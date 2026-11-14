@@ -1,0 +1,22 @@
+{
+  "name": "caveira-bot-ccos",
+  "version": "2.1.0",
+  "description": "Sistema ERP CCOS Portuário - Monitor Silencioso de WhatsApp, Telegram Bot e Disparo de E-mails",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "whatsapp": "node bot_ccos_whatsapp.js",
+    "telegram": "node bot_ccos.js"
+  },
+  "dependencies": {
+    "@google/genai": "^0.1.2",
+    "@whiskeysockets/baileys": "^6.7.13",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "firebase-admin": "^13.0.1",
+    "node-telegram-bot-api": "^0.66.0",
+    "nodemailer": "^6.9.16",
+    "pino": "^9.5.0"
+  }
+}
