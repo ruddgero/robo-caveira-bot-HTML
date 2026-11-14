@@ -587,6 +587,28 @@ app.post('/api/disparar-relatorio', async (req, res) => {
     res.json({ sucesso: true, mensagem: 'Relatório disparado com sucesso!' });
 });
 
+let codigoPairingAtual = null;
+
+async function solicitarPairingCode(numero) {
+    if (!sockWhatsApp) throw new Error("Motor do WhatsApp ainda não inicializado no servidor. Aguarde alguns segundos e tente novamente.");
+    if (sockWhatsApp.authState?.creds?.registered) {
+        statusConexaoWhatsApp = 'CONECTADO';
+        throw new Error("O WhatsApp já está registrado e autenticado com sucesso!");
+    }
+    const numLimpo = String(numero).replace(/\D/g, '');
+    if (numLimpo.length < 10) throw new Error("Número inválido. Digite com DDI e DDD (Exemplo: 5522998765432)");
+
+    const code = await sockWhatsApp.requestPairingCode(numLimpo);
+    const codeFormatado = code ? (code.match(/.{1,4}/g)?.join('-') || code) : code;
+    codigoPairingAtual = codeFormatado;
+    console.log(`\n========================================================`);
+    console.log(`📲 CÓDIGO DE PAREAMENTO DO WHATSAPP GERADO COM SUCESSO:`);
+    console.log(`👉👉👉  ${codeFormatado}  👈👈👈`);
+    console.log(`No seu celular: WhatsApp > Aparelhos Conectados > Conectar um Aparelho > Conectar com número de telefone`);
+    console.log(`========================================================\n`);
+    return codeFormatado;
+}
+
 // Endpoint 7: Tela do QR Code Oficial no Navegador para Leitura Fácil
 app.get('/qr', (req, res) => {
     if (statusConexaoWhatsApp === 'CONECTADO') {
@@ -650,6 +672,130 @@ app.get('/qr', (req, res) => {
                     setTimeout(() => window.location.reload(), 15000);
                 </script>
             </div>
+        </body>
+        </html>
+    `);
+});
+
+// Endpoint 8: API para solicitar o Pairing Code
+app.all('/api/pairing-code', async (req, res) => {
+    const numero = req.query.numero || req.body?.numero;
+    if (!numero) {
+        return res.status(400).json({ sucesso: false, erro: 'Informe o número de telefone com DDI e DDD (ex: 5522998765432)' });
+    }
+    try {
+        const code = await solicitarPairingCode(numero);
+        res.json({ sucesso: true, codigo: code });
+    } catch (err) {
+        res.status(500).json({ sucesso: false, erro: err.message });
+    }
+});
+
+// Endpoint 9: Página Visual para Conectar por Código de 8 Dígitos (Sem Câmera)
+app.get('/conectar', (req, res) => {
+    if (statusConexaoWhatsApp === 'CONECTADO') {
+        return res.send(`
+            <!DOCTYPE html>
+            <html lang="pt-BR">
+            <head><meta charset="UTF-8"><title>WhatsApp Conectado</title><script src="https://cdn.tailwindcss.com"></script></head>
+            <body class="bg-slate-950 text-white min-h-screen flex items-center justify-center p-4 font-sans">
+                <div class="bg-slate-900 border border-emerald-500/30 p-8 rounded-3xl text-center max-w-md shadow-2xl space-y-4">
+                    <div class="text-5xl">🎉</div>
+                    <h1 class="text-xl font-bold text-emerald-400">WHATSAPP CONECTADO COM SUCESSO!</h1>
+                    <p class="text-sm text-slate-300">O CAVEIRA BOT já está monitorando os grupos silenciosamente.</p>
+                </div>
+            </body>
+            </html>
+        `);
+    }
+
+    res.send(`
+        <!DOCTYPE html>
+        <html lang="pt-BR">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Conectar WhatsApp por Código - CCOS</title>
+            <script src="https://cdn.tailwindcss.com"></script>
+        </head>
+        <body class="bg-slate-950 text-white min-h-screen flex items-center justify-center p-4 font-sans">
+            <div class="bg-slate-900 border border-slate-800 p-8 rounded-3xl max-w-md w-full shadow-2xl space-y-5">
+                <div class="text-center space-y-1">
+                    <div class="text-3xl">🔢</div>
+                    <h1 class="text-lg font-bold text-white">Conectar por Código de 8 Dígitos</h1>
+                    <p class="text-xs text-slate-400">Sem câmera e sem QR Code! Digite seu número com DDD:</p>
+                </div>
+
+                <div class="space-y-3">
+                    <div>
+                        <label class="block text-xs text-slate-300 mb-1">Número do WhatsApp (com 55 e DDD):</label>
+                        <input type="tel" id="input-numero" placeholder="Ex: 5522998765432" class="w-full bg-slate-950 border border-slate-700 rounded-xl p-3 text-sm text-white font-mono focus:border-indigo-500 focus:outline-none">
+                    </div>
+                    <button onclick="gerarCodigo()" id="btn-gerar" class="w-full py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl text-xs transition shadow-lg flex items-center justify-center gap-2">
+                        <span>⚡</span> Gerar Código de Pareamento
+                    </button>
+                </div>
+
+                <!-- BOX DO CÓDIGO GERADO -->
+                <div id="box-resultado" class="hidden p-5 bg-slate-950 border border-indigo-500/30 rounded-2xl text-center space-y-3">
+                    <div class="text-xs text-slate-400 uppercase tracking-wider font-bold">Seu Código de Pareamento:</div>
+                    <div id="display-codigo" class="text-3xl font-mono font-black text-emerald-400 tracking-widest bg-slate-900 py-3 rounded-xl border border-emerald-500/30 select-all">
+                        ---- ----
+                    </div>
+                    <div class="text-[11px] text-slate-300 text-left bg-slate-900/60 p-3 rounded-xl border border-slate-800 space-y-1.5">
+                        <div class="font-bold text-indigo-400">O que fazer no celular agora:</div>
+                        <div>1. Abra o WhatsApp</div>
+                        <div>2. Toque em <strong>Aparelhos Conectados &gt; Conectar um Aparelho</strong></div>
+                        <div>3. Embaixo da câmera, toque em <strong>"Conectar com número de telefone"</strong></div>
+                        <div>4. Digite esse código de 8 dígitos acima!</div>
+                    </div>
+                </div>
+
+                <div id="box-erro" class="hidden p-3 bg-red-950/50 border border-red-500/30 rounded-xl text-xs text-red-400 text-center"></div>
+
+                <div class="text-center pt-2">
+                    <a href="/qr" class="text-[11px] text-slate-500 hover:text-slate-300 underline">Prefere usar QR Code? Clique aqui</a>
+                </div>
+            </div>
+
+            <script>
+                async function gerarCodigo() {
+                    const btn = document.getElementById('btn-gerar');
+                    const num = document.getElementById('input-numero').value.trim();
+                    const boxRes = document.getElementById('box-resultado');
+                    const boxErr = document.getElementById('box-erro');
+                    const disp = document.getElementById('display-codigo');
+
+                    boxErr.classList.add('hidden');
+                    if (!num || num.length < 10) {
+                        boxErr.innerText = "Por favor, digite o número completo com DDI (55) e DDD. Ex: 5522998765432";
+                        boxErr.classList.remove('hidden');
+                        return;
+                    }
+
+                    btn.disabled = true;
+                    btn.innerHTML = '<span class="animate-spin">⏳</span> Solicitando código à Meta...';
+
+                    try {
+                        const r = await fetch('/api/pairing-code?numero=' + encodeURIComponent(num));
+                        const d = await r.json();
+
+                        if (d.sucesso && d.codigo) {
+                            disp.innerText = d.codigo;
+                            boxRes.classList.remove('hidden');
+                            btn.innerText = "✓ Código Gerado! Digite no seu celular";
+                            btn.className = "w-full py-3 bg-emerald-600 text-white font-bold rounded-xl text-xs";
+                        } else {
+                            throw new Error(d.erro || "Falha ao gerar código");
+                        }
+                    } catch (e) {
+                        boxErr.innerText = e.message;
+                        boxErr.classList.remove('hidden');
+                        btn.disabled = false;
+                        btn.innerText = "Tentar Novamente";
+                    }
+                }
+            </script>
         </body>
         </html>
     `);
