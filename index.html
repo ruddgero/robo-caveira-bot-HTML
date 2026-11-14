@@ -281,43 +281,58 @@
   </main>
 
   <!-- ======================================================== -->
-  <!-- MODAL: PAREAMENTO DO WHATSAPP (QR CODE & CÓDIGO) -->
+  <!-- MODAL: PAREAMENTO DO WHATSAPP POR CÓDIGO DE 8 DÍGITOS (SEM CÂMERA) -->
   <!-- ======================================================== -->
   <div id="modal-pareamento" class="fixed inset-0 bg-slate-950/85 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
     <div class="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-md shadow-2xl p-5 space-y-4">
       <div class="flex items-center justify-between border-b border-slate-800 pb-3">
         <div class="flex items-center gap-2">
-          <span class="text-xl">📲</span>
-          <h2 class="text-sm font-bold text-white">Espelhar WhatsApp com o CAVEIRA BOT</h2>
+          <span class="text-xl">🔢</span>
+          <h2 class="text-sm font-bold text-white">Conectar WhatsApp por Código (Sem Câmera)</h2>
         </div>
         <button onclick="fecharModalPareamento()" class="text-slate-400 hover:text-white text-lg">✕</button>
       </div>
 
       <div class="space-y-3 text-xs text-slate-300">
-        <p>
-          Escaneie o QR Code abaixo no seu WhatsApp em <strong>Aparelhos Conectados &gt; Conectar um Aparelho</strong> para que o robô comece a monitorar silenciosamente:
+        <p class="text-slate-400 text-[11px]">
+          Conexão oficial da Meta sem precisar de QR Code nem de câmera. Digite o número do WhatsApp com DDI (55) e DDD:
         </p>
 
-        <!-- CONTAINER DO QR CODE -->
-        <div class="flex flex-col items-center justify-center p-4 bg-slate-950 border border-slate-800 rounded-2xl">
-          <div id="qrcode-box" class="bg-white p-3 rounded-xl shadow-lg"></div>
-          <div class="mt-3 flex items-center gap-2 text-[11px] text-emerald-400 font-mono">
-            <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-            Aguardando leitura do aparelho...
+        <div class="space-y-2">
+          <input type="tel" id="pairing-telefone-input" placeholder="Ex: 5522998765432" class="w-full bg-slate-950 border border-slate-700 rounded-xl p-3 text-xs text-white font-mono focus:border-indigo-500 focus:outline-none">
+          <button onclick="solicitarCodigoWeb()" id="btn-gerar-pairing-modal" class="w-full py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-bold transition shadow flex items-center justify-center gap-1.5">
+            <span>⚡</span> Gerar Código de 8 Dígitos
+          </button>
+        </div>
+
+        <!-- Box do Código de 8 Dígitos -->
+        <div id="pairing-resultado-box" class="hidden p-4 bg-slate-950 border border-emerald-500/30 rounded-2xl text-center space-y-2">
+          <div class="text-[10px] text-slate-400 uppercase tracking-widest font-bold">Código Oficial Gerado:</div>
+          <div id="pairing-codigo-display" class="text-3xl font-mono font-black text-emerald-400 tracking-widest bg-slate-900 py-2.5 rounded-xl border border-emerald-500/40 select-all">
+            ---- ----
+          </div>
+          <div class="text-[11px] text-slate-300 text-left bg-slate-900/60 p-2.5 rounded-xl border border-slate-800 space-y-1">
+            <strong class="text-indigo-400 block">Como ativar no seu celular:</strong>
+            <div>1. Abra o WhatsApp no celular</div>
+            <div>2. Vá em <strong>Aparelhos Conectados &gt; Conectar um Aparelho</strong></div>
+            <div>3. Embaixo da câmera, toque em <strong>"Conectar com número de telefone"</strong></div>
+            <div>4. Digite o código de 8 dígitos acima!</div>
           </div>
         </div>
 
+        <div id="pairing-erro-box" class="hidden p-2.5 bg-red-950/50 border border-red-500/30 rounded-xl text-xs text-red-400 text-center"></div>
+
         <div class="p-3 bg-slate-950 border border-slate-800 rounded-xl space-y-1">
-          <div class="font-bold text-indigo-400">Ou conecte via Servidor/Render (URL do Bot):</div>
+          <div class="font-bold text-indigo-400 text-[11px]">URL do seu Servidor no Render:</div>
           <div class="flex gap-2">
-            <input type="text" id="input-api-url" placeholder="https://caveira-bot-render.onrender.com" class="flex-1 bg-slate-900 border border-slate-700 rounded-lg p-2 text-xs text-white font-mono">
-            <button onclick="salvarUrlServidor()" class="px-3 py-1.5 bg-indigo-600 text-white rounded-lg font-bold">Salvar</button>
+            <input type="text" id="input-api-url" placeholder="https://robo-caveira-bot-html.onrender.com" class="flex-1 bg-slate-900 border border-slate-700 rounded-lg p-2 text-xs text-white font-mono">
+            <button onclick="salvarUrlServidor()" class="px-3 py-1 bg-indigo-600 text-white rounded-lg font-bold text-xs">Salvar</button>
           </div>
         </div>
       </div>
 
-      <div class="flex justify-end pt-2">
-        <button onclick="fecharModalPareamento()" class="px-4 py-2 bg-slate-800 text-white rounded-xl text-xs font-bold">Concluído</button>
+      <div class="flex justify-end pt-2 border-t border-slate-800">
+        <button onclick="fecharModalPareamento()" class="px-4 py-2 bg-slate-800 text-white rounded-xl text-xs font-bold">Fechar</button>
       </div>
     </div>
   </div>
@@ -1079,23 +1094,60 @@ ${estadoCCOS.equipes.assumindo}`;
       }
     }
 
-    // QR CODE PARA ESPELHAMENTO
+    // MODAL DE PAREAMENTO POR CÓDIGO DE 8 DÍGITOS
     function abrirModalPareamentoWhatsApp() {
       document.getElementById('modal-pareamento').classList.remove('hidden');
-      const box = document.getElementById('qrcode-box');
-      box.innerHTML = '';
-      new QRCode(box, {
-        text: "caveira-bot-ccos://whatsapp-pairing-session-" + Date.now(),
-        width: 180,
-        height: 180,
-        colorDark: "#020617",
-        colorLight: "#ffffff",
-        correctLevel: QRCode.CorrectLevel.M
-      });
+      const apiUrl = localStorage.getItem('CAVEIRA_API_URL') || '';
+      if (apiUrl) {
+        document.getElementById('input-api-url').value = apiUrl;
+      }
     }
 
     function fecharModalPareamento() {
       document.getElementById('modal-pareamento').classList.add('hidden');
+    }
+
+    async function solicitarCodigoWeb() {
+      const btn = document.getElementById('btn-gerar-pairing-modal');
+      const tel = document.getElementById('pairing-telefone-input').value.trim();
+      const boxRes = document.getElementById('pairing-resultado-box');
+      const boxErr = document.getElementById('pairing-erro-box');
+      const disp = document.getElementById('pairing-codigo-display');
+      const apiUrl = localStorage.getItem('CAVEIRA_API_URL') || (window.location.port ? window.location.origin : '');
+
+      boxErr.classList.add('hidden');
+
+      if (!tel || tel.length < 10) {
+        boxErr.innerText = "Por favor, digite o número completo com DDI (55) e DDD. Ex: 5522998765432";
+        boxErr.classList.remove('hidden');
+        return;
+      }
+
+      btn.disabled = true;
+      btn.innerHTML = '<span class="animate-spin">⏳</span> Solicitando código à Meta...';
+
+      try {
+        if (!apiUrl) {
+          throw new Error("Informe a URL do seu servidor Render abaixo e clique em Salvar.");
+        }
+
+        const r = await fetch(`${apiUrl}/api/pairing-code?numero=${encodeURIComponent(tel)}`);
+        const d = await r.json();
+
+        if (d.sucesso && d.codigo) {
+          disp.innerText = d.codigo;
+          boxRes.classList.remove('hidden');
+          btn.innerText = "✓ Código Gerado! Digite no WhatsApp do celular";
+          btn.className = "w-full py-2.5 bg-emerald-600 text-white font-bold rounded-xl text-xs";
+        } else {
+          throw new Error(d.erro || "Falha ao solicitar código");
+        }
+      } catch (e) {
+        boxErr.innerText = e.message;
+        boxErr.classList.remove('hidden');
+        btn.disabled = false;
+        btn.innerText = "Tentar Novamente";
+      }
     }
 
     function salvarUrlServidor() {
