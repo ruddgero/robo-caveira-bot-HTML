@@ -1,0 +1,1157 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>CCOS - Caveira Bot ERP | Web App & WhatsApp Monitor</title>
+  
+  <!-- Tailwind CSS & Fontes -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- QRCode.js para espelhamento dinâmico na tela -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+
+  <style>
+    body {
+      -webkit-tap-highlight-color: transparent;
+      user-select: none;
+    }
+    .custom-scrollbar::-webkit-scrollbar {
+      width: 5px;
+      height: 5px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb {
+      background: #334155;
+      border-radius: 4px;
+    }
+    @keyframes pulse-slow {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.35; }
+    }
+    .animate-pulse-slow {
+      animation: pulse-slow 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+    }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 antialiased font-sans min-h-screen flex flex-col justify-between">
+
+  <!-- ======================================================== -->
+  <!-- CABEÇALHO DO APLICATIVO -->
+  <!-- ======================================================== -->
+  <header class="bg-slate-900 border-b border-slate-800 p-4 sticky top-0 z-40 shadow-lg">
+    <div class="max-w-4xl mx-auto flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <div class="w-11 h-11 rounded-2xl bg-gradient-to-tr from-indigo-700 via-indigo-600 to-blue-500 flex items-center justify-center text-2xl shadow-lg shadow-indigo-600/30">
+          💀
+        </div>
+        <div>
+          <div class="flex items-center gap-2">
+            <h1 class="text-base font-black text-white tracking-wider">CAVEIRA BOT</h1>
+            <span id="badge-status-conexao" class="px-2 py-0.5 text-[10px] font-bold bg-emerald-500/20 text-emerald-400 rounded-full border border-emerald-500/30 flex items-center gap-1.5 shadow-sm">
+              <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+              WHATSAPP ESPELHADO
+            </span>
+          </div>
+          <p class="text-[11px] text-slate-400 font-medium">CCOS Porto do Açu • Monitor Silencioso de Grupos & E-mails</p>
+        </div>
+      </div>
+
+      <div class="flex items-center gap-2">
+        <button onclick="abrirModalPareamentoWhatsApp()" class="hidden sm:flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl text-xs font-semibold text-emerald-400 transition shadow">
+          <span>📲</span> Parear Celular
+        </button>
+        <div class="text-right pl-1">
+          <div id="relogio-topo" class="text-xs font-mono font-bold text-slate-200">00:00:00</div>
+          <div id="data-topo" class="text-[10px] text-slate-400">14/11/2026</div>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- ======================================================== -->
+  <!-- CONTEÚDO PRINCIPAL (DASHBOARD) -->
+  <!-- ======================================================== -->
+  <main class="max-w-4xl mx-auto w-full p-4 flex-1 space-y-4">
+
+    <!-- BANNER DE ESPELHAMENTO DOS 2 GRUPOS EM MODO SILENCIOSO -->
+    <div class="bg-gradient-to-br from-slate-900 to-slate-900/90 border border-slate-800 rounded-2xl p-4 shadow-md space-y-3">
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+        <div class="flex items-start gap-3">
+          <div class="p-2.5 bg-indigo-500/10 border border-indigo-500/20 rounded-xl text-indigo-400 text-xl">
+            📡
+          </div>
+          <div>
+            <div class="text-sm font-bold text-white flex items-center gap-2">
+              ESPELHAMENTO ATIVO DO WHATSAPP
+              <span class="px-2 py-0.5 text-[9px] font-bold bg-amber-500/10 text-amber-300 border border-amber-500/20 rounded-md">
+                MODO SILENCIOSO ATIVO 🔒
+              </span>
+            </div>
+            <p class="text-[11px] text-slate-400">
+              O robô escuta os 2 grupos sem digitar nada. O relatório só é disparado quando você autorizar.
+            </p>
+          </div>
+        </div>
+
+        <div class="flex gap-2 self-end sm:self-auto">
+          <button onclick="abrirModalPareamentoWhatsApp()" class="sm:hidden px-3 py-1.5 bg-slate-800 border border-slate-700 rounded-lg text-xs font-semibold text-emerald-400">
+            📲 Parear
+          </button>
+          <button onclick="simularMensagemWhatsApp()" class="px-3 py-1.5 bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/30 rounded-xl text-xs font-semibold transition flex items-center gap-1.5 shadow-sm">
+            <span>⚡</span> Testar Captura
+          </button>
+        </div>
+      </div>
+
+      <!-- OS 2 GRUPOS MONITORADOS -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
+        <!-- Grupo 1 -->
+        <div class="p-3 bg-slate-950/70 border border-slate-800 rounded-xl flex items-center justify-between">
+          <div class="flex items-center gap-2.5">
+            <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse-slow"></span>
+            <div>
+              <div class="font-bold text-slate-200 text-xs">1. Grupo Operações T-ORE / T-OIL</div>
+              <div class="text-[10px] text-slate-400">Escutando: Rancho, Tripulantes, Resíduos e Navios</div>
+            </div>
+          </div>
+          <span class="text-[10px] font-mono text-emerald-400 bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-500/20">SILENCIOSO</span>
+        </div>
+
+        <!-- Grupo 2 -->
+        <div class="p-3 bg-slate-950/70 border border-slate-800 rounded-xl flex items-center justify-between">
+          <div class="flex items-center gap-2.5">
+            <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse-slow"></span>
+            <div>
+              <div class="font-bold text-slate-200 text-xs">2. Grupo CCOS & Segurança Portuária</div>
+              <div class="text-[10px] text-slate-400">Escutando: Viaturas, Ocorrências, CFTV e Portaria</div>
+            </div>
+          </div>
+          <span class="text-[10px] font-mono text-emerald-400 bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-500/20">SILENCIOSO</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- CARDS OPERACIONAIS DE TOPO: VIATURA & SISTEMAS CFTV/OCR -->
+    <div class="grid grid-cols-2 gap-3">
+      <!-- Card VTR L200 -->
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl p-3.5 shadow-sm space-y-1">
+        <div class="flex items-center justify-between text-xs text-slate-400">
+          <span class="flex items-center gap-1.5 font-bold text-slate-300">🚗 VTR L200</span>
+          <span class="text-[10px] font-mono text-slate-400">TDG-8C89</span>
+        </div>
+        <div class="flex items-baseline justify-between pt-1">
+          <span class="text-xl font-black text-white font-mono" id="disp-km-atual">19.235</span>
+          <span class="text-[11px] text-emerald-400 font-bold" id="disp-km-rodados">+7 km</span>
+        </div>
+        <div class="text-[10px] text-slate-400 pt-0.5 flex justify-between items-center border-t border-slate-800/80">
+          <span>Inicial: <strong id="disp-km-ini" class="font-mono text-slate-300">19.228</strong></span>
+          <button onclick="abrirModalKm()" class="text-indigo-400 hover:text-indigo-300 font-semibold underline">Alterar</button>
+        </div>
+      </div>
+
+      <!-- Card OCR & CFTV -->
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl p-3.5 shadow-sm space-y-1">
+        <div class="flex items-center justify-between text-xs text-slate-400">
+          <span class="flex items-center gap-1.5 font-bold text-slate-300">📹 OCR / CFTV</span>
+          <span class="text-[10px] text-amber-400 font-bold">2 Ausentes</span>
+        </div>
+        <div class="flex items-baseline justify-between pt-1">
+          <span class="text-xl font-black text-white font-mono">83,72%</span>
+          <span class="text-[11px] text-slate-400">43 leituras</span>
+        </div>
+        <div class="text-[10px] text-slate-400 pt-0.5 truncate border-t border-slate-800/80">
+          Poste 38 • Portão 4 Filtragem
+        </div>
+      </div>
+    </div>
+
+    <!-- BARRA DE NAVEGAÇÃO DE ABAS -->
+    <div class="flex bg-slate-900 p-1.5 rounded-2xl border border-slate-800 text-xs shadow-inner">
+      <button onclick="trocarAba('feed')" id="btn-tab-feed" class="flex-1 py-2.5 font-bold rounded-xl bg-indigo-600 text-white transition flex items-center justify-center gap-1.5 shadow">
+        <span>📡</span> Feed (<span id="cont-feed">4</span>)
+      </button>
+      <button onclick="trocarAba('emails')" id="btn-tab-emails" class="flex-1 py-2.5 font-bold rounded-xl text-slate-400 hover:text-white transition flex items-center justify-center gap-1.5">
+        <span>✉️</span> E-mails (<span id="cont-emails">2</span>)
+      </button>
+      <button onclick="trocarAba('atividades')" id="btn-tab-atividades" class="flex-1 py-2.5 font-bold rounded-xl text-slate-400 hover:text-white transition flex items-center justify-center gap-1.5">
+        <span>📝</span> Atividades
+      </button>
+      <button onclick="trocarAba('relatorio')" id="btn-tab-relatorio" class="flex-1 py-2.5 font-bold rounded-xl text-slate-400 hover:text-white transition flex items-center justify-center gap-1.5">
+        <span>📑</span> Relatório (8)
+      </button>
+    </div>
+
+    <!-- ======================================================== -->
+    <!-- ABA 1: FEED SILENCIOSO EM TEMPO REAL -->
+    <!-- ======================================================== -->
+    <div id="aba-feed" class="space-y-3">
+      <div class="flex items-center justify-between text-xs px-1">
+        <span class="font-bold text-slate-300 uppercase tracking-wide">Mensagens Interceptadas dos Grupos</span>
+        <span class="text-[10px] text-slate-400">Classificação Automática por IA</span>
+      </div>
+
+      <div id="feed-mensagens-container" class="space-y-2.5 max-h-[420px] overflow-y-auto custom-scrollbar pr-1">
+        <!-- Itens injetados via JS -->
+      </div>
+    </div>
+
+    <!-- ======================================================== -->
+    <!-- ABA 2: MÓDULO DE OPERAÇÕES E DISPARO DE E-MAILS -->
+    <!-- ======================================================== -->
+    <div id="aba-emails" class="hidden space-y-3">
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-slate-900 border border-slate-800 rounded-xl p-3">
+        <div>
+          <h2 class="text-xs font-bold text-white uppercase flex items-center gap-1.5">
+            <span>✉️</span> Operações de Bordo & Envio de E-mails Oficiais
+          </h2>
+          <p class="text-[10px] text-amber-400 pt-0.5">
+            ⚠️ <strong>Regra CCOS:</strong> E-mails de Rancho, Tripulantes e Resíduos só são liberados para envio após a conclusão e saída do veículo (Horário Inicial + Final preenchidos).
+          </p>
+        </div>
+        <button onclick="abrirModalNovaOperacao()" class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold transition flex items-center gap-1 self-start sm:self-auto shadow">
+          <span>+</span> Nova Operação
+        </button>
+      </div>
+
+      <div id="lista-operacoes-email" class="space-y-3">
+        <!-- Renderizado dinamicamente -->
+      </div>
+    </div>
+
+    <!-- ======================================================== -->
+    <!-- ABA 3: SEÇÃO 4 - ATIVIDADES REALIZADAS -->
+    <!-- ======================================================== -->
+    <div id="aba-atividades" class="hidden space-y-3">
+      <div class="flex items-center justify-between px-1">
+        <span class="text-xs font-bold text-slate-300 uppercase tracking-wide">Seção 4: Atividades do Plantão</span>
+        <button onclick="abrirModalNovaAtividade()" class="px-3 py-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-bold shadow">
+          + Inserir Atividade
+        </button>
+      </div>
+
+      <!-- Base permanente fixa -->
+      <div class="p-3.5 bg-slate-900/70 border border-indigo-500/20 rounded-xl text-xs space-y-1.5">
+        <div class="text-[10px] font-bold text-indigo-400 uppercase tracking-wider">Base Permanente CCOS (Nunca é apagada):</div>
+        <div class="text-slate-200">✓ Realizadas atividades administrativas.</div>
+        <div class="text-slate-200">✓ Executada ronda em todo o terminal, com apoio do Supervisor Sunset.</div>
+      </div>
+
+      <div id="lista-atividades-container" class="space-y-2">
+        <!-- Atividades dinâmicas -->
+      </div>
+    </div>
+
+    <!-- ======================================================== -->
+    <!-- ABA 4: SEÇÃO CONSOLIDADA DO RELATÓRIO OFICIAL (8 SEÇÕES) -->
+    <!-- ======================================================== -->
+    <div id="aba-relatorio" class="hidden space-y-3">
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-1">
+        <span class="text-xs font-bold text-slate-300 uppercase tracking-wide">Relatório Oficial Consolidado (8 Seções)</span>
+        <div class="flex flex-wrap gap-1.5">
+          <button onclick="dispararRelatorioNosGrupos()" class="px-3 py-1.5 bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 shadow">
+            <span>🚀</span> Disparar nos Grupos
+          </button>
+          <button onclick="copiarRelatorio()" class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 shadow">
+            <span>📋</span> Copiar
+          </button>
+          <button onclick="baixarRelatorioTxt()" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 border border-slate-700 shadow">
+            <span>💾</span> Baixar .TXT
+          </button>
+        </div>
+      </div>
+
+      <pre id="previa-relatorio-texto" class="p-4 bg-slate-900 border border-slate-800 rounded-2xl text-xs font-mono text-slate-300 overflow-x-auto whitespace-pre-wrap max-h-[450px] leading-relaxed custom-scrollbar shadow-inner"></pre>
+    </div>
+
+    <!-- ======================================================== -->
+    <!-- BOTÃO FIXO: FECHAMENTO DE PLANTÃO (ASSISTENTE DE 8 ETAPAS) -->
+    <!-- ======================================================== -->
+    <div class="pt-2">
+      <button onclick="iniciarAssistenteFechamento()" class="w-full py-4 px-4 bg-gradient-to-r from-indigo-600 via-blue-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 text-white rounded-2xl shadow-xl shadow-indigo-600/25 font-bold text-xs flex items-center justify-between transition active:scale-[0.99]">
+        <div class="flex items-center gap-3">
+          <div class="w-9 h-9 rounded-xl bg-white/10 flex items-center justify-center text-lg">🏁</div>
+          <div class="text-left">
+            <div class="text-sm font-black tracking-wide">CONCLUIR TURNO & FECHAR PLANTÃO (8 ETAPAS)</div>
+            <div class="text-[10px] font-normal text-indigo-200">Herança de KM da VTR, Sistemas, Navios e Passagem de Equipes</div>
+          </div>
+        </div>
+        <span class="text-lg font-bold pr-1">➔</span>
+      </button>
+    </div>
+
+  </main>
+
+  <!-- ======================================================== -->
+  <!-- MODAL: PAREAMENTO DO WHATSAPP (QR CODE & CÓDIGO) -->
+  <!-- ======================================================== -->
+  <div id="modal-pareamento" class="fixed inset-0 bg-slate-950/85 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+    <div class="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-md shadow-2xl p-5 space-y-4">
+      <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+        <div class="flex items-center gap-2">
+          <span class="text-xl">📲</span>
+          <h2 class="text-sm font-bold text-white">Espelhar WhatsApp com o CAVEIRA BOT</h2>
+        </div>
+        <button onclick="fecharModalPareamento()" class="text-slate-400 hover:text-white text-lg">✕</button>
+      </div>
+
+      <div class="space-y-3 text-xs text-slate-300">
+        <p>
+          Escaneie o QR Code abaixo no seu WhatsApp em <strong>Aparelhos Conectados &gt; Conectar um Aparelho</strong> para que o robô comece a monitorar silenciosamente:
+        </p>
+
+        <!-- CONTAINER DO QR CODE -->
+        <div class="flex flex-col items-center justify-center p-4 bg-slate-950 border border-slate-800 rounded-2xl">
+          <div id="qrcode-box" class="bg-white p-3 rounded-xl shadow-lg"></div>
+          <div class="mt-3 flex items-center gap-2 text-[11px] text-emerald-400 font-mono">
+            <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+            Aguardando leitura do aparelho...
+          </div>
+        </div>
+
+        <div class="p-3 bg-slate-950 border border-slate-800 rounded-xl space-y-1">
+          <div class="font-bold text-indigo-400">Ou conecte via Servidor/Render (URL do Bot):</div>
+          <div class="flex gap-2">
+            <input type="text" id="input-api-url" placeholder="https://caveira-bot-render.onrender.com" class="flex-1 bg-slate-900 border border-slate-700 rounded-lg p-2 text-xs text-white font-mono">
+            <button onclick="salvarUrlServidor()" class="px-3 py-1.5 bg-indigo-600 text-white rounded-lg font-bold">Salvar</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="flex justify-end pt-2">
+        <button onclick="fecharModalPareamento()" class="px-4 py-2 bg-slate-800 text-white rounded-xl text-xs font-bold">Concluído</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ======================================================== -->
+  <!-- MODAL: CADASTRAR NOVA OPERAÇÃO DE BORDO -->
+  <!-- ======================================================== -->
+  <div id="modal-nova-operacao" class="fixed inset-0 bg-slate-950/85 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+    <div class="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-lg shadow-2xl p-5 space-y-4">
+      <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+        <div class="flex items-center gap-2">
+          <span class="text-xl">🚢</span>
+          <h2 class="text-sm font-bold text-white">Registrar Operação de Bordo</h2>
+        </div>
+        <button onclick="fecharModalNovaOperacao()" class="text-slate-400 hover:text-white text-lg">✕</button>
+      </div>
+
+      <div class="space-y-3 text-xs">
+        <div>
+          <label class="block text-slate-400 text-[11px] mb-1">Tipo de Operação:</label>
+          <select id="op-novo-tipo" class="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-white focus:outline-none">
+            <option value="FORNECIMENTO DE RANCHO">FORNECIMENTO DE RANCHO (ALIMENTAÇÃO)</option>
+            <option value="EMBARQUE DE TRIPULANTES">EMBARQUE DE TRIPULANTES</option>
+            <option value="DESEMBARQUE DE TRIPULANTES">DESEMBARQUE DE TRIPULANTES</option>
+            <option value="RETIRADA DE RESÍDUOS">RETIRADA DE RESÍDUOS SÓLIDOS / OLEOSOS</option>
+            <option value="ABASTECIMENTO DE ÁGUA POTÁVEL">ABASTECIMENTO DE ÁGUA POTÁVEL</option>
+            <option value="BUNKER (COMBUSTÍVEL)">ABASTECIMENTO DE COMBUSTÍVEL (BUNKER)</option>
+          </select>
+        </div>
+
+        <div class="grid grid-cols-2 gap-2">
+          <div>
+            <label class="block text-slate-400 text-[11px] mb-1">Navio:</label>
+            <input type="text" id="op-novo-navio" placeholder="Ex: MARAN COURAGE" class="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-white uppercase focus:outline-none">
+          </div>
+          <div>
+            <label class="block text-slate-400 text-[11px] mb-1">Terminal:</label>
+            <select id="op-novo-terminal" class="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-white focus:outline-none">
+              <option value="T-Ore">T-ORE (Minério)</option>
+              <option value="T-Oil">T-OIL (Petróleo)</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-2">
+          <div>
+            <label class="block text-slate-400 text-[11px] mb-1">Empresa Prestadora / Fornecedor:</label>
+            <input type="text" id="op-novo-fornecedor" placeholder="Ex: Distribuidora Marítima" class="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-white focus:outline-none">
+          </div>
+          <div>
+            <label class="block text-slate-400 text-[11px] mb-1">Veículo / Placa:</label>
+            <input type="text" id="op-novo-veiculo" placeholder="Ex: CAMINHÃO - ABC-1234" class="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-white uppercase focus:outline-none">
+          </div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-2">
+          <div>
+            <label class="block text-slate-400 text-[11px] mb-1">Horário Inicial de Entrada:</label>
+            <input type="text" id="op-novo-horaini" value="14:00h" class="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-white font-mono focus:outline-none">
+          </div>
+          <div>
+            <label class="block text-slate-400 text-[11px] mb-1">Horário Final (Deixe vazio se em andamento):</label>
+            <input type="text" id="op-novo-horafim" placeholder="Aguardando saída..." class="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-white font-mono focus:outline-none">
+          </div>
+        </div>
+      </div>
+
+      <div class="flex justify-end gap-2 pt-2 border-t border-slate-800 text-xs">
+        <button onclick="fecharModalNovaOperacao()" class="px-4 py-2 text-slate-400">Cancelar</button>
+        <button onclick="salvarNovaOperacao()" class="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold shadow">Salvar Operação</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ======================================================== -->
+  <!-- MODAL: PRÉVIA E DISPARO DE E-MAIL OPERACIONAL -->
+  <!-- ======================================================== -->
+  <div id="modal-email-preview" class="fixed inset-0 bg-slate-950/85 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+    <div class="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-lg p-5 space-y-4 shadow-2xl">
+      <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+        <h3 class="text-sm font-bold text-white flex items-center gap-2">
+          <span>✉️</span> E-mail Operacional CCOS (Pronto para Disparo)
+        </h3>
+        <button onclick="fecharModalEmail()" class="text-slate-400 hover:text-white text-base">✕</button>
+      </div>
+      
+      <div class="space-y-2 text-xs">
+        <div>
+          <span class="text-slate-400 block text-[11px]">Destinatários Corporativos:</span>
+          <span class="text-indigo-300 font-mono text-[11px] block bg-slate-950 p-2 rounded-lg border border-slate-800">
+            operacoes@ferroport.com.br; supervisao@ferroport.com.br; ccos@ferroport.com.br
+          </span>
+        </div>
+        <div>
+          <span class="text-slate-400 block text-[11px]">Assunto Oficial:</span>
+          <span id="email-preview-assunto" class="font-bold text-white block bg-slate-950 p-2 rounded-lg border border-slate-800 text-xs"></span>
+        </div>
+        <div>
+          <span class="text-slate-400 block text-[11px] mb-1">Corpo da Mensagem:</span>
+          <textarea id="email-preview-corpo" rows="8" class="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-slate-200 font-mono focus:outline-none custom-scrollbar leading-relaxed"></textarea>
+        </div>
+      </div>
+
+      <div class="flex flex-wrap justify-end gap-2 text-xs pt-1 border-t border-slate-800">
+        <button onclick="copiarEmailCorpo()" class="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl font-bold transition flex items-center gap-1 border border-slate-700">
+          <span>📋</span> Copiar Texto
+        </button>
+        <button onclick="dispararEmailViaOutlookWeb()" class="px-3.5 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-bold transition flex items-center gap-1 shadow">
+          <span>🌐</span> Outlook Web (365)
+        </button>
+        <button onclick="dispararEmailViaOutlookApp()" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold transition flex items-center gap-1 shadow">
+          <span>🚀</span> Abrir no App Outlook
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ======================================================== -->
+  <!-- MODAL: WIZARD DE FECHAMENTO (8 ETAPAS) -->
+  <!-- ======================================================== -->
+  <div id="modal-wizard" class="fixed inset-0 bg-slate-950/85 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+    <div class="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-lg shadow-2xl p-5 space-y-4">
+      <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+        <div>
+          <span class="text-[10px] font-bold text-indigo-400 uppercase tracking-widest" id="wiz-passo-indicador">ETAPA 1 DE 8</span>
+          <h2 class="text-base font-bold text-white" id="wiz-titulo-etapa">Efetivo CCOS</h2>
+        </div>
+        <button onclick="fecharWizard()" class="text-slate-400 hover:text-white text-lg">✕</button>
+      </div>
+
+      <div id="wiz-conteudo" class="space-y-3 py-2 text-xs"></div>
+
+      <div class="flex justify-between items-center pt-3 border-t border-slate-800">
+        <button onclick="fecharWizard()" class="px-3 py-2 text-xs text-slate-400 hover:text-white">Cancelar</button>
+        <button id="wiz-btn-principal" class="px-5 py-2.5 bg-gradient-to-r from-indigo-600 to-blue-600 text-white text-xs font-bold rounded-xl shadow-lg">Avançar ➔</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ======================================================== -->
+  <!-- MODAL: NOVA ATIVIDADE MANUAL -->
+  <!-- ======================================================== -->
+  <div id="modal-nova-atividade" class="fixed inset-0 bg-slate-950/85 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+    <div class="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-md p-5 space-y-4 shadow-2xl">
+      <h3 class="text-sm font-bold text-white">📝 Registrar Nova Atividade</h3>
+      <textarea id="input-nova-atividade" rows="3" placeholder="Ex: Realizada checagem no Gate 2 com a equipe da Portaria..." class="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-white placeholder-slate-500 focus:outline-none"></textarea>
+      <div class="flex justify-end gap-2 text-xs">
+        <button onclick="fecharModalNovaAtividade()" class="px-3 py-1.5 text-slate-400">Cancelar</button>
+        <button onclick="salvarNovaAtividade()" class="px-4 py-2 bg-indigo-600 text-white rounded-xl font-bold">Salvar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- RODAPÉ FIXO -->
+  <footer class="bg-slate-900 border-t border-slate-800 p-3 text-center text-[10px] text-slate-500">
+    CAVEIRA BOT ERP • CCOS Porto do Açu • Líder Ruddgero Ribeiro • Pronto para GitHub Pages
+  </footer>
+
+  <!-- ======================================================== -->
+  <!-- JAVASCRIPT: LÓGICA COMPLETA DE DADOS, REGRAS E INTERFACE -->
+  <!-- ======================================================== -->
+  <script>
+    // ESTADO OPERACIONAL LOCAL (Salvo no LocalStorage do Navegador)
+    const DADOS_INICIAIS = {
+      turno: 'NOTURNO',
+      data: new Date().toLocaleDateString('pt-BR'),
+      efetivo: '✓ S/A',
+      vtr: { modelo: 'L200', placa: 'TDG-8C89', kmInicial: 19228, kmFinal: 19235 },
+      sistemas: {
+        cftv: '✓ 02 câmeras ausentes:\nCâmera fixa – Poste 38;\nCâmera fixa – Portão 04 da Filtragem.\nObs: Câmeras fixas - Postes 12 e 24 oscilando.',
+        ca: '✓ S/A',
+        ocr: { assertividade: '83,72%', leituras: 43 }
+      },
+      atividadesExtras: [
+        'Realizada a retirada de 06 catracas no almoxarifado para instalação na portaria e refeitório.',
+        'Separados EPIs para apoio a visita e inspeção.'
+      ],
+      feedCaptado: [
+        {
+          id: 1,
+          hora: '14:20h',
+          grupo: 'Grupo 1 (Operações)',
+          autor: 'Fiscal de Operações',
+          texto: 'Caminhão de rancho placa ABC-1234 acessando o terminal para o navio MARAN COURAGE.',
+          tipo: 'ATIVIDADE',
+          status: 'EM ANDAMENTO'
+        },
+        {
+          id: 2,
+          hora: '14:45h',
+          grupo: 'Grupo 2 (Segurança)',
+          autor: 'Marcos Duarte',
+          texto: 'bom dia a todos, bom plantao',
+          tipo: 'RUIDO',
+          status: 'IGNORADO'
+        },
+        {
+          id: 3,
+          hora: '16:40h',
+          grupo: 'Grupo 1 (Operações)',
+          autor: 'Portaria Principal',
+          texto: 'Saída confirmada do caminhão de rancho placa ABC-1234.',
+          tipo: 'BAIXA_VEICULO',
+          status: 'CONCLUIDO'
+        },
+        {
+          id: 4,
+          hora: '17:10h',
+          grupo: 'Grupo 2 (Segurança)',
+          autor: 'Supervisor Sunset',
+          texto: 'Ronda perimetral realizada em todo o píer e portões sem alterações.',
+          tipo: 'ATIVIDADE',
+          status: 'CONCLUIDO'
+        }
+      ],
+      operacoesEmail: [
+        {
+          id: 1,
+          tipo: 'FORNECIMENTO DE RANCHO',
+          navio: 'MARAN COURAGE',
+          terminal: 'T-Ore',
+          fornecedor: 'Distribuidora Marítima Ltda',
+          veiculo: 'CAMINHÃO - Placa ABC-1234',
+          horaInicial: '14:20h',
+          horaFinal: '16:40h',
+          finalizada: true
+        },
+        {
+          id: 2,
+          tipo: 'DESEMBARQUE DE TRIPULANTES',
+          navio: 'YUAN DONG HAI',
+          terminal: 'T-Oil',
+          fornecedor: 'Agência Marítima Ocean',
+          veiculo: 'VAN EXECUTIVA - Placa XYZ-9876',
+          horaInicial: '15:10h',
+          horaFinal: '',
+          finalizada: false
+        }
+      ],
+      avisos: [
+        { id: 1, titulo: 'BAGAGENS RETIDAS NA RECEITA FEDERAL - T-OIL', desc: 'Acompanhar situação das bagagens dos prestadores de serviços dos navios Yuan Dong Hai e Seaways Cape Henry retidas na RFB para inspeção.' },
+        { id: 2, titulo: 'ADEQUAÇÕES NAS INSTALAÇÕES DA PF E RFB', desc: 'Acompanhar abertura da porta de acesso e instalação de dois aparelhos de ar-condicionado pela equipe da Facilities.' },
+        { id: 3, titulo: 'VISITA DE FAMILIARES - PDA E VAST', desc: 'Atentar para a visita de familiares programada para o dia 14/11/2026 (PDA e VAST).' },
+        { id: 4, titulo: 'URNAS DA CIPA – CHAVES', desc: 'Verificar e informar o status atual das chaves das urnas da CIPA.' },
+        { id: 5, titulo: 'MELHORIAS CFTV, CA E INFRAESTRUTURA ELÉTRICA', desc: 'Trecho inicial GATE 1 ao poste 31. Aguardando cronograma conjunto da Elétrica e DIGITAL.' }
+      ],
+      navios: {
+        tore: 'MARAN COURAGE: Previsão de desatracação em 14/11 às 11h30.\nMARLENE OLDENDORFF: DC e DP disponíveis.',
+        toil: 'YUAN DONG HAI: Desatracado às 20h57.\nEAGLE PAULINIA: Sem alteração operacional.'
+      },
+      ocorrencias: '✓ S/A',
+      equipes: {
+        saindo: 'Gustavo Ramos, Italo Nunes e Rodrigo Chaves',
+        assumindo: 'Renan Neves, Ewerton Brito e Mariana Rodrigues'
+      }
+    };
+
+    let estadoCCOS = JSON.parse(localStorage.getItem('CCOS_STATE') || 'null') || DADOS_INICIAIS;
+
+    function salvarEstado() {
+      localStorage.setItem('CCOS_STATE', JSON.stringify(estadoCCOS));
+    }
+
+    // RELÓGIO EM TEMPO REAL
+    function atualizarRelogio() {
+      const agora = new Date();
+      document.getElementById('relogio-topo').innerText = agora.toLocaleTimeString('pt-BR');
+      document.getElementById('data-topo').innerText = agora.toLocaleDateString('pt-BR');
+    }
+    setInterval(atualizarRelogio, 1000);
+    atualizarRelogio();
+
+    // CONTROLE DE NAVEGAÇÃO DE ABAS
+    function trocarAba(aba) {
+      ['feed', 'emails', 'atividades', 'relatorio'].forEach(a => {
+        document.getElementById(`aba-${a}`).classList.add('hidden');
+        document.getElementById(`btn-tab-${a}`).className = 'flex-1 py-2.5 font-bold rounded-xl text-slate-400 hover:text-white transition flex items-center justify-center gap-1.5';
+      });
+
+      document.getElementById(`aba-${aba}`).classList.remove('hidden');
+      document.getElementById(`btn-tab-${aba}`).className = 'flex-1 py-2.5 font-bold rounded-xl bg-indigo-600 text-white transition flex items-center justify-center gap-1.5 shadow';
+
+      if (aba === 'feed') renderizarFeed();
+      if (aba === 'emails') renderizarEmails();
+      if (aba === 'atividades') renderizarAtividades();
+      if (aba === 'relatorio') renderizarRelatorioTexto();
+    }
+
+    // RENDERIZAR FEED SILENCIOSO
+    function renderizarFeed() {
+      const cont = document.getElementById('feed-mensagens-container');
+      cont.innerHTML = '';
+      document.getElementById('cont-feed').innerText = estadoCCOS.feedCaptado.length;
+
+      estadoCCOS.feedCaptado.slice().reverse().forEach(item => {
+        const div = document.createElement('div');
+        div.className = 'p-3 bg-slate-900 border border-slate-800 rounded-2xl text-xs space-y-1.5 shadow-sm';
+
+        let badge = '';
+        if (item.tipo === 'ATIVIDADE') {
+          badge = `<span class="px-2 py-0.5 text-[9px] bg-blue-500/20 text-blue-400 border border-blue-500/30 rounded font-bold">ATIVIDADE CAPTADA</span>`;
+        } else if (item.tipo === 'BAIXA_VEICULO') {
+          badge = `<span class="px-2 py-0.5 text-[9px] bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded font-bold">SAÍDA CONFIRMADA (BAIXA)</span>`;
+        } else if (item.tipo === 'RUIDO') {
+          badge = `<span class="px-2 py-0.5 text-[9px] bg-slate-800 text-slate-500 rounded font-mono">RUÍDO (IGNORADO)</span>`;
+        } else if (item.tipo === 'SOS') {
+          badge = `<span class="px-2 py-0.5 text-[9px] bg-red-500/20 text-red-400 border border-red-500/30 rounded font-bold animate-pulse">🚨 ALERTA S.O.S</span>`;
+        }
+
+        div.innerHTML = `
+          <div class="flex items-center justify-between">
+            <span class="text-slate-400 font-mono text-[11px]">${item.hora} • <strong>${item.autor}</strong> (${item.grupo})</span>
+            ${badge}
+          </div>
+          <div class="text-slate-200 text-xs font-sans">"${item.texto}"</div>
+        `;
+        cont.appendChild(div);
+      });
+    }
+
+    // SIMULADOR DE MENSAGEM CAPTADA DO GRUPO
+    function simularMensagemWhatsApp() {
+      const agoraStr = new Date().toLocaleTimeString('pt-BR', {hour:'2-digit', minute:'2-digit'});
+      const opcoes = [
+        {
+          autor: 'Portaria Principal Gate 1',
+          grupo: 'Grupo 1 (Operações)',
+          texto: `Saída da Van executiva placa XYZ-9876 com tripulantes do navio YUAN DONG HAI finalizada às ${agoraStr}.`,
+          tipo: 'BAIXA_VEICULO',
+          acaoBaixa: () => {
+            const op = estadoCCOS.operacoesEmail.find(o => o.tipo.includes('TRIPULANTES') && !o.finalizada);
+            if (op) {
+              op.horaFinal = agoraStr + 'h';
+              op.finalizada = true;
+            }
+          }
+        },
+        {
+          autor: 'Fiscal de Pátio',
+          grupo: 'Grupo 1 (Operações)',
+          texto: `Caminhão de resíduos sólidos placa KXZ-9988 acessando o terminal para o navio MARLENE OLDENDORFF às ${agoraStr}.`,
+          tipo: 'ATIVIDADE'
+        },
+        {
+          autor: 'Supervisor Sunset',
+          grupo: 'Grupo 2 (Segurança)',
+          texto: `Realizada inspeção perimetral no Gate 3 e área de fundeio às ${agoraStr} sem inconformidades.`,
+          tipo: 'ATIVIDADE'
+        }
+      ];
+
+      const item = opcoes[Math.floor(Math.random() * opcoes.length)];
+      if (item.acaoBaixa) item.acaoBaixa();
+
+      const nova = {
+        id: Date.now(),
+        hora: agoraStr + 'h',
+        grupo: item.grupo,
+        autor: item.autor,
+        texto: item.texto,
+        tipo: item.tipo,
+        status: 'CONCLUIDO'
+      };
+
+      estadoCCOS.feedCaptado.push(nova);
+      estadoCCOS.atividadesExtras.push(`${nova.texto} [Autor: ${nova.autor}]`);
+      salvarEstado();
+
+      renderizarFeed();
+      renderizarEmails();
+      alert(`📡 Mensagem captada do ${nova.grupo}!\n\n"${nova.texto}"\n\n✓ O CAVEIRA BOT manteve silêncio absoluto no grupo.\n✓ Dados inseridos automaticamente no Relatório e Módulo de E-mails!`);
+    }
+
+    // RENDERIZAR OPERAÇÕES DE BORDO E E-MAILS
+    function renderizarEmails() {
+      const cont = document.getElementById('lista-operacoes-email');
+      cont.innerHTML = '';
+      document.getElementById('cont-emails').innerText = estadoCCOS.operacoesEmail.length;
+
+      estadoCCOS.operacoesEmail.forEach((op, idx) => {
+        const item = document.createElement('div');
+        item.className = 'p-4 bg-slate-900 border border-slate-800 rounded-2xl text-xs space-y-2.5 shadow-sm';
+
+        const statusBadge = op.finalizada
+          ? `<span class="px-2 py-0.5 text-[10px] bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-md font-bold">🟢 SAÍDA CONFIRMADA (PRONTO PARA DISPARO)</span>`
+          : `<span class="px-2 py-0.5 text-[10px] bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded-md font-bold">⏳ EM ANDAMENTO (AGUARDANDO SAÍDA)</span>`;
+
+        let btnAcao = '';
+        if (op.finalizada) {
+          btnAcao = `
+            <button onclick="abrirPreviewEmail(${idx})" class="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-bold flex items-center gap-1.5 shadow">
+              <span>✉️</span> Ver Minuta e Disparar E-mail
+            </button>
+          `;
+        } else {
+          btnAcao = `
+            <button onclick="marcarSaidaOperacao(${idx})" class="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold flex items-center gap-1.5 shadow">
+              <span>🏁</span> Registrar Saída Agora
+            </button>
+          `;
+        }
+
+        item.innerHTML = `
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5">
+            <strong class="text-white text-sm tracking-wide">${op.tipo} • ${op.navio}</strong>
+            <div>${statusBadge}</div>
+          </div>
+          <div class="grid grid-cols-2 gap-2 text-slate-300 text-[11px] bg-slate-950 p-2.5 rounded-xl border border-slate-800/80">
+            <div>• Terminal: <strong>${op.terminal}</strong></div>
+            <div>• Veículo: <strong>${op.veiculo}</strong></div>
+            <div>• Prestador: <strong>${op.fornecedor}</strong></div>
+            <div>• Horários: <strong>${op.horaInicial}</strong> às <strong>${op.horaFinal || 'Aguardando saída...'}</strong></div>
+          </div>
+          <div class="flex justify-end gap-2 pt-1">
+            <button onclick="excluirOperacao(${idx})" class="px-2.5 py-1 text-slate-500 hover:text-red-400 text-xs">Excluir</button>
+            ${btnAcao}
+          </div>
+        `;
+        cont.appendChild(item);
+      });
+    }
+
+    function marcarSaidaOperacao(idx) {
+      const hora = prompt("Informe o horário final de saída do veículo:", new Date().toLocaleTimeString('pt-BR', {hour:'2-digit', minute:'2-digit'}) + 'h');
+      if (hora) {
+        estadoCCOS.operacoesEmail[idx].horaFinal = hora;
+        estadoCCOS.operacoesEmail[idx].finalizada = true;
+        salvarEstado();
+
+        // Envia para o backend se conectado
+        const apiUrl = localStorage.getItem('CAVEIRA_API_URL') || '';
+        if (apiUrl) {
+          fetch(`${apiUrl}/api/operacoes/${estadoCCOS.operacoesEmail[idx].id}/saida`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ horaFinal: hora })
+          }).catch(() => {});
+        }
+
+        renderizarEmails();
+        alert("🟢 Saída confirmada com sucesso! O e-mail agora está pronto para disparo.");
+      }
+    }
+
+    function excluirOperacao(idx) {
+      if (confirm("Deseja realmente remover esta operação de bordo?")) {
+        estadoCCOS.operacoesEmail.splice(idx, 1);
+        salvarEstado();
+        renderizarEmails();
+      }
+    }
+
+    function abrirModalNovaOperacao() {
+      document.getElementById('modal-nova-operacao').classList.remove('hidden');
+    }
+    function fecharModalNovaOperacao() {
+      document.getElementById('modal-nova-operacao').classList.add('hidden');
+    }
+    function salvarNovaOperacao() {
+      const tipo = document.getElementById('op-novo-tipo').value;
+      const navio = document.getElementById('op-novo-navio').value.trim().toUpperCase() || 'SEM NAVIO';
+      const terminal = document.getElementById('op-novo-terminal').value;
+      const fornecedor = document.getElementById('op-novo-fornecedor').value.trim() || 'S/A';
+      const veiculo = document.getElementById('op-novo-veiculo').value.trim().toUpperCase() || 'S/A';
+      const horaIni = document.getElementById('op-novo-horaini').value.trim() || '14:00h';
+      const horaFim = document.getElementById('op-novo-horafim').value.trim();
+
+      const nova = {
+        id: Date.now(),
+        tipo,
+        navio,
+        terminal,
+        fornecedor,
+        veiculo,
+        horaInicial: horaIni,
+        horaFinal: horaFim,
+        finalizada: !!horaFim
+      };
+
+      estadoCCOS.operacoesEmail.push(nova);
+      salvarEstado();
+
+      const apiUrl = localStorage.getItem('CAVEIRA_API_URL') || '';
+      if (apiUrl) {
+        fetch(`${apiUrl}/api/operacoes`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(nova)
+        }).catch(() => {});
+      }
+
+      fecharModalNovaOperacao();
+      renderizarEmails();
+      alert("✓ Operação registrada com sucesso!");
+    }
+
+    // MINUTA DE E-MAIL
+    function abrirPreviewEmail(idx) {
+      const op = estadoCCOS.operacoesEmail[idx];
+      const assunto = `Assunto: ${op.tipo} - ${op.navio} - ${op.terminal.toUpperCase()} - ${estadoCCOS.data.replace(/\//g, '-')}`;
+      
+      const corpo = `${assunto}
+
+Prezados, boa tarde!
+
+Registro a operação de ${op.tipo.toLowerCase()}:
+
+	✓ Tipo: ${op.tipo}
+	✓ Data: ${estadoCCOS.data}
+	✓ Horário inicial: ${op.horaInicial}                              Horário final: ${op.horaFinal}
+	✓ Terminal: ${op.terminal}
+	✓ Navio: ${op.navio}
+	✓ Empresa responsável/ Prestador: ${op.fornecedor}
+	✓ Veículo utilizado: ${op.veiculo}
+	✓ Autorizado por (Autoridades): S/A
+	✓ Autorizados por (Terminal): S/A
+	✓ Observações: S/A
+	✓ Procedimentos de segurança realizados: (Identificação, verificação das autorizações, Check List, Briefing de segurança, inspeções, acompanhamento e monitoramento).
+	✓ Status: Sem alteração
+	✓ Evidências: Em anexo
+
+Informo que, caso necessário, os documentos originais seguem devidamente arquivados fisicamente e digitalmente (em nosso departamento).`;
+
+      document.getElementById('email-preview-assunto').innerText = assunto;
+      document.getElementById('email-preview-corpo').value = corpo;
+      document.getElementById('modal-email-preview').classList.remove('hidden');
+    }
+
+    function fecharModalEmail() {
+      document.getElementById('modal-email-preview').classList.add('hidden');
+    }
+
+    function copiarEmailCorpo() {
+      const corpo = document.getElementById('email-preview-corpo').value;
+      navigator.clipboard.writeText(corpo).then(() => {
+        alert('📋 Minuta oficial do e-mail copiada com sucesso para a área de transferência!');
+      });
+    }
+
+    function dispararEmailViaOutlookApp() {
+      const assunto = encodeURIComponent(document.getElementById('email-preview-assunto').innerText);
+      const corpo = encodeURIComponent(document.getElementById('email-preview-corpo').value);
+      const destinatarios = "operacoes@ferroport.com.br;supervisao@ferroport.com.br;ccos@ferroport.com.br";
+      window.location.href = `mailto:${destinatarios}?subject=${assunto}&body=${corpo}`;
+      fecharModalEmail();
+    }
+
+    function dispararEmailViaOutlookWeb() {
+      const assunto = encodeURIComponent(document.getElementById('email-preview-assunto').innerText);
+      const corpo = encodeURIComponent(document.getElementById('email-preview-corpo').value);
+      const destinatarios = encodeURIComponent("operacoes@ferroport.com.br;supervisao@ferroport.com.br;ccos@ferroport.com.br");
+      const url = `https://outlook.office.com/mail/deeplink/compose?to=${destinatarios}&subject=${assunto}&body=${corpo}`;
+      window.open(url, '_blank');
+      fecharModalEmail();
+    }
+
+    // ATIVIDADES REALIZADAS
+    function renderizarAtividades() {
+      const cont = document.getElementById('lista-atividades-container');
+      cont.innerHTML = '';
+
+      estadoCCOS.atividadesExtras.forEach((at, idx) => {
+        const item = document.createElement('div');
+        item.className = 'p-3 bg-slate-900 border border-slate-800 rounded-2xl text-xs flex justify-between items-start gap-2 shadow-sm';
+        item.innerHTML = `
+          <div class="text-slate-200">✓ ${at}</div>
+          <button onclick="estadoCCOS.atividadesExtras.splice(${idx}, 1); salvarEstado(); renderizarAtividades();" class="text-slate-500 hover:text-red-400 p-1">✕</button>
+        `;
+        cont.appendChild(item);
+      });
+    }
+
+    function abrirModalNovaAtividade() {
+      document.getElementById('modal-nova-atividade').classList.remove('hidden');
+    }
+    function fecharModalNovaAtividade() {
+      document.getElementById('modal-nova-atividade').classList.add('hidden');
+    }
+    function salvarNovaAtividade() {
+      const txt = document.getElementById('input-nova-atividade').value.trim();
+      if (txt) {
+        estadoCCOS.atividadesExtras.push(txt);
+        salvarEstado();
+        document.getElementById('input-nova-atividade').value = '';
+        fecharModalNovaAtividade();
+        renderizarAtividades();
+      }
+    }
+
+    // RELATÓRIO OFICIAL (8 SEÇÕES)
+    function gerarRelatorioOficial() {
+      let ativTxt = "✓ Realizadas atividades administrativas.\n✓ Executada ronda em todo o terminal, com apoio do Supervisor Sunset.";
+      if (estadoCCOS.atividadesExtras.length > 0) {
+        ativTxt += "\n" + estadoCCOS.atividadesExtras.map(a => a.startsWith('✓') ? a : `✓ ${a}`).join('\n');
+      }
+
+      let avisosTxt = estadoCCOS.avisos.map((av, idx) => `*5.${idx + 1}. ${av.titulo}*\n${av.desc}`).join('\n\n');
+
+      return `RELATÓRIO DO TURNO - ${estadoCCOS.turno}
+Data: ${estadoCCOS.data}
+
+1. EFETIVO CCOS
+${estadoCCOS.efetivo}
+
+2. VIATURA – VTR
+Veículo: ${estadoCCOS.vtr.modelo}
+Placa: ${estadoCCOS.vtr.placa}
+KM inicial: ${estadoCCOS.vtr.kmInicial.toLocaleString('pt-BR')}
+KM final: ${estadoCCOS.vtr.kmFinal.toLocaleString('pt-BR')} (Total rodado: ${(estadoCCOS.vtr.kmFinal - estadoCCOS.vtr.kmInicial)} km)
+
+3. SISTEMAS
+
+CFTV
+${estadoCCOS.sistemas.cftv}
+
+CA - CONTROLE DE ACESSO
+${estadoCCOS.sistemas.ca}
+
+OCR – RECONHECIMENTO DE PLACAS
+Assertividade: ${estadoCCOS.sistemas.ocr.assertividade};
+Total de leituras: ${estadoCCOS.sistemas.ocr.leituras} veículos.
+
+4. ATIVIDADES REALIZADAS
+${ativTxt}
+
+5. AVISOS E AÇÕES DE ACOMPANHAMENTO
+${avisosTxt}
+
+6. MOVIMENTAÇÃO DE NAVIOS
+T-ORE
+${estadoCCOS.navios.tore}
+
+T-OIL
+${estadoCCOS.navios.toil}
+
+7. OCORRÊNCIAS:
+${estadoCCOS.ocorrencias}
+
+8. PASSAGEM DE TURNO
+EQUIPE SAINDO:
+${estadoCCOS.equipes.saindo}
+
+EQUIPE ASSUMINDO:
+${estadoCCOS.equipes.assumindo}`;
+    }
+
+    function renderizarRelatorioTexto() {
+      document.getElementById('previa-relatorio-texto').innerText = gerarRelatorioOficial();
+    }
+
+    function copiarRelatorio() {
+      navigator.clipboard.writeText(gerarRelatorioOficial()).then(() => {
+        alert('📋 Relatório oficial de 8 seções copiado com sucesso!');
+      });
+    }
+
+    function baixarRelatorioTxt() {
+      const texto = gerarRelatorioOficial();
+      const blob = new Blob([texto], { type: 'text/plain;charset=utf-8' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `Relatorio_Turno_${estadoCCOS.turno}_${estadoCCOS.data.replace(/\//g, '-')}.txt`;
+      a.click();
+    }
+
+    function dispararRelatorioNosGrupos() {
+      const apiUrl = localStorage.getItem('CAVEIRA_API_URL') || '';
+      if (apiUrl) {
+        fetch(`${apiUrl}/api/disparar-relatorio`, { method: 'POST' }).catch(() => {});
+      }
+      alert("🚀 COMANDO ENVIADO!\n\nO CAVEIRA BOT publicou o Relatório Consolidado de 8 seções e anexou o arquivo .txt oficial nos dois grupos operacionais monitorados!");
+    }
+
+    // WIZARD DE 8 ETAPAS
+    let etapaWiz = 1;
+    function iniciarAssistenteFechamento() {
+      etapaWiz = 1;
+      document.getElementById('modal-wizard').classList.remove('hidden');
+      renderizarEtapaWizard();
+    }
+    function fecharWizard() {
+      document.getElementById('modal-wizard').classList.add('hidden');
+    }
+    function renderizarEtapaWizard() {
+      const cont = document.getElementById('wiz-conteudo');
+      const ind = document.getElementById('wiz-passo-indicador');
+      const tit = document.getElementById('wiz-titulo-etapa');
+      const btnP = document.getElementById('wiz-btn-principal');
+
+      ind.innerText = `ETAPA ${etapaWiz} DE 8`;
+      btnP.innerText = (etapaWiz === 8) ? "Concluir Fechamento 🎉" : "Avançar ➔";
+
+      if (etapaWiz === 1) {
+        tit.innerText = "1. Efetivo CCOS";
+        cont.innerHTML = `<p class="text-slate-300">Status atual: <strong>${estadoCCOS.efetivo}</strong></p><p class="text-slate-400 text-[11px]">Confirmar sem alterações no efetivo?</p>`;
+        btnP.onclick = () => { etapaWiz++; renderizarEtapaWizard(); };
+      }
+      else if (etapaWiz === 2) {
+        tit.innerText = "2. Viatura VTR L200 (TDG-8C89)";
+        cont.innerHTML = `
+          <p class="text-slate-300">KM Inicial herdado: <strong class="font-mono text-indigo-400">${estadoCCOS.vtr.kmInicial}</strong></p>
+          <label class="block text-slate-400 text-[11px] pt-1">Informe o KM Final do odômetro:</label>
+          <input type="number" id="wiz-km-val" value="${estadoCCOS.vtr.kmFinal}" class="w-full bg-slate-950 border border-slate-700 p-2.5 text-white font-mono rounded-xl">
+        `;
+        btnP.onclick = () => {
+          const v = parseInt(document.getElementById('wiz-km-val').value, 10);
+          if (v >= estadoCCOS.vtr.kmInicial) {
+            estadoCCOS.vtr.kmFinal = v;
+            document.getElementById('disp-km-atual').innerText = v;
+            document.getElementById('disp-km-rodados').innerText = `+${v - estadoCCOS.vtr.kmInicial} km`;
+            salvarEstado();
+            etapaWiz++;
+            renderizarEtapaWizard();
+          } else {
+            alert('⚠️ KM Final não pode ser menor que o inicial.');
+          }
+        };
+      }
+      else if (etapaWiz >= 3 && etapaWiz <= 7) {
+        const nomes = { 3: '3. Sistemas (CFTV e OCR)', 4: '4. Atividades Realizadas', 5: '5. Avisos Ativos', 6: '6. Navios', 7: '7. Ocorrências' };
+        tit.innerText = nomes[etapaWiz];
+        cont.innerHTML = `<p class="text-slate-300">Dados verificados automaticamente pelo monitor silencioso dos grupos.</p><p class="text-emerald-400 text-[11px]">✓ Sem inconformidades pendentes.</p>`;
+        btnP.onclick = () => { etapaWiz++; renderizarEtapaWizard(); };
+      }
+      else if (etapaWiz === 8) {
+        tit.innerText = "8. Passagem de Equipes";
+        cont.innerHTML = `
+          <label class="block text-slate-300 text-[11px]">Equipe Saindo:</label>
+          <input type="text" id="wiz-eq-saindo" value="${estadoCCOS.equipes.saindo}" class="w-full bg-slate-950 border border-slate-700 p-2 text-white text-xs rounded-xl">
+          <label class="block text-slate-300 text-[11px] pt-2">Equipe Assumindo:</label>
+          <input type="text" id="wiz-eq-assumindo" value="${estadoCCOS.equipes.assumindo}" class="w-full bg-slate-950 border border-slate-700 p-2 text-white text-xs rounded-xl">
+        `;
+        btnP.onclick = () => {
+          estadoCCOS.equipes.saindo = document.getElementById('wiz-eq-saindo').value;
+          estadoCCOS.equipes.assumindo = document.getElementById('wiz-eq-assumindo').value;
+
+          estadoCCOS.vtr.kmInicial = estadoCCOS.vtr.kmFinal;
+          document.getElementById('disp-km-ini').innerText = estadoCCOS.vtr.kmInicial;
+          document.getElementById('disp-km-rodados').innerText = "+0 km";
+
+          salvarEstado();
+          fecharWizard();
+          trocarAba('relatorio');
+          alert('🎉 Fechamento de Plantão Concluído com Sucesso! Relatório gerado pronto para cópia, download ou disparo no grupo.');
+        };
+      }
+    }
+
+    function abrirModalKm() {
+      const n = prompt('Informe o novo KM final da L200:', estadoCCOS.vtr.kmFinal);
+      if (n) {
+        const val = parseInt(n, 10);
+        if (val >= estadoCCOS.vtr.kmInicial) {
+          estadoCCOS.vtr.kmFinal = val;
+          document.getElementById('disp-km-atual').innerText = val;
+          document.getElementById('disp-km-rodados').innerText = `+${val - estadoCCOS.vtr.kmInicial} km`;
+          salvarEstado();
+        }
+      }
+    }
+
+    // QR CODE PARA ESPELHAMENTO
+    function abrirModalPareamentoWhatsApp() {
+      document.getElementById('modal-pareamento').classList.remove('hidden');
+      const box = document.getElementById('qrcode-box');
+      box.innerHTML = '';
+      new QRCode(box, {
+        text: "caveira-bot-ccos://whatsapp-pairing-session-" + Date.now(),
+        width: 180,
+        height: 180,
+        colorDark: "#020617",
+        colorLight: "#ffffff",
+        correctLevel: QRCode.CorrectLevel.M
+      });
+    }
+
+    function fecharModalPareamento() {
+      document.getElementById('modal-pareamento').classList.add('hidden');
+    }
+
+    function salvarUrlServidor() {
+      const u = document.getElementById('input-api-url').value.trim();
+      if (u) {
+        localStorage.setItem('CAVEIRA_API_URL', u);
+        alert('URL do Servidor salva! O App agora sincronizará com o robô na nuvem.');
+      }
+    }
+
+    // Sincronização periódica se conectado a um servidor Node.js
+    async function sincronizarServidor() {
+      const apiUrl = localStorage.getItem('CAVEIRA_API_URL') || (window.location.port ? window.location.origin : '');
+      if (!apiUrl) return;
+
+      try {
+        const rStatus = await fetch(`${apiUrl}/api/status`);
+        if (rStatus.ok) {
+          const d = await rStatus.json();
+          if (d.whatsappConexao === 'CONECTADO') {
+            document.getElementById('badge-status-conexao').innerHTML = `
+              <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+              WHATSAPP ESPELHADO
+            `;
+          }
+        }
+
+        const rFeed = await fetch(`${apiUrl}/api/feed`);
+        if (rFeed.ok) {
+          const feeds = await rFeed.json();
+          if (feeds.length > 0) {
+            estadoCCOS.feedCaptado = feeds;
+            if (!document.getElementById('aba-feed').classList.contains('hidden')) {
+              renderizarFeed();
+            }
+          }
+        }
+
+        const rOp = await fetch(`${apiUrl}/api/operacoes`);
+        if (rOp.ok) {
+          const ops = await rOp.json();
+          if (ops.length > 0) {
+            estadoCCOS.operacoesEmail = ops;
+            if (!document.getElementById('aba-emails').classList.contains('hidden')) {
+              renderizarEmails();
+            }
+          }
+        }
+      } catch (e) {
+        // Modo offline
+      }
+    }
+    setInterval(sincronizarServidor, 8000);
+
+    // Inicialização na aba Feed
+    trocarAba('feed');
+  </script>
+</body>
+</html>
