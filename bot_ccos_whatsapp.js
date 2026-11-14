@@ -587,6 +587,74 @@ app.post('/api/disparar-relatorio', async (req, res) => {
     res.json({ sucesso: true, mensagem: 'Relatório disparado com sucesso!' });
 });
 
+// Endpoint 7: Tela do QR Code Oficial no Navegador para Leitura Fácil
+app.get('/qr', (req, res) => {
+    if (statusConexaoWhatsApp === 'CONECTADO') {
+        return res.send(`
+            <!DOCTYPE html>
+            <html lang="pt-BR">
+            <head><meta charset="UTF-8"><title>WhatsApp Conectado</title><script src="https://cdn.tailwindcss.com"></script></head>
+            <body class="bg-slate-950 text-white min-h-screen flex items-center justify-center p-4 font-sans">
+                <div class="bg-slate-900 border border-emerald-500/30 p-8 rounded-3xl text-center max-w-md shadow-2xl space-y-4">
+                    <div class="text-5xl">🎉</div>
+                    <h1 class="text-xl font-bold text-emerald-400">WHATSAPP CONECTADO COM SUCESSO!</h1>
+                    <p class="text-sm text-slate-300">O CAVEIRA BOT já está monitorando os grupos silenciosamente em segundo plano.</p>
+                </div>
+            </body>
+            </html>
+        `);
+    }
+
+    if (!qrCodeAtual) {
+        return res.send(`
+            <!DOCTYPE html>
+            <html lang="pt-BR">
+            <head><meta charset="UTF-8"><meta http-equiv="refresh" content="3"><title>Gerando QR Code...</title><script src="https://cdn.tailwindcss.com"></script></head>
+            <body class="bg-slate-950 text-white min-h-screen flex items-center justify-center p-4 font-sans">
+                <div class="bg-slate-900 border border-slate-800 p-8 rounded-3xl text-center max-w-md shadow-2xl space-y-4">
+                    <div class="animate-spin text-4xl">⏳</div>
+                    <h1 class="text-base font-bold text-white">Iniciando conexão com WhatsApp...</h1>
+                    <p class="text-xs text-slate-400">Aguardando o QR Code ser gerado pela Meta. A página atualiza sozinha em 3 segundos.</p>
+                </div>
+            </body>
+            </html>
+        `);
+    }
+
+    res.send(`
+        <!DOCTYPE html>
+        <html lang="pt-BR">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Conectar WhatsApp CCOS</title>
+            <script src="https://cdn.tailwindcss.com"></script>
+            <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+        </head>
+        <body class="bg-slate-950 text-white min-h-screen flex items-center justify-center p-4 font-sans">
+            <div class="bg-slate-900 border border-slate-800 p-8 rounded-3xl text-center max-w-md shadow-2xl space-y-4">
+                <div class="text-3xl">📲</div>
+                <h1 class="text-lg font-bold text-white">Conectar WhatsApp - CAVEIRA BOT</h1>
+                <p class="text-xs text-slate-300">Abra o WhatsApp no celular &gt; <strong>Aparelhos Conectados</strong> &gt; <strong>Conectar um Aparelho</strong> e aponte para o QR Code abaixo:</p>
+                <div class="bg-white p-4 rounded-2xl inline-block shadow-lg mx-auto" id="qrcode"></div>
+                <div class="text-[11px] text-emerald-400 font-mono animate-pulse">● Aguardando leitura do celular...</div>
+                <script>
+                    new QRCode(document.getElementById('qrcode'), {
+                        text: ${JSON.stringify(qrCodeAtual)},
+                        width: 250,
+                        height: 250,
+                        colorDark: "#020617",
+                        colorLight: "#ffffff",
+                        correctLevel: QRCode.CorrectLevel.M
+                    });
+                    setTimeout(() => window.location.reload(), 15000);
+                </script>
+            </div>
+        </body>
+        </html>
+    `);
+});
+
 const PORTA = process.env.PORT || 3000;
 app.listen(PORTA, () => {
     console.log(`🚀 [API CCOS] Servidor HTTP pronto na porta ${PORTA}`);
