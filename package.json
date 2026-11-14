@@ -4,9 +4,7 @@
   "description": "Sistema ERP CCOS Portuário - Monitor Silencioso de WhatsApp, Telegram Bot e Disparo de E-mails",
   "main": "index.js",
   "scripts": {
-    "start": "node bot_ccos_whatsapp.js",
-    "whatsapp": "node bot_ccos_whatsapp.js",
-    "telegram": "node bot_ccos.js"
+    "start": "node bot_ccos_whatsapp.js"
   },
   "dependencies": {
     "@google/genai": "*",
