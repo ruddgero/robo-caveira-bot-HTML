@@ -587,6 +587,53 @@ app.post('/api/disparar-relatorio', async (req, res) => {
     res.json({ sucesso: true, mensagem: 'Relatório disparado com sucesso!' });
 });
 
+// Endpoint Keep-Alive (Evita suspensão do Render)
+app.get('/ping', (req, res) => {
+    res.json({
+        status: 'ONLINE',
+        sistema: 'CAVEIRA BOT ERP - CCOS',
+        whatsapp: statusConexaoWhatsApp,
+        uptimeSegundos: Math.round(process.uptime()),
+        timestamp: new Date().toISOString()
+    });
+});
+
+// Endpoint: Teste direto no privado do Líder Ruddgero
+app.post('/api/testar-lider', async (req, res) => {
+    if (!sockWhatsApp || statusConexaoWhatsApp !== 'CONECTADO') {
+        return res.status(400).json({ sucesso: false, erro: 'WhatsApp não está conectado no momento.' });
+    }
+    const numeroAlvo = req.body?.numero || NUMERO_LIDER_RUDDGERO;
+    const jid = numeroAlvo.includes('@s.whatsapp.net') ? numeroAlvo : `${numeroAlvo.replace(/\D/g, '')}@s.whatsapp.net`;
+
+    try {
+        await sockWhatsApp.sendMessage(jid, {
+            text: `💀 *CAVEIRA BOT CCOS - TESTE OPERACIONAL*\n\n✅ *Status:* Espelhamento 100% ativo!\n🕒 *Horário:* ${new Date().toLocaleTimeString('pt-BR')}\n🚢 *Monitoramento Silencioso:* T-ORE & T-OIL ativos.\n\n_Mensagem enviada com sucesso pelo painel de controle._`
+        });
+        res.json({ sucesso: true, mensagem: `Mensagem enviada para ${jid}` });
+    } catch (err) {
+        res.status(500).json({ sucesso: false, erro: err.message });
+    }
+});
+
+// Endpoint: Desconectar WhatsApp / Resetar Sessão
+app.post('/api/desconectar-whatsapp', async (req, res) => {
+    try {
+        if (sockWhatsApp) {
+            await sockWhatsApp.logout().catch(() => {});
+            statusConexaoWhatsApp = 'DESCONECTADO';
+        }
+        const pastaAuth = path.join(__dirname, 'auth_whatsapp_ccos');
+        if (fs.existsSync(pastaAuth)) {
+            fs.rmSync(pastaAuth, { recursive: true, force: true });
+        }
+        res.json({ sucesso: true, mensagem: 'Sessão desconectada. Pronto para novo pareamento.' });
+        setTimeout(() => iniciarBotWhatsApp(), 2000);
+    } catch (err) {
+        res.status(500).json({ sucesso: false, erro: err.message });
+    }
+});
+
 let codigoPairingAtual = null;
 
 async function solicitarPairingCode(numero) {
@@ -804,6 +851,19 @@ app.get('/conectar', (req, res) => {
 const PORTA = process.env.PORT || 3000;
 app.listen(PORTA, () => {
     console.log(`🚀 [API CCOS] Servidor HTTP pronto na porta ${PORTA}`);
+    
+    // Auto Keep-Alive a cada 10 minutos para não deixar o container dormir no Render
+    setInterval(() => {
+        try {
+            const https = require('https');
+            const http = require('http');
+            const urlSelf = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORTA}`;
+            const client = urlSelf.startsWith('https') ? https : http;
+            client.get(`${urlSelf}/ping`, (res) => {
+                console.log(`💓 [KEEP-ALIVE] Ping executado com status: ${res.statusCode}`);
+            }).on('error', () => {});
+        } catch (_) {}
+    }, 10 * 60 * 1000);
 });
 
 // Inicia Baileys
