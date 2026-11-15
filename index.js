@@ -1,42 +1,65 @@
 // =====================================================================
-// CAVEIRA BOT CCOS — ponto de partida
-//   npm start   → liga o painel web + o leitor do WhatsApp
+// CAVEIRA BOT CCOS — ponto de partida (npm start)
 // =====================================================================
-try { require('dotenv').config(); } catch (_) { /* .env opcional quando as variáveis vêm do servidor */ }
+try { require('dotenv').config(); } catch (_) { /* variáveis vêm do servidor (Render) */ }
 
 const store = require('./store');
+const usuarios = require('./usuarios');
 const nucleo = require('./nucleo');
 const whatsapp = require('./whatsapp');
+const email = require('./email');
 const servidor = require('./servidor');
 const { agora } = require('./util');
 
 async function principal() {
-    console.log('💀 CAVEIRA BOT CCOS — iniciando...');
-
-    if (!process.env.APP_SENHA || process.env.APP_SENHA.length < 8) {
-        console.error('\n❌ Defina APP_SENHA no arquivo .env (mínimo 8 caracteres). É a senha para entrar no painel.\n');
-        process.exit(1);
-    }
-
+    console.log('💀 CAVEIRA BOT CCOS v4 — iniciando...');
     store.iniciar();
+    try { await usuarios.carregar(); }
+    catch (e) { console.error('\n❌ ' + e.message + '\n'); process.exit(1); }
     await nucleo.carregar();
+    email.iniciar();
 
-    // Alerta de emergência no privado (só quando você ativa nas Configurações)
+    // Alerta de emergência: mensagem no privado, enviada pelo WhatsApp do líder de plantão
     nucleo.aoAlerta(item => {
-        const cfg = nucleo.estado.config;
+        const lider = nucleo.liderDePlantao();
+        const numero = nucleo.estado.config.alertaNumero;
+        if (!lider || !numero) return;
         const texto = `🚨 *ALERTA CCOS — possível ocorrência no grupo*\n\n🕒 ${item.hora} • ${item.grupoNome}\n👤 ${item.autor}\n📄 "${item.texto}"\n\nAbra o painel para registrar.`;
-        whatsapp.enviarTexto(`${cfg.alertaNumero}@s.whatsapp.net`, texto).catch(e => console.error('Falha no alerta:', e.message));
+        whatsapp.enviarTexto(lider.id, `${numero}@s.whatsapp.net`, texto).catch(e => console.error('Falha no alerta:', e.message));
+    });
+
+    // Quem assume o plantão tem o WhatsApp religado (se já tinha conectado antes)
+    nucleo.aoMudarPlantao(uid => {
+        const u = usuarios.porId(uid);
+        if (u?.whatsapp?.pareado) whatsapp.ativar(uid).catch(() => {});
     });
 
     await servidor.iniciar(parseInt(process.env.PORT || '3000', 10));
-    await whatsapp.iniciar({ mensagem: msg => nucleo.receberMensagem(msg) });
+
+    // Liga primeiro o líder de plantão, depois o reserva (último a usar)
+    const liderId = nucleo.estado.plantao.liderId;
+    const pareados = usuarios.todos()
+        .filter(u => u.ativo && u.whatsapp?.pareado && usuarios.podeLiderar(u))
+        .sort((a, b) => (b.id === liderId) - (a.id === liderId) || String(b.whatsapp.ultimoUso || '').localeCompare(String(a.whatsapp.ultimoUso || '')))
+        .map(u => u.id);
+
+    await whatsapp.iniciar({
+        mensagem: msg => nucleo.receberMensagem(msg),
+        gruposDe: uid => usuarios.porId(uid)?.whatsapp?.grupos || [],
+        nomeSessao: uid => usuarios.porId(uid)?.whatsapp?.sessao || `whatsapp_sessao_${uid}`,
+        liderPlantao: () => nucleo.estado.plantao.liderId || null,
+        pareado: (uid, numero) => usuarios.atualizarWhatsapp(uid, numero
+            ? { pareado: true, numero, ultimoUso: new Date().toISOString() }
+            : { pareado: false, numero: null }).catch(() => {})
+    }, pareados);
 
     // No Render gratuito o serviço dorme sem acessos; este "ping" o mantém acordado.
     if (process.env.RENDER_EXTERNAL_URL) {
         const https = require('https');
         setInterval(() => https.get(`${process.env.RENDER_EXTERNAL_URL}/ping`, () => {}).on('error', () => {}), 10 * 60 * 1000);
     }
-    console.log(`✅ Pronto (${agora().data} ${agora().hora}).`);
+    const t = agora();
+    console.log(`✅ Pronto (${t.data} ${t.hora}).`);
 }
 
 process.on('unhandledRejection', e => console.error('⚠️  Erro não tratado:', e?.message || e));

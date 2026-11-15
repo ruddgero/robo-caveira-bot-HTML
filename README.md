@@ -1,128 +1,97 @@
-# 💀 Caveira Bot · CCOS Porto do Açu — v3
+# 💀 Caveira Bot · CCOS Porto do Açu — v4
 
-Painel para montar o **Relatório do Turno** sem retrabalho:
+Central do plantão do CCOS:
 
-1. O robô lê **só** o grupo de trabalho que você escolher (ex.: *EQUIPE AZUL - US FERROPORT*).
-2. Quando a equipe anterior posta o **RELATÓRIO DO TURNO**, ele aparece na aba **Turno**. Com um toque você herda o KM da VTR, os sistemas, os navios e a equipe.
-3. As mensagens operacionais do grupo caem na aba **Entrada**. Cada uma vai para o destino que você escolher: Atividade, Ocorrência, Aviso, Navios, Operação de bordo (gera e-mail) ou Saída de veículo.
-4. Na aba **Relatório** você edita as 8 seções e publica no grupo **exatamente** o texto da Prévia, ou copia, baixa o .txt ou gera o PDF.
-
-> O robô **nunca escreve no grupo sozinho**. Só publica quando você aperta "Publicar".
+- **Login por pessoa.** O e-mail é obrigatório, e há três perfis: Administrador, Líder e Operador.
+- **Assumir plantão.** O relatório sai pelo WhatsApp de quem está de plantão, e os e-mails de bordo chegam no e-mail dessa pessoa.
+- **Relatório anterior automático.** O robô pega o "RELATÓRIO DO TURNO" no grupo e prepara o seu turno sozinho. Os últimos 10 ficam guardados para você escolher.
+- **Central de pendências.** Avisos, pendências da Digital, operações e e-mails aparecem por assunto. Cada um tem histórico, atualização e **conclusão com tratativa**.
+- **Mensagens no formato padrão** (`*Tipo:*`, `*Navio:*`, `*Placa:*`…) são lidas sozinhas e viram **uma operação e um e-mail para cada navio**.
+- **E-mails de bordo nos modelos do CCOS.** Tripulantes são autorizados pela Polícia Federal e fornecimentos pela Receita Federal. O campo "Autorizados por (Terminal)" fica em branco.
+- **Passagem da escala.** O robô coleta tudo desde o primeiro dia, e no fim você edita e publica.
 
 ---
 
-## 📁 O que tem no pacote
+## 📁 Arquivos (todos na raiz do repositório)
 
-| Arquivo / pasta | Para que serve |
+`index.js` · `servidor.js` · `nucleo.js` · `relatorio.js` · `usuarios.js` · `whatsapp.js` · `email.js` · `store.js` · `util.js` · `sessaoFirestore.js` · `index.html` · `app.js` · `style.css` · `sw.js` · `manifest.json` · `icon.svg` · `package.json` · `teste_relatorio.js` · `Dockerfile` · `.env.example` · `.gitignore` · `README.md`
+
+---
+
+## 🚀 Atualizar o que já está no Render
+
+### 1. GitHub
+1. No repositório `robo-caveira-bot-HTML`, clique em **Add file → Upload files**.
+2. Arraste **todos os arquivos do zip**. Os que têm o mesmo nome são substituídos, e `usuarios.js` e `email.js` são novos.
+3. Clique em **Commit changes**.
+4. Apague o que não é mais usado, se ainda estiver lá: `download`, `download (1)`, `env.example` (sem ponto), `bot_ccos.js`, `bot_ccos_whatsapp.js`, `app_caveira_bot.html`, `iniciar_robo.bat`.
+5. Em **Settings → General → Change visibility**, deixe o repositório **Private**. Se o deploy der "repository not found", libere o acesso em Render → Account Settings → GitHub.
+
+### 2. Render → Environment
+| Variável | Valor |
 |---|---|
-| `index.js` | Liga tudo (`npm start`) |
-| `src/` | Servidor, leitor do WhatsApp e regras do relatório |
-| `public/` | A tela do aplicativo (celular e computador) |
-| `.env.example` | Modelo das configurações secretas |
-| `Dockerfile` | Usado só se for rodar no Render |
-| `test/` | Teste com o relatório real do Wallace (`npm test`) |
+| `APP_SENHA` | **Mantenha a atual.** No primeiro start, ela vira a senha do administrador |
+| `FIREBASE_CREDENTIALS` | Mantenha |
+| `NODE_VERSION` | `22` |
+| `GMAIL_USUARIO` | E-mail do robô (veja abaixo) |
+| `GMAIL_SENHA_APP` | Senha de app do Google (veja abaixo) |
 
-Os arquivos antigos (`bot_ccos.js`, `bot_ccos_whatsapp.js`, `app_caveira_bot.html`, `iniciar_robo.bat`, `ultimo_relatorio_us.json`, `manifest.json`/`sw.js` da raiz) **não são mais usados**. Pode apagar.
+Depois clique em **Save Changes → Manual Deploy → Clear build cache & deploy**.
 
----
-
-## ⚠️ Antes de começar (importante)
-
-- **Use um chip só para o robô**, não o seu número pessoal. A biblioteca do WhatsApp usada não é oficial, e o WhatsApp pode bloquear números que usam esse tipo de conexão.
-- **Alinhe com seu gestor / Segurança da Informação.** O robô guarda mensagens do grupo de trabalho.
-- **Deixe o repositório do GitHub PRIVADO.** O projeto antigo estava público e expunha nomes, IDs, e-mails e quais câmeras estavam fora.
-
----
-
-## 🖥️ Opção A — Rodar num computador (recomendado para começar)
-
-Funciona enquanto o computador estiver ligado. Os dados ficam na pasta `dados`.
-
-### 1. Instale o Node.js
-Baixe a versão **LTS** em https://nodejs.org e instale (Avançar, Avançar, Concluir).
-
-### 2. Prepare a pasta
-1. Extraia o `.zip` numa pasta, por exemplo `C:\caveira-bot`.
-2. Faça uma cópia do arquivo `.env.example` e renomeie a cópia para `.env`.
-3. Abra o `.env` no Bloco de Notas e troque `APP_SENHA=troque-esta-senha` por uma senha sua (mínimo 8 caracteres). Salve.
-
-> No Windows, se não aparecer a extensão dos arquivos: Explorador de Arquivos → Exibir → marque "Extensões de nomes de arquivos".
-
-### 3. Instale e ligue
-1. Abra a pasta, clique com o botão direito num espaço vazio → **Abrir no Terminal**.
-2. Digite e aperte Enter (só na primeira vez, demora um pouco):
-   ```
-   npm install
-   ```
-3. Para ligar o robô:
-   ```
-   npm start
-   ```
-4. Vai aparecer `🌐 [PAINEL] Aberto em http://localhost:3000`. **Deixe essa janela aberta.**
-
-### 4. Primeiro acesso
-1. Abra no navegador: **http://localhost:3000** e entre com a senha do `.env`.
-2. Toque em **⚙️ Configurações → WhatsApp**.
-3. No celular **do robô**: WhatsApp → ⋮ → **Aparelhos conectados → Conectar um aparelho** e leia o QR Code. Se preferir, use **"Gerar código"** e digite o código em "Conectar com número de telefone".
-4. Quando aparecer **● Conectado**, toque em **Escolher grupos**:
-   - marque **EQUIPE AZUL - US FERROPORT** (e só os grupos de trabalho);
-   - em **Publicar o relatório em**, escolha o grupo;
-   - toque em **Salvar grupos**.
-5. Preencha os **destinatários dos e-mails de bordo**, o **número para alerta de emergência** e as **atividades fixas** do turno. Toque em **Salvar configurações**.
-
-### 5. Usar no celular (mesma rede Wi-Fi do computador)
-No computador, descubra o IP: no Terminal digite `ipconfig` e procure "Endereço IPv4" (ex.: `192.168.0.15`).
-No celular, abra `http://192.168.0.15:3000`. No menu do navegador use **"Adicionar à tela inicial"** para virar um app.
-
-> Configure o computador para **não hibernar** (Configurações → Energia → Suspensão: Nunca).
+### 3. Conferir o log
+```
+👤 [USUÁRIOS] Administrador criado: ruddgero.ribeiro@ferroport.com.br (senha = APP_SENHA).
+🔄 [MIGRAÇÃO] Dados da versão anterior convertidos (avisos → pendências, navios e operações).
+✉️  [E-MAIL] Envio automático ativo pela conta ...
+🌐 [PAINEL] Aberto em ...
+✅ Pronto
+```
+O administrador só é criado no primeiro start, e a migração só acontece uma vez. Os avisos que já existiam viram pendências.
 
 ---
 
-## ☁️ Opção B — Rodar no Render (nuvem, acessa de qualquer lugar)
+## ✉️ Criar o e-mail do robô (Gmail)
+1. Crie uma conta Gmail só para o robô (ex.: `ccos.caveirabot@gmail.com`).
+2. Em **myaccount.google.com → Segurança**, ative a **Verificação em duas etapas**.
+3. Abra **myaccount.google.com/apppasswords**, crie uma senha com o nome "Caveira Bot" e copie os 16 caracteres.
+4. No Render, preencha `GMAIL_USUARIO` (o e-mail) e `GMAIL_SENHA_APP` (os 16 caracteres) e faça o deploy de novo.
 
-No plano gratuito do Render, o disco é apagado quando o serviço reinicia. Por isso **é obrigatório usar o Firebase**, que guarda a sessão do WhatsApp e os dados.
-
-### 1. Firebase (gratuito)
-1. https://console.firebase.google.com → seu projeto (ou crie um).
-2. **Firestore Database → Criar banco de dados** (modo produção, região `southamerica-east1`).
-3. ⚙️ **Configurações do projeto → Contas de serviço → Gerar nova chave privada**. Baixa um `.json`.
-4. Abra o `.json` e deixe todo o conteúdo em **uma linha só** (pode usar https://jsonformatter.org/json-minify). Você vai colar isso no Render.
-
-### 2. GitHub (privado)
-1. Crie um repositório **Private** e envie os arquivos deste pacote. **Não envie o `.env` nem a pasta `dados`.**
-2. No repositório antigo: **Settings → Pages → desative** e mude para **Private** (ou apague).
-
-### 3. Render
-1. https://render.com → **New → Web Service** → conecte o repositório.
-2. **Runtime: Docker.**
-3. Em **Environment**, adicione:
-   - `APP_SENHA` = sua senha
-   - `FIREBASE_CREDENTIALS` = o JSON em uma linha
-4. **Create Web Service.** Quando terminar, abra o link `https://seu-servico.onrender.com` e siga o **Primeiro acesso** acima.
-5. **Apague o serviço antigo** (`robo-caveira-bot-html`) no Render. A API dele está aberta, sem senha.
-
-> O plano gratuito "dorme" sem acessos. O robô faz um ping a cada 10 minutos para evitar isso, mas o Render pode reiniciar o serviço. Para uso profissional contínuo, use um plano pago do Render ou a Opção A.
+Sem essas variáveis, tudo funciona, mas o e-mail não sai sozinho. Use **Copiar**, **Outlook Web** ou **App de e-mail** na tela do e-mail.
 
 ---
 
-## 🔁 Rotina do turno
+## 👤 Primeiro acesso (administrador)
+1. Abra o link do Render e entre com **ruddgero.ribeiro@ferroport.com.br** e a **APP_SENHA**.
+2. Em **☰ → Meu perfil → Conectar meu WhatsApp**, leia o QR com o seu celular e toque em **Escolher grupos**. Marque **EQUIPE AZUL - US FERROPORT**.
+3. Em **☰ → Configurações**:
+   - escolha o **grupo de publicação**;
+   - preencha **Encaminhar para** (a lista oficial dos e-mails de bordo);
+   - confira o **número do alerta** e os **navios conhecidos**;
+   - toque em **Salvar configurações**.
+4. Em **☰ → Usuários**:
+   - Lais Campos e Felipe Furtado já estão cadastrados como **Operador**;
+   - toque em **Criar senha provisória** e envie a senha para cada um. No primeiro login, a pessoa cria a própria senha;
+   - quem for **Líder** precisa ter o perfil trocado para "Líder" e conectar o próprio WhatsApp em Meu perfil.
+5. Na **Central**, toque em **Assumir plantão** e depois em **Iniciar nova escala**.
 
-1. **Turno** → confira o relatório da equipe anterior (os itens com **?** não foram encontrados) → **Herdar e começar meu turno**.
-2. **Entrada** → para cada mensagem, use o botão sugerido ou **Outro destino**. Ruído ("bom dia", "ok") já vem ignorado. Mensagens de emergência ficam no topo, em vermelho.
-3. **Relatório** → ajuste o que precisar (salva sozinho) → **Prévia** → **Publicar**.
-4. **Operações de bordo** → depois de registrar a saída do veículo, use **✉️ E-mail** para abrir a minuta no Outlook (Web ou aplicativo). Anexe as evidências e envie.
+---
 
-Se o relatório da US foi postado com o robô desligado: **Turno → Colar relatório**.
+## 🔁 Rotina do plantão
+1. **Central:** o líder toca em **Assumir plantão**. O relatório anterior já vem herdado. Se aparecer "Chegou um relatório novo", escolha herdar ou manter o turno.
+2. **Pendências:** toque em cada uma para atualizar ou **Concluir com tratativa**. Avisos abertos passam para o próximo turno.
+3. **Entrada:** mensagens no formato padrão são registradas sozinhas e vão para "Tratadas". As demais vão para o destino que você escolher.
+4. **E-mails:** chegam no e-mail do líder. Confira, anexe as evidências, encaminhe e toque em **✓ Encaminhado**.
+5. **Relatório:** confira as 8 seções, abra a **Prévia** e toque em **Publicar**. O relatório sai pelo WhatsApp do líder de plantão.
+6. **Fim da escala:** abra **📦 Passagem da escala**, revise, edite e publique.
 
 ---
 
 ## 🛠️ Problemas comuns
-
 | Sintoma | O que fazer |
 |---|---|
-| `Defina APP_SENHA no arquivo .env` | Crie o `.env` (passo 2) com uma senha de 8+ caracteres |
-| `'npm' não é reconhecido` | Instale o Node.js e abra um Terminal novo |
-| Pílula mostra **Offline** / **Conectar** | Configurações → WhatsApp → conecte de novo |
-| Relatório da US não apareceu | Confira se o grupo está marcado em Configurações. Se foi postado antes de ligar, use **Colar relatório** |
-| "Alterada em outro aparelho" | Outra pessoa editou ao mesmo tempo. A tela recarrega a versão atual |
-| Quer conferir o leitor | `npm test` testa com o relatório real do Wallace |
+| "Primeiro acesso: defina APP_SENHA" | Crie `APP_SENHA` no Render, com 8 ou mais caracteres |
+| Não consigo publicar | Assuma o plantão e conecte o seu WhatsApp em Meu perfil |
+| WhatsApp "Pausado" | Normal: no plano grátis ficam ligados só o líder de plantão e um reserva. Ele religa ao assumir |
+| E-mail "não configurado" | Preencha `GMAIL_USUARIO` e `GMAIL_SENHA_APP` |
+| Esqueci a senha | O administrador gera uma senha provisória em Usuários |
+| Conferir o leitor de relatórios | `npm test` |

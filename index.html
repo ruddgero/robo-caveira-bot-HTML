@@ -20,9 +20,11 @@
       <img src="/icon.svg" alt="" class="login-logo">
       <h1>Caveira Bot</h1>
       <p class="mudo">CCOS · Porto do Açu</p>
+      <input type="email" id="login-email" placeholder="Seu e-mail" autocomplete="username" required>
       <input type="password" id="login-senha" placeholder="Senha" autocomplete="current-password" required>
       <button class="btn primario largo" type="submit">Entrar</button>
       <p id="login-erro" class="erro" hidden></p>
+      <p class="mudo pequeno" style="margin:0">Esqueceu a senha? Peça ao administrador uma senha provisória.</p>
     </form>
   </section>
 
@@ -33,29 +35,28 @@
         <img src="/icon.svg" alt="" class="topo-logo">
         <div>
           <strong>Caveira Bot</strong>
-          <span id="topo-turno" class="mudo pequeno"></span>
+          <span id="topo-sub" class="topo-sub"></span>
         </div>
       </div>
       <div class="topo-acoes">
-        <button id="pilula-whats" class="pilula" title="Status do WhatsApp"><span class="ponto"></span><span class="txt">…</span></button>
-        <button id="btn-config" class="btn-icone" aria-label="Configurações" title="Configurações">⚙️</button>
+        <button id="pilula-whats" class="pilula" title="WhatsApp do líder de plantão"><span class="ponto"></span><span class="txt">…</span></button>
+        <button id="btn-menu" class="btn-icone" aria-label="Menu" title="Menu">☰</button>
       </div>
     </header>
 
     <main id="conteudo">
-      <section id="aba-turno" class="aba"></section>
+      <section id="aba-central" class="aba"></section>
       <section id="aba-entrada" class="aba" hidden></section>
       <section id="aba-relatorio" class="aba" hidden></section>
     </main>
 
     <nav class="abas">
-      <button data-aba="turno" class="ativa"><span class="ic">🧭</span>Turno</button>
+      <button data-aba="central" class="ativa"><span class="ic">🧭</span>Central<span id="badge-central" class="badge" hidden></span></button>
       <button data-aba="entrada"><span class="ic">📥</span>Entrada<span id="badge-entrada" class="badge" hidden></span></button>
       <button data-aba="relatorio"><span class="ic">📑</span>Relatório</button>
     </nav>
   </div>
 
-  <!-- Janelas -->
   <div id="modal" class="modal" hidden>
     <div class="modal-caixa" role="dialog" aria-modal="true">
       <div class="modal-topo">
@@ -67,7 +68,7 @@
     </div>
   </div>
 
-  <div id="painel-config" class="painel" hidden></div>
+  <div id="painel" class="painel" hidden></div>
   <div id="aviso" class="aviso" hidden></div>
   <div id="impressao"></div>
 

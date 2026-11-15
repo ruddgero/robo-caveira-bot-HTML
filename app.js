@@ -1,8 +1,8 @@
 'use strict';
 // =====================================================================
-// CAVEIRA BOT · Painel do CCOS
-// Tudo que aparece na tela vem do servidor; o texto publicado é
-// exatamente o da Prévia. Nenhum dado de exemplo.
+// CAVEIRA BOT · Painel do CCOS (v4)
+// Central do Plantão · Entrada · Relatório · Passagem da Escala
+// Tudo vem do servidor; o texto publicado é exatamente o da Prévia.
 // =====================================================================
 
 // ---------------------------- Utilidades ----------------------------
@@ -28,6 +28,7 @@ function el(tag, props = {}, ...filhos) {
 
 const uid = () => Math.random().toString(16).slice(2, 10) + Date.now().toString(16).slice(-4);
 const semAcento = s => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '');
+const clone = o => JSON.parse(JSON.stringify(o));
 const FUSO = 'America/Sao_Paulo';
 
 function agoraBR() {
@@ -40,15 +41,11 @@ function quando(iso) {
   if (!iso) return '';
   const d = new Date(iso);
   const f = o => new Intl.DateTimeFormat('pt-BR', { timeZone: FUSO, ...o }).format(d);
-  const mesmoDia = f({ day: '2-digit', month: '2-digit', year: 'numeric' }) === agoraBR().data;
   const hora = f({ hour: '2-digit', minute: '2-digit', hour12: false });
-  return mesmoDia ? `hoje às ${hora}` : `${f({ day: '2-digit', month: '2-digit' })} às ${hora}`;
+  return f({ day: '2-digit', month: '2-digit', year: 'numeric' }) === agoraBR().data ? `hoje às ${hora}` : `${f({ day: '2-digit', month: '2-digit' })} às ${hora}`;
 }
 
-function autoAltura(t) {
-  t.style.height = 'auto';
-  t.style.height = Math.min(t.scrollHeight + 2, 420) + 'px';
-}
+function autoAltura(t) { t.style.height = 'auto'; t.style.height = Math.min(t.scrollHeight + 2, 420) + 'px'; }
 
 function aviso(texto, falha = false) {
   const a = $('#aviso');
@@ -73,7 +70,6 @@ function baixar(nome, texto) {
   document.body.append(a); a.click(); a.remove();
 }
 
-// Texto do WhatsApp com *negrito* → nós DOM seguros (sem innerHTML)
 function textoWhats(texto) {
   const frag = document.createDocumentFragment();
   String(texto).split('\n').forEach((linha, i) => {
@@ -96,57 +92,46 @@ async function api(metodo, url, corpo) {
   let d = {};
   try { d = await r.json(); } catch (_) {}
   if (r.status === 401 && !url.endsWith('/login')) { mostrarLogin(); throw new Error(d.erro || 'Sessão expirada.'); }
-  if (!r.ok) { const e = new Error(d.erro || `Erro ${r.status}`); e.status = r.status; throw e; }
+  if (r.status === 403 && d.trocarSenha) { pedirTrocaSenha(true); throw new Error(d.erro); }
+  if (!r.ok) { const e = new Error(d.erro || `Erro ${r.status}`); e.status = r.status; e.dados = d; throw e; }
   return d;
 }
 
 // ------------------------------ Estado ------------------------------
 const S = {
-  aba: 'turno', ficha: null, versao: 0, conferencia: [],
-  entrada: [], relatorioUS: null, config: null, estado: null,
-  filtro: 'pendente', busca: '',
-  sujo: false, salvando: false, timerSalvar: null, timerEstado: null
+  usuario: null, meta: null, estado: null, aba: 'central',
+  central: null, ficha: null, fichaBase: null, versao: 0, conferencia: [], avisos: [], operacoes: [],
+  entrada: [], config: null, filtroEntrada: 'pendente', busca: '', filtroPend: 'todas',
+  sujo: false, salvando: false, timerSalvar: null, timerEstado: null, painelTimer: null
 };
+const ehLider = () => ['ADMIN', 'LIDER'].includes(S.usuario?.perfil);
+const ehAdmin = () => S.usuario?.perfil === 'ADMIN';
+const deplantao = () => S.estado?.plantao?.liderId === S.usuario?.id;
 
 const DESTINOS = {
   ATIVIDADE: { rotulo: 'Atividade', ic: '📝', desc: 'Seção 4 · Atividades realizadas' },
   OCORRENCIA: { rotulo: 'Ocorrência', ic: '🚨', desc: 'Seção 7 · Ocorrências' },
-  AVISO: { rotulo: 'Aviso', ic: '📌', desc: 'Seção 5 · Avisos e acompanhamento' },
+  AVISO: { rotulo: 'Aviso', ic: '📌', desc: 'Pendência · aparece na seção 5 até ser concluído' },
+  DIGITAL: { rotulo: 'Pendência da Digital', ic: '🛠️', desc: 'CFTV, câmeras, SPDA, fibra… · vai para a passagem da escala' },
   NAVIO: { rotulo: 'Navios', ic: '🚢', desc: 'Seção 6 · Movimentação de navios' },
-  OPERACAO: { rotulo: 'Operação de bordo', ic: '✉️', desc: 'Rancho, tripulantes, resíduos… gera o e-mail' },
-  SAIDA: { rotulo: 'Saída de veículo', ic: '🏁', desc: 'Fecha uma operação de bordo em andamento' }
+  OPERACAO: { rotulo: 'Operação de bordo', ic: '✉️', desc: 'Rancho, tripulantes, resíduos… · gera e-mail (um por navio)' },
+  SAIDA: { rotulo: 'Saída de veículo', ic: '🏁', desc: 'Fecha uma operação em andamento e libera o e-mail' }
 };
 
-const TIPOS_OPERACAO = [
-  'MOVIMENTAÇÃO DE TRIPULAÇÃO', 'FORNECIMENTO DE RANCHO', 'FORNECIMENTO DE MATERIAIS E EQUIPAMENTOS',
-  'RETIRADA DE RESÍDUOS', 'FORNECIMENTO DE ÁGUA POTÁVEL', 'ABASTECIMENTO DE COMBUSTÍVEL', 'OUTRA OPERAÇÃO'
-];
-
-function tipoDoTexto(t) {
-  const n = semAcento(t).toLowerCase();
-  if (/tripula/.test(n)) return TIPOS_OPERACAO[0];
-  if (/rancho|provis/.test(n)) return TIPOS_OPERACAO[1];
-  if (/residuo/.test(n)) return TIPOS_OPERACAO[3];
-  if (/agua/.test(n)) return TIPOS_OPERACAO[4];
-  if (/bunker|combustivel/.test(n)) return TIPOS_OPERACAO[5];
-  if (/dta|materia|pecas|sobressalente|equipamento/.test(n)) return TIPOS_OPERACAO[2];
-  return TIPOS_OPERACAO[6];
-}
-
-const operacoesAbertas = () => (S.ficha?.operacoes || []).filter(o => !o.horaFinal);
-
 // ------------------------------ Janela ------------------------------
-function abrirModal(titulo, corpo, rodape = []) {
+function abrirModal(titulo, corpo, rodape = [], { travado = false } = {}) {
   $('#modal-titulo').textContent = titulo;
   $('#modal-corpo').replaceChildren(...[].concat(corpo).filter(Boolean));
   $('#modal-rodape').replaceChildren(...[].concat(rodape).filter(Boolean));
+  $('#modal').dataset.travado = travado ? '1' : '';
+  $('#modal [data-fechar]').hidden = travado;
   $('#modal').hidden = false;
   requestAnimationFrame(() => {
     $('#modal-corpo').querySelectorAll('textarea').forEach(autoAltura);
     const foco = $('#modal-corpo [autofocus]'); if (foco) foco.focus();
   });
 }
-function fecharModal() { $('#modal').hidden = true; }
+function fecharModal() { $('#modal').hidden = true; $('#modal').dataset.travado = ''; }
 const modalAberto = () => !$('#modal').hidden;
 
 function confirmar(titulo, conteudo, rotuloOk = 'Confirmar', perigo = false) {
@@ -159,114 +144,183 @@ function confirmar(titulo, conteudo, rotuloOk = 'Confirmar', perigo = false) {
   });
 }
 
+function campoTexto(rotulo, valor, opts = {}) {
+  const t = el('textarea', { rows: opts.linhas || 3, value: valor || '', placeholder: opts.placeholder, autofocus: opts.autofocus, oninput: e => autoAltura(e.target) });
+  return [rotulo ? el('label', { class: 'campo' }, rotulo, t) : t, t];
+}
+function campoLinha(rotulo, valor, opts = {}) {
+  const i = el('input', { type: opts.tipo || 'text', value: valor ?? '', placeholder: opts.placeholder, autofocus: opts.autofocus, inputmode: opts.inputmode });
+  return [el('label', { class: 'campo' }, rotulo, i), i];
+}
+function botoesSalvar(onSalvar, rotulo = 'Salvar', classe = 'primario') {
+  return [
+    el('button', { class: 'btn fantasma', 'data-fechar': true }, 'Cancelar'),
+    el('button', {
+      class: `btn ${classe}`, onclick: async ev => {
+        ev.target.disabled = true;
+        try { await onSalvar(); } catch (e) { aviso(e.message, true); ev.target.disabled = false; }
+      }
+    }, rotulo)
+  ];
+}
+
 // ------------------------------ Login -------------------------------
 function mostrarLogin() {
   clearInterval(S.timerEstado);
-  $('#app').hidden = true;
-  $('#painel-config').hidden = true;
-  fecharModal();
+  $('#app').hidden = true; $('#painel').hidden = true; fecharModal();
   $('#tela-login').hidden = false;
-  setTimeout(() => $('#login-senha').focus(), 50);
+  setTimeout(() => ($('#login-email').value ? $('#login-senha') : $('#login-email')).focus(), 50);
 }
 
 $('#form-login').addEventListener('submit', async ev => {
   ev.preventDefault();
   const erro = $('#login-erro'); erro.hidden = true;
   try {
-    await api('POST', '/api/login', { senha: $('#login-senha').value });
+    const r = await api('POST', '/api/login', { email: $('#login-email').value, senha: $('#login-senha').value });
     $('#login-senha').value = '';
+    S.usuario = r.usuario;
+    if (r.usuario.trocarSenha) return pedirTrocaSenha(true);
     entrar();
   } catch (e) { erro.textContent = e.message; erro.hidden = false; }
 });
 
+function pedirTrocaSenha(obrigatoria = false) {
+  $('#tela-login').hidden = true;
+  const [c1, atual] = campoLinha(obrigatoria ? 'Senha provisória (a que você recebeu)' : 'Senha atual', '', { tipo: 'password', autofocus: true });
+  const [c2, nova] = campoLinha('Nova senha (mínimo 8 caracteres)', '', { tipo: 'password' });
+  const [c3, conf] = campoLinha('Repita a nova senha', '', { tipo: 'password' });
+  abrirModal(obrigatoria ? '🔐 Crie sua senha' : 'Trocar senha', [
+    obrigatoria ? el('p', { class: 'mudo', text: 'É o seu primeiro acesso (ou sua senha foi redefinida). Crie uma senha pessoal para continuar.' }) : null,
+    c1, c2, c3
+  ], [
+    obrigatoria ? null : el('button', { class: 'btn fantasma', 'data-fechar': true }, 'Cancelar'),
+    el('button', {
+      class: 'btn primario', onclick: async () => {
+        if (nova.value !== conf.value) return aviso('As senhas não conferem.', true);
+        try {
+          const r = await api('POST', '/api/eu/senha', { atual: atual.value, nova: nova.value });
+          S.usuario = r.usuario; fecharModal(); aviso('Senha alterada ✓');
+          if (obrigatoria) entrar();
+        } catch (e) { aviso(e.message, true); }
+      }
+    }, 'Salvar senha')
+  ], { travado: obrigatoria });
+}
+
 async function entrar() {
   $('#tela-login').hidden = true;
   $('#app').hidden = false;
-  await carregarTudo();
+  try {
+    [S.meta, S.estado] = await Promise.all([api('GET', '/api/meta'), api('GET', '/api/estado')]);
+    S.usuario = S.estado.usuario;
+    await Promise.all([carregarCentral(), carregarFicha(), carregarEntrada(), carregarConfig()]);
+  } catch (e) { if (e.status !== 403 && e.status !== 401) aviso(e.message, true); return; }
+  desenharTopo();
   trocarAba(S.aba);
   clearInterval(S.timerEstado);
-  S.timerEstado = setInterval(atualizarEstado, 8000);
+  S.timerEstado = setInterval(atualizarEstado, 6000);
 }
 
-async function carregarTudo() {
-  const [f, en, rel, cfg, est] = await Promise.all([
-    api('GET', '/api/ficha'), api('GET', '/api/entrada'), api('GET', '/api/relatorio-us'),
-    api('GET', '/api/config'), api('GET', '/api/estado')
-  ]);
-  S.ficha = f.ficha; S.versao = f.ficha.versao || 0; S.conferencia = f.conferencia;
-  S.entrada = en.itens; S.relatorioUS = rel.relatorio; S.config = cfg.config; S.estado = est;
-  desenharTopo();
+async function carregarCentral() { S.central = await api('GET', '/api/central'); }
+async function carregarEntrada() { S.entrada = (await api('GET', '/api/entrada')).itens; }
+async function carregarConfig() { S.config = (await api('GET', '/api/config')).config; }
+async function carregarFicha() {
+  const f = await api('GET', '/api/ficha');
+  S.ficha = f.ficha; S.fichaBase = clone(f.ficha); S.versao = f.ficha.versao || 0;
+  S.conferencia = f.conferencia; S.avisos = f.avisos; S.operacoes = f.operacoes;
 }
 
 // --------------------------- Topo e abas ----------------------------
 function desenharTopo() {
-  const f = S.ficha;
-  $('#topo-turno').textContent = f ? `${f.turno} · ${f.data}` : '';
-  const w = S.estado?.whatsapp?.estado || 'DESLIGADO';
+  const e = S.estado;
+  const lider = e?.plantao?.liderNome ? ` · Líder: ${e.plantao.liderNome.split(' ')[0]}` : ' · sem líder de plantão';
+  $('#topo-sub').textContent = e ? `${e.turno.turno} ${e.turno.data.slice(0, 5)}${lider}` : '';
+  const w = e?.whatsapp?.plantao?.estado || (e?.plantao?.liderId ? 'PAUSADO' : 'SEM_LIDER');
   const mapa = {
-    CONECTADO: ['ok', 'Conectado'], AGUARDANDO_PAREAMENTO: ['atencao', 'Conectar'],
-    CONECTANDO: ['atencao', 'Conectando'], RECONECTANDO: ['atencao', 'Reconectando']
+    CONECTADO: ['ok', 'Conectado'], AGUARDANDO_PAREAMENTO: ['atencao', 'Conectar'], CONECTANDO: ['atencao', 'Conectando'],
+    RECONECTANDO: ['atencao', 'Reconectando'], SEM_LIDER: ['atencao', 'Sem líder']
   };
   const [classe, txt] = mapa[w] || ['falha', 'Offline'];
   const p = $('#pilula-whats');
   p.className = 'pilula ' + classe;
   p.querySelector('.txt').textContent = txt;
-  const b = $('#badge-entrada');
-  const n = S.estado?.pendentes || 0;
-  b.hidden = !n;
-  b.textContent = n > 99 ? '99+' : n;
-  b.style.background = S.estado?.urgentes ? 'var(--vermelho)' : 'var(--primario)';
+  const be = $('#badge-entrada');
+  const n = e?.pendentesEntrada || 0;
+  be.hidden = !n; be.textContent = n > 99 ? '99+' : n;
+  be.style.background = e?.urgentes ? 'var(--vermelho)' : 'var(--primario)';
+  const bc = $('#badge-central');
+  const alerta = (e?.plantao?.relatorioPendenteId ? 1 : 0) + (e?.plantao?.sugerirNovaEscala && deplantao() ? 1 : 0) + (!e?.plantao?.liderId ? 1 : 0);
+  bc.hidden = !alerta; bc.textContent = '!'; bc.style.background = 'var(--ambar)';
 }
 
 function trocarAba(nome) {
-  S.aba = ['turno', 'entrada', 'relatorio'].includes(nome) ? nome : 'turno';
+  S.aba = ['central', 'entrada', 'relatorio'].includes(nome) ? nome : 'central';
   document.querySelectorAll('.abas button').forEach(b => b.classList.toggle('ativa', b.dataset.aba === S.aba));
   document.querySelectorAll('.aba').forEach(s => { s.hidden = s.id !== `aba-${S.aba}`; });
-  if (S.aba === 'turno') desenharTurno();
+  if (S.aba === 'central') desenharCentral();
   if (S.aba === 'entrada') desenharEntrada();
   if (S.aba === 'relatorio') desenharRelatorio();
   window.scrollTo(0, 0);
 }
 
 document.querySelectorAll('.abas button').forEach(b => b.addEventListener('click', () => trocarAba(b.dataset.aba)));
-$('#btn-config').addEventListener('click', abrirConfig);
-$('#pilula-whats').addEventListener('click', abrirConfig);
-$('#modal').addEventListener('click', e => { if (e.target.id === 'modal' || e.target.closest('[data-fechar]')) fecharModal(); });
-document.addEventListener('keydown', e => { if (e.key === 'Escape' && modalAberto()) fecharModal(); });
+$('#btn-menu').addEventListener('click', abrirMenu);
+$('#pilula-whats').addEventListener('click', () => (ehLider() ? abrirPerfil() : aviso('O WhatsApp é do líder de plantão.')));
+$('#modal').addEventListener('click', e => {
+  if ($('#modal').dataset.travado) return;
+  if (e.target.id === 'modal' || e.target.closest('[data-fechar]')) fecharModal();
+});
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && modalAberto() && !$('#modal').dataset.travado) fecharModal(); });
 
 // ------------------------ Atualização periódica ---------------------
 async function atualizarEstado() {
   try {
-    const anterior = S.estado;
+    const ant = S.estado;
     S.estado = await api('GET', '/api/estado');
+    S.usuario = S.estado.usuario;
     desenharTopo();
+    const m = S.estado.marcas, a = ant?.marcas || {};
+    const livre = !modalAberto() && $('#painel').hidden;
 
-    if (S.estado.relatorioUS?.capturadoEm && S.estado.relatorioUS.capturadoEm !== anterior?.relatorioUS?.capturadoEm) {
-      S.relatorioUS = (await api('GET', '/api/relatorio-us')).relatorio;
-      if (anterior?.relatorioUS?.capturadoEm || anterior) aviso('📑 Novo relatório da equipe anterior capturado');
-      if (S.aba === 'turno' && !modalAberto()) desenharTurno();
+    if (m.relatorios !== a.relatorios && ant) aviso('📑 Relatório da equipe anterior atualizado');
+    if (m.pendencias !== a.pendencias || m.operacoes !== a.operacoes || m.relatorios !== a.relatorios || m.plantao !== a.plantao || m.ficha !== a.ficha) {
+      await carregarCentral();
+      if (S.aba === 'central' && livre) desenharCentral();
     }
-    if (S.estado.pendentes !== anterior?.pendentes || S.estado.urgentes !== anterior?.urgentes) {
-      S.entrada = (await api('GET', '/api/entrada')).itens;
-      if (S.aba === 'entrada' && !modalAberto()) desenharListaEntrada();
-      if (S.estado.urgentes > (anterior?.urgentes || 0)) aviso('🚨 Mensagem urgente na Entrada', true);
+    if (S.estado.pendentesEntrada !== ant?.pendentesEntrada || S.estado.urgentes !== ant?.urgentes || m.operacoes !== a.operacoes) {
+      await carregarEntrada();
+      if (S.aba === 'entrada' && livre) desenharListaEntrada();
+      if (S.estado.urgentes > (ant?.urgentes || 0)) aviso('🚨 Mensagem urgente na Entrada', true);
     }
     const editando = document.activeElement && $('#aba-relatorio').contains(document.activeElement);
-    if (S.estado.fichaVersao !== S.versao && !S.sujo && !S.salvando && !editando && !modalAberto()) {
-      await recarregarFicha();
+    if ((m.ficha !== S.versao || m.pendencias !== a.pendencias || m.operacoes !== a.operacoes) && !S.sujo && !S.salvando && !editando && livre) {
+      await carregarFicha();
+      if (S.aba === 'relatorio') desenharRelatorio();
     }
-  } catch (_) { /* sem conexão: tenta de novo no próximo ciclo */ }
+  } catch (_) { /* sem conexão: tenta no próximo ciclo */ }
 }
 
-async function recarregarFicha() {
-  const f = await api('GET', '/api/ficha');
-  S.ficha = f.ficha; S.versao = f.ficha.versao || 0; S.conferencia = f.conferencia;
-  desenharTopo();
-  if (S.aba === 'relatorio') desenharRelatorio();
-  if (S.aba === 'turno') desenharTurno();
+// ------------------------ Salvar a ficha (com mesclagem) ------------
+function mesclarLista(base = [], local = [], servidor = []) {
+  const idsBase = new Set(base.map(i => i.id));
+  const idsLocal = new Set(local.map(i => i.id));
+  return [...local, ...servidor.filter(i => !idsLocal.has(i.id) && !idsBase.has(i.id))];
 }
 
-// ------------------------ Salvar a ficha ----------------------------
+function mesclarFicha(base, local, servidor) {
+  const r = clone(servidor);
+  for (const k of ['turno', 'data', 'efetivo', 'vtr', 'sistemas', 'equipes']) {
+    if (JSON.stringify(local[k]) !== JSON.stringify(base[k])) r[k] = local[k];
+  }
+  r.atividades = mesclarLista(base.atividades, local.atividades, servidor.atividades);
+  r.ocorrencias = mesclarLista(base.ocorrencias, local.ocorrencias, servidor.ocorrencias);
+  r.navios = {
+    tore: mesclarLista(base.navios?.tore, local.navios?.tore, servidor.navios?.tore),
+    toil: mesclarLista(base.navios?.toil, local.navios?.toil, servidor.navios?.toil)
+  };
+  return r;
+}
+
 function agendarSalvar() {
   S.sujo = true;
   marcarEstadoSalvo('Salvando…');
@@ -274,192 +328,439 @@ function agendarSalvar() {
   S.timerSalvar = setTimeout(salvarFicha, 700);
 }
 
-async function salvarFicha() {
+async function salvarFicha(tentativa = 0) {
   clearTimeout(S.timerSalvar);
   if (S.salvando) { S.timerSalvar = setTimeout(salvarFicha, 300); return; }
   if (!S.sujo) return;
   S.salvando = true; S.sujo = false;
   try {
     const r = await api('PUT', '/api/ficha', { ficha: S.ficha, versao: S.versao });
-    S.versao = r.ficha.versao;
-    S.ficha.versao = r.ficha.versao;
-    S.ficha.atualizadoEm = r.ficha.atualizadoEm;
-    S.conferencia = r.conferencia;
+    S.versao = r.ficha.versao; S.ficha.versao = r.ficha.versao; S.ficha.atualizadoEm = r.ficha.atualizadoEm;
+    S.fichaBase = clone(r.ficha); S.conferencia = r.conferencia;
     marcarEstadoSalvo('Salvo ✓');
     desenharConferencia();
-    desenharTopo();
   } catch (e) {
-    if (e.status === 409) { aviso(e.message, true); await recarregarFicha(); }
-    else { S.sujo = true; marcarEstadoSalvo('Não salvo — tentando de novo'); S.timerSalvar = setTimeout(salvarFicha, 4000); }
+    if (e.status === 409 && e.dados?.ficha && tentativa < 2) {
+      // outra pessoa (ou o robô) mexeu ao mesmo tempo: junta as duas versões
+      const servidor = e.dados.ficha;
+      S.ficha = mesclarFicha(S.fichaBase, S.ficha, servidor);
+      S.versao = servidor.versao; S.fichaBase = clone(servidor);
+      S.salvando = false; S.sujo = true;
+      await salvarFicha(tentativa + 1);
+      if (S.aba === 'relatorio' && !(document.activeElement && $('#aba-relatorio').contains(document.activeElement))) desenharRelatorio();
+      return;
+    }
+    S.sujo = true; marcarEstadoSalvo('Não salvo — tentando de novo');
+    S.timerSalvar = setTimeout(salvarFicha, 4000);
   } finally { S.salvando = false; }
 }
 
 async function salvarAgora() {
-  S.sujo = true;
-  await salvarFicha();
+  if (S.sujo) await salvarFicha();
   while (S.salvando) await new Promise(r => setTimeout(r, 100));
 }
+function marcarEstadoSalvo(txt) { const e = $('#estado-salvo'); if (e) e.textContent = txt; }
 
-function marcarEstadoSalvo(txt) {
-  const e = $('#estado-salvo');
-  if (e) e.textContent = txt;
+async function alterarFicha(fn) {
+  await salvarAgora();
+  fn(S.ficha);
+  S.sujo = true;
+  await salvarFicha();
+  if (S.aba === 'relatorio') desenharRelatorio();
 }
 
-// Edita a ficha a partir de qualquer tela e salva na hora
-async function alterarFicha(fn) {
-  fn(S.ficha);
-  await salvarAgora();
+async function recarregarTudo() {
+  await Promise.all([carregarCentral(), carregarFicha(), carregarEntrada()]);
+  try { S.estado = await api('GET', '/api/estado'); } catch (_) {}
+  desenharTopo();
+  if (S.aba === 'central') desenharCentral();
+  if (S.aba === 'entrada') desenharEntrada();
   if (S.aba === 'relatorio') desenharRelatorio();
 }
 
 // =====================================================================
-// ABA 1 · TURNO
+// ABA 1 · CENTRAL DO PLANTÃO
 // =====================================================================
-function desenharTurno() {
-  const c = $('#aba-turno');
+function desenharCentral() {
+  const c = $('#aba-central');
+  const C = S.central, E = S.estado;
+  if (!C || !E) return;
   c.replaceChildren();
-  if (S.estado && !S.estado.configurado) {
-    c.append(el('div', { class: 'cartao' },
-      el('h2', { text: '👋 Falta configurar o WhatsApp' }),
-      el('p', { class: 'mudo', text: 'Conecte o aparelho e escolha o grupo da Equipe Azul para o robô começar a ler as mensagens e o relatório da US.' }),
-      el('div', {}, el('button', { class: 'btn primario', onclick: abrirConfig }, 'Abrir configurações'))
-    ));
+
+  // --- Plantão
+  const p = E.plantao;
+  if (!p.liderId) {
+    c.append(el('div', { class: 'faixa atencao' },
+      el('strong', { text: 'Ninguém assumiu o plantão' }),
+      el('p', { class: 'pequeno', text: 'Ao assumir, o relatório é publicado pelo seu WhatsApp e os e-mails de bordo chegam no seu e-mail.' }),
+      ehLider() ? el('div', {}, el('button', { class: 'btn primario', onclick: assumir }, '🙋 Assumir plantão')) : null));
+  } else {
+    c.append(el('div', { class: 'faixa' },
+      el('div', { class: 'cartao-topo' },
+        el('div', {},
+          el('h3', { class: 'mudo pequeno', text: 'PLANTÃO' }),
+          el('h2', { text: `${E.turno.turno} · ${E.turno.data}` }),
+          el('span', { class: 'mudo pequeno', text: `Líder: ${p.liderNome} · desde ${quando(p.assumidoEm)}` })),
+        ehLider() && !deplantao() ? el('button', { class: 'btn pequeno', onclick: assumir }, 'Assumir') : el('span', { class: 'etiqueta ok', text: deplantao() ? 'Você' : 'Ativo' })),
+      el('div', { class: 'contadores' },
+        contador(E.urgentes, 'Urgentes', () => { S.filtroEntrada = 'pendente'; trocarAba('entrada'); }, E.urgentes > 0),
+        contador(emailsPendentes().length, 'E-mails', () => { S.filtroPend = 'emails'; desenharCentral(); }, emailsPendentes().some(o => o.email?.status === 'ERRO')),
+        contador(E.pendentesEntrada, 'Na entrada', () => { S.filtroEntrada = 'pendente'; trocarAba('entrada'); }))));
   }
-  c.append(cartaoRelatorioUS(), cartaoMeuTurno());
+
+  // --- Sugestão de nova escala (só para o líder de plantão)
+  if (p.sugerirNovaEscala && deplantao()) {
+    c.append(el('div', { class: 'faixa info' },
+      el('strong', { text: '📦 Parece o primeiro turno da escala' }),
+      el('p', { class: 'pequeno', text: C.escala ? `A escala atual começou em ${C.escala.dataInicio}. Iniciar uma nova para coletar as informações desde hoje?` : 'Inicie a escala para o robô coletar as informações de todos os turnos até a passagem.' }),
+      el('div', { class: 'linha' },
+        el('button', { class: 'btn primario', onclick: async () => { await api('POST', '/api/escala/iniciar'); aviso('Nova escala iniciada ✓'); recarregarTudo(); } }, 'Iniciar nova escala'),
+        C.escala ? el('button', { class: 'btn fantasma', onclick: async () => { await api('POST', '/api/escala/continuar'); recarregarTudo(); } }, 'Continuar a atual') : null)));
+  }
+
+  // --- Relatório novo aguardando decisão
+  if (C.relatorioPendente) {
+    const r = C.relatorioPendente;
+    c.append(el('div', { class: 'faixa atencao' },
+      el('strong', { text: `📑 Chegou um relatório novo: ${r.dados.turno || ''} ${r.dados.data || ''} (${r.autor || ''})` }),
+      el('p', { class: 'pequeno', text: 'Seu turno atual ainda não foi publicado, por isso o robô não trocou sozinho.' }),
+      ehLider() ? el('div', { class: 'linha' },
+        el('button', { class: 'btn primario', onclick: () => herdar(r) }, 'Herdar agora'),
+        el('button', { class: 'btn fantasma', onclick: async () => { await api('POST', '/api/plantao/manter-turno'); recarregarTudo(); } }, 'Manter meu turno')) : null));
+  }
+
+  c.append(cartaoPassagemTurno(), cartaoPendencias());
+  c.append(el('div', { class: 'rodape-discreto' }, el('button', { onclick: abrirEscala }, '📦 Passagem da escala')));
 }
 
-function cartaoRelatorioUS() {
-  const r = S.relatorioUS;
-  if (!r) {
-    return el('div', { class: 'cartao' },
-      el('h2', { text: 'Relatório da equipe anterior' }),
-      el('p', { class: 'mudo', text: 'Quando o "RELATÓRIO DO TURNO" for postado no grupo, ele aparece aqui automaticamente. Se foi postado antes do robô ligar, cole o texto.' }),
-      el('div', {}, el('button', { class: 'btn', onclick: abrirColarRelatorio }, '📋 Colar relatório'))
-    );
+function contador(n, rotulo, onclick, alerta = false) {
+  return el('button', { class: `contador${alerta ? ' alerta' : ''}`, onclick }, el('strong', { text: String(n || 0) }), el('span', { text: rotulo }));
+}
+
+async function assumir() {
+  try {
+    await api('POST', '/api/plantao/assumir');
+    aviso('Plantão assumido ✓');
+    await recarregarTudo();
+  } catch (e) { aviso(e.message, true); }
+}
+
+function cartaoPassagemTurno() {
+  const f = S.central.ficha;
+  const h = f.herdadoDe;
+  const detalhes = el('div', { hidden: true, style: 'display:grid;gap:8px' });
+  if (h) {
+    detalhes.append(el('div', { class: 'linha' },
+      (h.encontrados || []).map(x => el('span', { class: 'etiqueta ok', text: '✓ ' + x })),
+      (h.faltando || []).map(x => el('span', { class: 'etiqueta atencao', text: '? ' + x }))));
+    const rel = S.central.relatorios.find(r => r.id === h.relatorioId);
+    if (rel) detalhes.append(el('div', { class: 'texto-bruto', text: rel.texto }));
   }
-  const d = r.dados;
-  const herdado = r.herdadoEm && r.herdadoEm >= r.capturadoEm;
-  const resumo = [
-    ['KM final da VTR', d.vtr.kmFinal != null ? d.vtr.kmFinal.toLocaleString('pt-BR') : '—'],
-    ['OCR', d.sistemas.ocrAssertividade ? `${d.sistemas.ocrAssertividade} · ${d.sistemas.ocrLeituras || '?'} leituras` : '—'],
-    ['Equipe assumindo', d.equipes.assumindo || '—']
-  ];
-  return el('div', { class: 'cartao' },
+  const total = h ? (h.encontrados || []).length + (h.faltando || []).length : 0;
+  return el('section', { class: 'cartao' },
     el('div', { class: 'cartao-topo' },
       el('div', {},
-        el('h3', { text: 'Relatório da equipe anterior' }),
-        el('h2', { text: `Turno ${d.turno || '?'} · ${d.data || 'sem data'}` }),
-        el('p', { class: 'mudo pequeno', style: 'margin:4px 0 0', text: `${r.manual ? 'Colado manualmente' : `Postado por ${r.autor || '?'}${r.grupoNome ? ' em ' + r.grupoNome : ''}`} · capturado ${quando(r.capturadoEm)}` })
-      ),
-      el('span', { class: `etiqueta ${herdado ? 'ok' : 'info'}`, text: herdado ? 'Já herdado' : 'Novo' })
-    ),
-    el('div', { class: 'grade-3' }, resumo.map(([k, v]) => el('div', {}, el('div', { class: 'mudo pequeno', text: k }), el('div', { text: v })))),
+        el('h3', { text: 'Passagem de turno' }),
+        el('h2', { text: h ? `Herdado de ${h.autor || 'equipe anterior'}` : 'Turno sem herança' }),
+        el('p', { class: 'mudo pequeno', style: 'margin:4px 0 0', text: h ? `Relatório ${h.turno || ''} ${h.data || ''} · capturado ${quando(h.capturadoEm)}` : 'Quando o relatório for postado no grupo, o robô prepara seu turno sozinho.' })),
+      h ? el('button', { class: `etiqueta ${(h.faltando || []).length ? 'atencao' : 'ok'}`, style: 'cursor:pointer', onclick: () => { detalhes.hidden = !detalhes.hidden; } },
+        (h.faltando || []).length ? `⚠ ${(h.faltando || []).length} faltando ▾` : `✓ ${total} de ${total} campos ▾`) : null),
+    detalhes,
     el('div', { class: 'linha' },
-      r.encontrados.map(x => el('span', { class: 'etiqueta ok', text: '✓ ' + x })),
-      r.faltando.map(x => el('span', { class: 'etiqueta atencao', text: '? ' + x }))
-    ),
-    r.faltando.length ? el('p', { class: 'mudo pequeno', style: 'margin:0', text: 'Os itens com "?" não foram encontrados no texto — confira e preencha no Relatório depois de herdar.' }) : null,
-    el('details', {}, el('summary', { class: 'mudo pequeno', style: 'cursor:pointer', text: 'Ver texto original' }), el('div', { class: 'texto-bruto', style: 'margin-top:8px', text: r.texto })),
-    el('div', { class: 'linha' },
-      el('button', { class: 'btn primario', onclick: herdar }, herdado ? 'Herdar novamente' : '📥 Herdar e começar meu turno'),
-      el('button', { class: 'btn fantasma', onclick: abrirColarRelatorio }, 'Colar outro')
-    )
+      S.central.relatorios.length ? el('button', { class: 'btn pequeno', onclick: escolherRelatorio }, '🔄 Escolher relatório') : null,
+      el('button', { class: 'btn fantasma pequeno', onclick: abrirColarRelatorio }, '📋 Colar relatório'),
+      ehLider() ? el('button', { class: 'btn fantasma pequeno', onclick: novaEmBranco }, 'Turno em branco') : null)
   );
 }
 
-async function herdar() {
-  const d = S.relatorioUS.dados;
-  const novoTurno = d.turno ? (d.turno === 'DIURNO' ? 'NOTURNO' : 'DIURNO') : 'conforme o horário';
-  const ok = await confirmar('Herdar o relatório?', [
-    el('p', { text: `Vai começar um turno ${novoTurno} novo com:` }),
+function escolherRelatorio() {
+  const lista = S.central.relatorios.map(r => el('div', { class: 'usuario-card' },
+    el('div', { class: 'cartao-topo' },
+      el('div', {}, el('strong', { text: `${r.dados.turno || '?'} · ${r.dados.data || 'sem data'}` }),
+        el('div', { class: 'mudo pequeno', text: `${r.manual ? 'Colado manualmente' : r.autor} · ${quando(r.capturadoEm)}` })),
+      r.herdadoEm ? el('span', { class: 'etiqueta ok', text: 'herdado' }) : null),
+    el('details', {}, el('summary', { class: 'mudo pequeno', style: 'cursor:pointer', text: 'Ver texto' }), el('div', { class: 'texto-bruto', style: 'margin-top:6px', text: r.texto })),
+    ehLider() ? el('div', {}, el('button', { class: 'btn primario pequeno', onclick: () => herdar(r) }, 'Herdar este')) : null));
+  abrirModal('Relatórios capturados (últimos 10)', lista);
+}
+
+async function herdar(r) {
+  const d = r.dados;
+  const ok = await confirmar('Herdar este relatório?', [
+    el('p', { text: `Turno ${d.turno || '?'} de ${d.data || '?'} (${r.autor || 'equipe anterior'}). Vai começar o próximo turno com:` }),
     el('ul', { style: 'margin:0;padding-left:20px' },
       el('li', { text: `KM inicial da VTR: ${d.vtr.kmFinal != null ? d.vtr.kmFinal.toLocaleString('pt-BR') : 'não encontrado'}` }),
-      el('li', { text: 'Sistemas (CFTV, CA, OCR) e navios do relatório anterior' }),
-      el('li', { text: 'Avisos em aberto mantidos; atividades e ocorrências zeradas' }),
-      el('li', { text: `Equipe saindo: ${d.equipes.assumindo || '(preencher)'}` })
-    ),
-    el('p', { class: 'mudo pequeno', text: 'O turno atual vai para o histórico.' })
+      el('li', { text: 'Sistemas e navios do relatório; avisos viram pendências' }),
+      el('li', { text: `Equipe saindo: ${d.equipes.assumindo || '(preencher)'}` })),
+    el('p', { class: 'mudo pequeno', text: 'O turno atual vai para o histórico e para a coleta da escala.' })
   ], 'Herdar');
   if (!ok) return;
   try {
-    const r = await api('POST', '/api/ficha/herdar');
-    S.ficha = r.ficha; S.versao = r.ficha.versao;
-    S.relatorioUS = (await api('GET', '/api/relatorio-us')).relatorio;
-    const f = await api('GET', '/api/ficha'); S.conferencia = f.conferencia;
-    desenharTopo();
+    await api('POST', '/api/ficha/herdar', { relatorioId: r.id });
     aviso('Turno iniciado com os dados herdados ✓');
-    trocarAba('relatorio');
+    await recarregarTudo();
   } catch (e) { aviso(e.message, true); }
 }
 
 function abrirColarRelatorio() {
-  const txt = el('textarea', { rows: 12, placeholder: 'Cole aqui o texto completo do "RELATÓRIO DO TURNO"…', autofocus: true });
-  abrirModal('Colar relatório da equipe anterior', [
-    el('p', { class: 'mudo pequeno', text: 'Use quando o relatório foi postado antes do robô ligar, ou em outro grupo.' }), txt
-  ], [
-    el('button', { class: 'btn fantasma', 'data-fechar': true }, 'Cancelar'),
-    el('button', {
-      class: 'btn primario', onclick: async () => {
-        try {
-          S.relatorioUS = (await api('POST', '/api/relatorio-us', { texto: txt.value })).relatorio;
-          fecharModal(); desenharTurno(); aviso('Relatório lido ✓');
-        } catch (e) { aviso(e.message, true); }
-      }
-    }, 'Ler relatório')
-  ]);
-}
-
-function cartaoMeuTurno() {
-  const f = S.ficha;
-  const ki = f.vtr?.kmInicial, kf = f.vtr?.kmFinal;
-  const stats = [
-    ['KM rodados', ki != null && kf != null ? Math.max(0, kf - ki) : '—'],
-    ['Atividades', (f.atividades || []).length],
-    ['Ocorrências', (f.ocorrencias || []).length],
-    ['Avisos', (f.avisos || []).length],
-    ['Operações abertas', operacoesAbertas().length],
-    ['Entrada pendente', S.estado?.pendentes ?? 0]
-  ];
-  return el('div', { class: 'cartao' },
-    el('div', { class: 'cartao-topo' },
-      el('div', {},
-        el('h3', { text: 'Meu turno' }),
-        el('h2', { text: `${f.turno} · ${f.data}` }),
-        el('p', { class: 'mudo pequeno', style: 'margin:4px 0 0', text: f.herdadoDe ? `Herdado do turno ${f.herdadoDe.turno || ''} ${f.herdadoDe.data || ''} (${f.herdadoDe.autor || 'equipe anterior'})` : 'Turno sem herança' })
-      ),
-      el('span', { class: `etiqueta ${f.publicadoEm ? 'ok' : ''}`, text: f.publicadoEm ? `Publicado ${quando(f.publicadoEm)}` : 'Não publicado' })
-    ),
-    el('div', { class: 'grade-3' }, stats.map(([k, v]) => el('div', {}, el('div', { class: 'destaque', text: v }), el('div', { class: 'mudo pequeno', text: k })))),
-    S.conferencia.length ? el('div', { class: 'alertas' }, S.conferencia.map(a => el('div', { text: '• ' + a }))) : null,
-    el('div', { class: 'linha' },
-      el('button', { class: 'btn primario', onclick: () => trocarAba('relatorio') }, 'Abrir relatório'),
-      el('button', { class: 'btn', onclick: () => trocarAba('entrada') }, 'Ver entrada'),
-      el('button', { class: 'btn fantasma', onclick: novaEmBranco }, 'Começar turno em branco')
-    )
-  );
+  const [, txt] = campoTexto('', '', { linhas: 12, placeholder: 'Cole aqui o texto completo do "RELATÓRIO DO TURNO"…', autofocus: true });
+  abrirModal('Colar relatório da equipe anterior', [el('p', { class: 'mudo pequeno', text: 'Use quando o relatório foi postado com o robô desligado ou em outro grupo.' }), txt], botoesSalvar(async () => {
+    const r = await api('POST', '/api/relatorios', { texto: txt.value });
+    fecharModal();
+    await carregarCentral();
+    if (ehLider()) herdar(r.relatorio); else { aviso('Relatório lido ✓ — um líder pode herdá-lo.'); desenharCentral(); }
+  }, 'Ler relatório'));
 }
 
 async function novaEmBranco() {
-  const ok = await confirmar('Começar um turno em branco?', 'O turno atual vai para o histórico. Mantém os avisos em aberto e o KM final como KM inicial.', 'Começar');
-  if (!ok) return;
+  if (!await confirmar('Começar um turno em branco?', 'O turno atual vai para o histórico. O KM final vira KM inicial e os navios continuam.', 'Começar')) return;
+  try { await api('POST', '/api/ficha/nova'); await recarregarTudo(); trocarAba('relatorio'); } catch (e) { aviso(e.message, true); }
+}
+
+// ------------------------------ Pendências --------------------------
+function emailsPendentes() {
+  return (S.central?.operacoes || []).filter(o => o.horaFinal && !o.email?.encaminhadoEm);
+}
+
+function itensPendentes() {
+  const C = S.central;
+  const itens = [];
+  for (const p of C.pendencias.filter(x => x.status === 'ABERTA')) {
+    itens.push({
+      grupo: p.tipo === 'DIGITAL' ? 'digital' : 'avisos', ic: p.tipo === 'DIGITAL' ? '🛠️' : '📌', tit: p.titulo || p.texto,
+      sub: `${p.tipo === 'DIGITAL' ? 'Digital' : 'Aviso'} · aberto há ${p.turnosAberto} turno${p.turnosAberto > 1 ? 's' : ''}${p.historico.length > 1 ? ` · ${p.historico.length - 1} atualização(ões)` : ''}`,
+      abrir: () => abrirPendencia(p)
+    });
+  }
+  for (const o of C.operacoes.filter(x => !x.horaFinal)) {
+    itens.push({ grupo: 'operacoes', ic: '🚢', tit: `${o.rotuloTipo} · ${o.navio || 'navio?'}`, sub: `Em andamento desde ${o.horaInicial || '?'}${o.placa ? ' · ' + o.placa : ''}`, abrir: () => abrirOperacao(o) });
+  }
+  for (const o of emailsPendentes()) {
+    const st = o.email?.status;
+    const sub = st === 'ENVIADO' ? `Enviado ao líder ${quando(o.email.enviadoEm)} · falta encaminhar`
+      : st === 'ERRO' ? `Falha no envio: ${o.email.erro}` : st === 'SEM_CONTA' ? 'E-mail do robô não configurado · gerar manualmente' : 'Aguardando envio';
+    itens.push({ grupo: 'emails', ic: '✉️', tit: `E-mail · ${o.rotuloTipo} · ${o.navio || ''}`, sub, erro: st === 'ERRO', abrir: () => abrirEmail(o) });
+  }
+  return itens;
+}
+
+function cartaoPendencias() {
+  const itens = itensPendentes();
+  const filtros = [['todas', 'Todas'], ['avisos', 'Avisos'], ['digital', 'Digital'], ['operacoes', 'Operações'], ['emails', 'E-mails']];
+  const visiveis = itens.filter(i => S.filtroPend === 'todas' || i.grupo === S.filtroPend);
+  const concluidas = S.central.pendencias.filter(p => p.status === 'CONCLUIDA');
+  return el('section', { class: 'cartao' },
+    el('div', { class: 'cartao-topo' }, el('h2', { text: `Pendências (${itens.length})` }),
+      el('div', { class: 'linha' },
+        el('button', { class: 'btn pequeno', onclick: () => novaPendencia('AVISO') }, '+ Aviso'),
+        el('button', { class: 'btn pequeno', onclick: () => novaPendencia('DIGITAL') }, '+ Digital'))),
+    el('div', { class: 'filtros' }, filtros.map(([v, t]) => {
+      const n = v === 'todas' ? itens.length : itens.filter(i => i.grupo === v).length;
+      return el('button', { class: 'filtro' + (S.filtroPend === v ? ' ativo' : ''), onclick: () => { S.filtroPend = v; desenharCentral(); } }, `${t}${n ? ` (${n})` : ''}`);
+    })),
+    visiveis.length
+      ? el('div', { class: 'lista-pend' }, visiveis.map(i => el('button', { class: `pend${i.erro ? ' erro' : ''}`, onclick: i.abrir },
+        el('span', { class: 'ic', text: i.ic }), el('span', { style: 'min-width:0' }, el('div', { class: 'tit', text: i.tit }), el('div', { class: 'sub', text: i.sub })), el('span', { class: 'seta', text: '›' }))))
+      : el('div', { class: 'vazio' }, el('span', { class: 'ic', text: '✅' }), 'Nada pendente aqui.'),
+    concluidas.length ? el('details', {},
+      el('summary', { class: 'mudo pequeno', style: 'cursor:pointer', text: `Concluídas nas últimas 24h (${concluidas.length})` }),
+      el('div', { class: 'lista-pend', style: 'margin-top:8px' }, concluidas.map(p => el('button', { class: 'pend concluida', onclick: () => abrirPendencia(p) },
+        el('span', { class: 'ic', text: '✓' }), el('span', { style: 'min-width:0' }, el('div', { class: 'tit', text: p.titulo }), el('div', { class: 'sub', text: `${p.concluidoPor?.nome || ''}: ${p.tratativa || ''}` })), el('span', { class: 'seta', text: '›' }))))) : null
+  );
+}
+
+function novaPendencia(tipo, inicial = {}, entradaId = null) {
+  const [c1, ti] = campoLinha('Título (assunto curto)', inicial.titulo || '', { placeholder: tipo === 'DIGITAL' ? 'Ex.: CÂMERA POSTE 12 OSCILANDO' : 'Ex.: BAGAGENS RETIDAS NA RFB – T-OIL', autofocus: true });
+  const [c2, tx] = campoTexto('Descrição / o que acompanhar', inicial.texto || '');
+  abrirModal(tipo === 'DIGITAL' ? '🛠️ Nova pendência da Digital' : '📌 Novo aviso', [
+    inicial.citacao ? el('div', { class: 'citacao', text: inicial.citacao }) : null, c1, c2,
+    el('p', { class: 'mudo pequeno', style: 'margin:0', text: tipo === 'DIGITAL' ? 'Fica na Central até ser concluída e entra na passagem da escala.' : 'Aparece na seção 5 do relatório até alguém concluir com a tratativa.' })
+  ], botoesSalvar(async () => {
+    await api('POST', '/api/pendencias', { tipo, titulo: ti.value, texto: tx.value, entradaId });
+    fecharModal(); aviso('Pendência criada ✓'); await recarregarTudo();
+  }, 'Criar'));
+}
+
+function abrirPendencia(p) {
+  const aberta = p.status === 'ABERTA';
+  const linhaTempo = el('div', { class: 'linha-tempo' }, p.historico.map(h => el('div', { class: `evento ${h.tipo}` },
+    el('div', { class: 'meta', text: `${h.data} ${h.hora}h · ${h.por} · ${h.tipo === 'CRIACAO' ? 'criou' : h.tipo === 'CONCLUSAO' ? 'concluiu' : 'atualizou'}` }),
+    h.texto ? el('div', { text: h.texto }) : null)));
+  const acao = async (fn, msg) => { try { await fn(); fecharModal(); aviso(msg); await recarregarTudo(); } catch (e) { aviso(e.message, true); } };
+
+  const atualizar = () => {
+    const [c, t] = campoTexto('Nova atualização', '', { autofocus: true, placeholder: 'Ex.: Receita informou liberação prevista para amanhã às 10h.' });
+    abrirModal(`Atualizar · ${p.titulo}`, [c], botoesSalvar(() => acao(() => api('POST', `/api/pendencias/${p.id}/atualizar`, { texto: t.value }), 'Atualização registrada ✓'), 'Registrar'));
+  };
+  const concluir = () => {
+    const [c, t] = campoTexto('Tratativa (o que foi feito)', '', { autofocus: true, placeholder: 'Ex.: Chaves entregues ao Sr. X às 21h.' });
+    const chk = el('input', { type: 'checkbox', checked: true });
+    abrirModal(`Concluir · ${p.titulo}`, [c, el('label', { class: 'check' }, chk, 'Registrar também nas Atividades do turno')],
+      botoesSalvar(() => acao(() => api('POST', `/api/pendencias/${p.id}/concluir`, { tratativa: t.value, registrarAtividade: chk.checked }), 'Pendência concluída ✓'), 'Concluir', 'verde'));
+  };
+  const editar = () => {
+    const [c1, ti] = campoLinha('Título', p.titulo);
+    const [c2, tx] = campoTexto('Descrição', p.texto);
+    const tipo = el('select', {}, el('option', { value: 'AVISO', text: 'Aviso (seção 5)' }), el('option', { value: 'DIGITAL', text: 'Pendência da Digital' }));
+    tipo.value = p.tipo;
+    abrirModal('Editar pendência', [c1, c2, el('label', { class: 'campo' }, 'Tipo', tipo)],
+      botoesSalvar(() => acao(() => api('PUT', `/api/pendencias/${p.id}`, { titulo: ti.value, texto: tx.value, tipo: tipo.value }), 'Pendência atualizada ✓')));
+  };
+
+  abrirModal(p.titulo || 'Pendência', [
+    el('div', { class: 'linha' },
+      el('span', { class: `etiqueta ${p.tipo === 'DIGITAL' ? 'info' : 'atencao'}`, text: p.tipo === 'DIGITAL' ? '🛠️ Digital' : '📌 Aviso' }),
+      el('span', { class: `etiqueta ${aberta ? '' : 'ok'}`, text: aberta ? `Aberta há ${p.turnosAberto} turno(s)` : 'Concluída' })),
+    p.texto ? el('div', { class: 'citacao', text: p.texto }) : null,
+    p.origem ? el('p', { class: 'mudo pequeno', style: 'margin:0', text: `Origem: ${p.origem}` }) : null,
+    !aberta && p.tratativa ? el('div', { class: 'alertas', style: 'background:#0f2a1d;border-color:#1d4d33;color:#86efac' }, el('strong', { text: 'Tratativa: ' }), p.tratativa) : null,
+    el('h3', { text: 'Histórico' }), linhaTempo
+  ], aberta ? [
+    ehLider() ? el('button', { class: 'btn fantasma pequeno', onclick: async () => { if (await confirmar('Excluir pendência?', 'Use só para registros feitos por engano. Para dar baixa, use "Concluir".', 'Excluir', true)) acao(() => api('POST', `/api/pendencias/${p.id}/excluir`), 'Excluída'); } }, 'Excluir') : null,
+    el('button', { class: 'btn', onclick: editar }, 'Editar'),
+    el('button', { class: 'btn', onclick: atualizar }, 'Atualizar'),
+    el('button', { class: 'btn verde', onclick: concluir }, '✓ Concluir')
+  ] : [el('button', { class: 'btn', onclick: () => acao(() => api('POST', `/api/pendencias/${p.id}/reabrir`), 'Reaberta') }, 'Reabrir')]);
+}
+
+// ---------------------- Operações de bordo e e-mail ------------------
+function abrirOperacao(o) {
+  const linhas = [
+    ['Tipo', o.rotuloTipo], ['Navio', o.navio], ['Terminal', o.terminal],
+    o.tipo === 'TRIPULACAO' ? ['Tripulantes', `${o.movimento || ''} · ${o.quantidade || '?'}`] : null,
+    ['Empresa', o.empresa], ['Motorista', o.responsavel], ['Ajudante', o.ajudante], ['Veículo', `${o.veiculo || ''} ${o.placa || ''}`.trim()],
+    ['Entrada', o.horaInicial ? o.horaInicial + 'h' : '—'], ['Saída', o.horaFinal ? o.horaFinal + 'h' : 'aguardando']
+  ].filter(x => x && x[1]);
+  abrirModal(`${o.rotuloTipo} · ${o.navio || ''}`, [
+    el('div', { class: 'grade-2' }, linhas.map(([k, v]) => el('div', {}, el('div', { class: 'mudo pequeno', text: k }), el('div', { text: v })))),
+    o.origem?.autor ? el('p', { class: 'mudo pequeno', style: 'margin:0', text: `Informado por ${o.origem.autor} no grupo.` }) : null
+  ], [
+    el('button', { class: 'btn fantasma pequeno', onclick: async () => {
+      if (await confirmar('Excluir operação?', `${o.rotuloTipo} · ${o.navio}`, 'Excluir', true)) {
+        try { await api('POST', `/api/operacoes/${o.id}/excluir`); fecharModal(); await recarregarTudo(); } catch (e) { aviso(e.message, true); }
+      }
+    } }, 'Excluir'),
+    el('button', { class: 'btn', onclick: () => abrirFormOperacao(o) }, 'Editar'),
+    o.horaFinal ? el('button', { class: 'btn primario', onclick: () => abrirEmail(o) }, '✉️ E-mail') : el('button', { class: 'btn verde', onclick: () => registrarSaida(o) }, '🏁 Registrar saída')
+  ]);
+}
+
+function registrarSaida(o, entrada = null) {
+  const [c, h] = campoLinha('Horário de saída', entrada?.campos?.hora || agoraBR().hora, { autofocus: true, placeholder: 'HH:MM' });
+  abrirModal('🏁 Registrar saída', [el('div', { class: 'citacao', text: `${o.rotuloTipo} · ${o.navio || ''}${o.placa ? ' · ' + o.placa : ''}` }), c,
+    el('p', { class: 'mudo pequeno', text: 'Com a saída registrada, o e-mail da operação é enviado ao líder de plantão.' })],
+  botoesSalvar(async () => {
+    await api('POST', `/api/operacoes/${o.id}/saida`, { hora: h.value, entradaId: entrada?.id });
+    fecharModal(); aviso('Saída registrada ✓'); await recarregarTudo();
+  }, 'Registrar', 'verde'));
+}
+
+async function abrirEmail(o) {
   try {
-    const r = await api('POST', '/api/ficha/nova');
-    S.ficha = r.ficha; S.versao = r.ficha.versao;
-    await recarregarFicha();
-    trocarAba('relatorio');
+    const m = await api('GET', `/api/operacoes/${o.id}/email`);
+    const [cPara, iPara] = campoLinha('Encaminhar para', m.para, { placeholder: 'Defina os destinatários em Configurações' });
+    const [cCc, iCc] = campoLinha('Cópia (Cc)', m.cc);
+    const [cAss, iAss] = campoLinha('Assunto', m.assunto);
+    const [cCorpo, tCorpo] = campoTexto('Mensagem', m.corpo, { linhas: 14 });
+    const st = m.status || {};
+    const situacao = st.status === 'ENVIADO' ? `✓ Enviado para ${st.para} ${quando(st.enviadoEm)}` :
+      st.status === 'ERRO' ? `⚠ Falha no envio automático: ${st.erro}` : !m.emailAtivo ? 'E-mail do robô não configurado: use os botões abaixo.' : 'Ainda não enviado.';
+    const q = (k, v) => v ? `${k}=${encodeURIComponent(v)}` : '';
+    const marcar = campo => api('POST', `/api/operacoes/${o.id}/marcar`, { campo }).catch(() => {});
+    abrirModal('✉️ E-mail da operação', [
+      el('div', { class: `etiqueta ${st.status === 'ENVIADO' ? 'ok' : st.status === 'ERRO' ? 'urgente' : 'atencao'}`, style: 'white-space:normal' , text: situacao }),
+      cPara, cCc, cAss, cCorpo,
+      el('p', { class: 'mudo pequeno', text: 'Confira, anexe as evidências e envie para a lista oficial. Depois toque em "Encaminhado".' })
+    ], [
+      el('button', { class: 'btn', onclick: () => copiar(`Assunto: ${iAss.value}\n\n${tCorpo.value}`) }, '📋 Copiar'),
+      el('button', { class: 'btn', onclick: () => { marcar('abertoEm'); window.open(`https://outlook.office.com/mail/deeplink/compose?${[q('to', iPara.value), q('cc', iCc.value), q('subject', iAss.value), q('body', tCorpo.value)].filter(Boolean).join('&')}`, '_blank', 'noopener'); } }, '🌐 Outlook Web'),
+      el('button', { class: 'btn', onclick: () => { marcar('abertoEm'); location.href = `mailto:${iPara.value.replace(/\s/g, '')}?${[q('cc', iCc.value), q('subject', iAss.value), q('body', tCorpo.value)].filter(Boolean).join('&')}`; } }, '📧 App de e-mail'),
+      m.emailAtivo ? el('button', { class: 'btn', onclick: async () => { try { await api('POST', `/api/operacoes/${o.id}/enviar-email`); aviso('Reenviado ao líder ✓'); fecharModal(); recarregarTudo(); } catch (e) { aviso(e.message, true); } } }, '↻ Reenviar ao líder') : null,
+      el('button', { class: 'btn verde', onclick: async () => { await marcar('encaminhadoEm'); fecharModal(); aviso('Marcado como encaminhado ✓'); recarregarTudo(); } }, '✓ Encaminhado')
+    ]);
   } catch (e) { aviso(e.message, true); }
 }
 
+// Formulário de operação: criando (vários navios → um e-mail por navio) ou editando
+function abrirFormOperacao(op = {}, ctx = {}) {
+  const editando = !!op.id;
+  const v = { ...op };
+  const tipos = S.meta.tipos;
+  const tipo = el('select', {}, Object.entries(tipos).map(([k, t]) => el('option', { value: k, text: t.rotulo })));
+  tipo.value = v.tipo || 'RANCHO';
+  const terminal = el('select', {}, ['', 'T-ORE', 'T-OIL'].map(t => el('option', { value: t, text: t || '—' })));
+  terminal.value = v.terminal || '';
+  const movimento = el('select', {}, ['', ...S.meta.movimentos].map(t => el('option', { value: t, text: t || '—' })));
+  movimento.value = v.movimento || '';
+
+  const L = (r, k, ph) => campoLinha(r, v[k], { placeholder: ph });
+  const naviosIniciais = ctx.navios || (v.navio ? [v.navio] : []);
+  const [cNavio, iNavio] = editando ? L('Navio', 'navio') : campoTexto('Navio(s) — um por linha · cada navio gera o seu e-mail', naviosIniciais.join('\n'), { linhas: 2, placeholder: 'BARCELONA SPIRIT' });
+  const [cEmp, iEmp] = L('Empresa / agência / fornecedor', 'empresa');
+  const [cResp, iResp] = L('Motorista / agente', 'responsavel');
+  const [cAju, iAju] = L('Ajudante', 'ajudante');
+  const [cVei, iVei] = L('Veículo', 'veiculo', 'CAMINHÃO, VAN…');
+  const [cPla, iPla] = L('Placa', 'placa', 'ABC-1D23');
+  const [cQtd, iQtd] = L('Quantos tripulantes', 'quantidade', '03');
+  const [cHi, iHi] = L('Horário inicial', 'horaInicial', 'HH:MM');
+  const [cHf, iHf] = L('Horário final (saída)', 'horaFinal', 'vazio = em andamento');
+  const autoridade = el('input', { type: 'text', value: v.autoridades || '', placeholder: tipos[tipo.value]?.autoridade });
+  const [cObs, iObs] = campoTexto('Observações', v.observacoes, { linhas: 2, placeholder: 'S/A' });
+
+  const tripulacao = el('div', { class: 'grade-2' }, cQtd, el('label', { class: 'campo' }, 'Movimento', movimento));
+  const ajustar = () => { tripulacao.hidden = tipo.value !== 'TRIPULACAO'; autoridade.placeholder = tipos[tipo.value]?.autoridade || ''; };
+  tipo.addEventListener('change', ajustar); ajustar();
+
+  let chkAtiv = null, txtAtiv = null;
+  const extras = [];
+  if (ctx.item) {
+    chkAtiv = el('input', { type: 'checkbox', checked: true });
+    [, txtAtiv] = campoTexto('', ctx.atividade || ctx.item.texto, { linhas: 2 });
+    extras.push(el('label', { class: 'check' }, chkAtiv, 'Registrar também nas Atividades (seção 4)'), txtAtiv);
+    chkAtiv.addEventListener('change', () => { txtAtiv.hidden = !chkAtiv.checked; });
+  }
+
+  abrirModal(editando ? 'Editar operação de bordo' : '✉️ Operação de bordo', [
+    ctx.citacao || null,
+    el('div', { class: 'grade-2' }, el('label', { class: 'campo' }, 'Tipo', tipo), el('label', { class: 'campo' }, 'Terminal', terminal)),
+    cNavio, tripulacao,
+    el('div', { class: 'grade-2' }, cHi, cHf),
+    cEmp, el('div', { class: 'grade-2' }, cResp, cAju),
+    el('div', { class: 'grade-2' }, cVei, cPla),
+    el('label', { class: 'campo' }, 'Autorizado por (Autoridades)', autoridade),
+    cObs, ...extras,
+    el('p', { class: 'mudo pequeno', style: 'margin:0', text: 'Com o horário de saída preenchido, o e-mail é enviado ao líder de plantão.' })
+  ], botoesSalvar(async () => {
+    const dados = {
+      tipo: tipo.value, terminal: terminal.value, quantidade: iQtd.value, movimento: movimento.value,
+      empresa: iEmp.value, responsavel: iResp.value, ajudante: iAju.value, veiculo: iVei.value, placa: iPla.value,
+      horaInicial: iHi.value, horaFinal: iHf.value, autoridades: autoridade.value, observacoes: iObs.value
+    };
+    if (editando) {
+      await api('PUT', `/api/operacoes/${op.id}`, { ...dados, navio: iNavio.value });
+    } else {
+      const navios = iNavio.value.split('\n').map(s => s.trim()).filter(Boolean);
+      if (!navios.length) throw new Error('Informe o navio.');
+      await api('POST', '/api/operacoes', {
+        operacoes: navios.map(n => ({ ...dados, navio: n })),
+        atividadeTexto: chkAtiv?.checked ? txtAtiv.value.trim() : '',
+        entradaId: ctx.item?.id || null, autor: ctx.item?.autor || ''
+      });
+    }
+    fecharModal(); aviso(editando ? 'Operação atualizada ✓' : 'Operação registrada ✓');
+    await recarregarTudo();
+  }, editando ? 'Salvar' : 'Registrar'));
+}
+
 // =====================================================================
-// ABA 2 · ENTRADA (mensagens do grupo para triagem)
+// ABA 2 · ENTRADA
 // =====================================================================
 function desenharEntrada() {
   const c = $('#aba-entrada');
   const cont = s => S.entrada.filter(i => i.status === s).length;
   const filtros = [['pendente', `Pendentes (${cont('pendente')})`], ['usado', 'Tratadas'], ['ignorado', 'Ignoradas'], ['todas', 'Todas']];
   c.replaceChildren(
-    el('div', { class: 'filtros' }, filtros.map(([v, t]) =>
-      el('button', { class: 'filtro' + (S.filtro === v ? ' ativo' : ''), onclick: () => { S.filtro = v; desenharEntrada(); } }, t))),
+    el('div', { class: 'filtros' }, filtros.map(([v, t]) => el('button', { class: 'filtro' + (S.filtroEntrada === v ? ' ativo' : ''), onclick: () => { S.filtroEntrada = v; desenharEntrada(); } }, t))),
     el('input', { type: 'search', placeholder: 'Buscar por navio, placa, nome…', value: S.busca, oninput: e => { S.busca = e.target.value; desenharListaEntrada(); } }),
     el('div', { id: 'lista-entrada', class: 'lista' })
   );
@@ -471,17 +772,18 @@ function desenharListaEntrada() {
   if (!box) return;
   const termo = semAcento(S.busca).toLowerCase().trim();
   const itens = S.entrada
-    .filter(i => S.filtro === 'todas' || i.status === S.filtro)
+    .filter(i => S.filtroEntrada === 'todas' || i.status === S.filtroEntrada)
     .filter(i => !termo || semAcento(`${i.texto} ${i.autor} ${i.grupoNome}`).toLowerCase().includes(termo))
-    .sort((a, b) => (S.filtro === 'pendente' ? (b.urgente - a.urgente) : 0) || b.ts - a.ts);
+    .sort((a, b) => (S.filtroEntrada === 'pendente' ? (b.urgente - a.urgente) : 0) || b.ts - a.ts);
   if (!itens.length) {
-    const msg = !S.estado?.configurado ? 'Escolha os grupos em Configurações para começar a receber mensagens.'
-      : S.filtro === 'pendente' ? 'Nada pendente. As mensagens operacionais do grupo aparecem aqui.' : 'Nenhuma mensagem aqui.';
+    const msg = S.filtroEntrada === 'pendente' ? 'Nada pendente. Mensagens no formato padrão (provisão, tripulantes) são registradas sozinhas e aparecem em "Tratadas".' : 'Nenhuma mensagem aqui.';
     box.replaceChildren(el('div', { class: 'vazio' }, el('span', { class: 'ic', text: '📭' }), msg));
     return;
   }
   box.replaceChildren(...itens.slice(0, 150).map(cartaoMensagem));
 }
+
+const operacoesAbertas = () => (S.central?.operacoes || []).filter(o => !o.horaFinal);
 
 function cartaoMensagem(item) {
   const hoje = agoraBR().data;
@@ -492,36 +794,30 @@ function cartaoMensagem(item) {
     acoes.push(
       el('button', { class: 'btn fantasma pequeno', onclick: () => marcarItem(item, 'ignorado') }, 'Ignorar'),
       el('button', { class: 'btn pequeno', onclick: () => escolherDestino(item) }, 'Outro destino'),
-      el('button', { class: 'btn primario pequeno', onclick: () => abrirDestino(item, sug) }, `${DESTINOS[sug].ic} ${DESTINOS[sug].rotulo}`)
-    );
+      el('button', { class: 'btn primario pequeno', onclick: () => abrirDestino(item, sug) }, `${DESTINOS[sug].ic} ${DESTINOS[sug].rotulo}`));
   } else if (item.status === 'usado') {
-    acoes.push(
-      el('button', { class: 'btn fantasma pequeno', onclick: () => marcarItem(item, 'pendente') }, 'Voltar p/ pendentes'),
-      el('button', { class: 'btn pequeno', onclick: () => escolherDestino(item) }, 'Usar de novo')
-    );
+    acoes.push(el('button', { class: 'btn fantasma pequeno', onclick: () => marcarItem(item, 'pendente') }, 'Voltar p/ pendentes'),
+      el('button', { class: 'btn pequeno', onclick: () => escolherDestino(item) }, 'Usar de novo'));
   } else {
     acoes.push(el('button', { class: 'btn pequeno', onclick: () => marcarItem(item, 'pendente') }, 'Restaurar'));
   }
   return el('article', { class: `msg${item.urgente && item.status === 'pendente' ? ' urgente' : ''}${item.status !== 'pendente' ? ' tratada' : ''}` },
     el('div', { class: 'msg-topo' },
       el('span', {}, el('strong', { text: item.autor || 'Sem nome' }), item.grupoNome ? ` · ${item.grupoNome}` : ''),
-      el('span', { text: `${item.data !== hoje ? item.data.slice(0, 5) + ' ' : ''}${item.hora}` })
-    ),
+      el('span', { text: `${item.data !== hoje ? item.data.slice(0, 5) + ' ' : ''}${item.hora}` })),
     (item.urgente || item.editado || item.destino) ? el('div', { class: 'linha' },
       item.urgente ? el('span', { class: 'etiqueta urgente', text: '🚨 Possível emergência' }) : null,
       item.editado ? el('span', { class: 'etiqueta', text: 'editada' }) : null,
-      item.destino ? el('span', { class: 'etiqueta ok', text: '→ ' + item.destino }) : null
-    ) : null,
+      item.destino ? el('span', { class: 'etiqueta ok', text: '→ ' + item.destino }) : null) : null,
     el('div', { class: 'msg-texto', text: item.texto }),
-    el('div', { class: 'msg-acoes' }, acoes)
-  );
+    el('div', { class: 'msg-acoes' }, acoes));
 }
 
 async function marcarItem(item, status, destino) {
   try {
     const r = await api('POST', `/api/entrada/${encodeURIComponent(item.id)}`, { status, destino });
     Object.assign(item, r.item);
-    S.estado.pendentes = S.entrada.filter(i => i.status === 'pendente').length;
+    S.estado.pendentesEntrada = S.entrada.filter(i => i.status === 'pendente').length;
     S.estado.urgentes = S.entrada.filter(i => i.status === 'pendente' && i.urgente).length;
     desenharTopo();
     if (S.aba === 'entrada') desenharEntrada();
@@ -529,161 +825,75 @@ async function marcarItem(item, status, destino) {
 }
 
 function escolherDestino(item) {
-  const opcoes = Object.entries(DESTINOS)
-    .filter(([k]) => k !== 'SAIDA' || operacoesAbertas().length)
+  const opcoes = Object.entries(DESTINOS).filter(([k]) => k !== 'SAIDA' || operacoesAbertas().length)
     .map(([k, d]) => el('button', { class: 'opcao-destino', onclick: () => abrirDestino(item, k) },
       el('span', { class: 'ic', text: d.ic }), el('span', {}, el('strong', { text: d.rotulo }), el('small', { text: d.desc }))));
   abrirModal('Para onde vai esta informação?', [el('div', { class: 'citacao', text: item.texto }), el('div', { class: 'opcoes-destino' }, opcoes)]);
 }
 
-function campoTexto(rotulo, valor, opts = {}) {
-  const t = el('textarea', { rows: opts.linhas || 3, value: valor || '', placeholder: opts.placeholder, autofocus: opts.autofocus, oninput: e => autoAltura(e.target) });
-  return [el('label', { class: 'campo' }, rotulo, t), t];
-}
-function campoLinha(rotulo, valor, opts = {}) {
-  const i = el('input', { type: opts.tipo || 'text', value: valor ?? '', placeholder: opts.placeholder, autofocus: opts.autofocus });
-  return [el('label', { class: 'campo' }, rotulo, i), i];
-}
-
-function botoesSalvar(onSalvar, rotulo = 'Adicionar') {
-  return [
-    el('button', { class: 'btn fantasma', 'data-fechar': true }, 'Cancelar'),
-    el('button', { class: 'btn primario', onclick: async ev => { ev.target.disabled = true; try { await onSalvar(); } catch (e) { aviso(e.message, true); ev.target.disabled = false; } } }, rotulo)
-  ];
-}
-
 function abrirDestino(item, destino) {
   const citacao = el('div', { class: 'citacao', text: `${item.autor} · ${item.hora}\n${item.texto}` });
-  const concluir = async (rotulo) => { fecharModal(); await marcarItem(item, 'usado', rotulo); aviso(`Enviado para ${rotulo} ✓`); };
+  const concluir = async rotulo => { fecharModal(); await marcarItem(item, 'usado', rotulo); aviso(`Enviado para ${rotulo} ✓`); await recarregarTudo(); };
 
-  if (destino === 'ATIVIDADE') {
-    const [c, t] = campoTexto('Texto na Seção 4 (ajuste se quiser)', item.texto, { autofocus: true });
-    return abrirModal('📝 Nova atividade', [citacao, c], botoesSalvar(async () => {
-      if (!t.value.trim()) throw new Error('Escreva a atividade.');
-      await alterarFicha(f => f.atividades.push({ id: uid(), texto: t.value.trim() }));
-      await concluir('Atividade');
-    }));
+  if (destino === 'ATIVIDADE' || destino === 'OCORRENCIA') {
+    const chave = destino === 'ATIVIDADE' ? 'atividades' : 'ocorrencias';
+    const [c, t] = campoTexto(destino === 'ATIVIDADE' ? 'Texto na seção 4' : 'Texto na seção 7', `${item.hora}h ${item.texto.replace(/\s*\n\s*/g, ' ')}`, { autofocus: true });
+    return abrirModal(destino === 'ATIVIDADE' ? '📝 Nova atividade' : '🚨 Nova ocorrência', [citacao, c], botoesSalvar(async () => {
+      if (!t.value.trim()) throw new Error('Escreva o texto.');
+      await alterarFicha(f => f[chave].push({ id: uid(), texto: t.value.trim() }));
+      await concluir(DESTINOS[destino].rotulo);
+    }, 'Adicionar'));
   }
-  if (destino === 'OCORRENCIA') {
-    const [c, t] = campoTexto('Texto na Seção 7', `${item.hora} – ${item.texto}`, { autofocus: true });
-    return abrirModal('🚨 Nova ocorrência', [citacao, c], botoesSalvar(async () => {
-      if (!t.value.trim()) throw new Error('Descreva a ocorrência.');
-      await alterarFicha(f => f.ocorrencias.push({ id: uid(), texto: t.value.trim() }));
-      await concluir('Ocorrência');
-    }));
-  }
-  if (destino === 'AVISO') {
-    const [c1, ti] = campoLinha('Título (curto, em maiúsculas)', '', { placeholder: 'Ex.: BAGAGENS RETIDAS NA RFB – T-OIL', autofocus: true });
-    const [c2, tx] = campoTexto('O que acompanhar', item.texto);
-    return abrirModal('📌 Novo aviso de acompanhamento', [citacao, c1, c2], botoesSalvar(async () => {
-      if (!ti.value.trim() && !tx.value.trim()) throw new Error('Preencha o aviso.');
-      await alterarFicha(f => f.avisos.push({ id: uid(), titulo: ti.value.trim().toUpperCase(), texto: tx.value.trim() }));
-      await concluir('Aviso');
-    }));
-  }
+  if (destino === 'AVISO' || destino === 'DIGITAL') return novaPendencia(destino, { texto: item.texto, citacao: `${item.autor} · ${item.hora}\n${item.texto}` }, item.id);
   if (destino === 'NAVIO') {
     const term = el('select', {}, el('option', { value: 'tore', text: 'T-ORE' }), el('option', { value: 'toil', text: 'T-OIL' }));
     term.value = item.campos?.terminal === 'T-OIL' ? 'toil' : 'tore';
-    const montar = () => [(S.ficha.navios?.[term.value] || '').trim(), item.texto.trim()].filter(Boolean).join('\n');
-    const [c, t] = campoTexto('Texto completo do terminal — edite a linha do navio se ele já estiver na lista', montar(), { linhas: 5 });
-    term.addEventListener('change', () => { t.value = montar(); autoAltura(t); });
-    return abrirModal('🚢 Movimentação de navios', [citacao, el('label', { class: 'campo' }, 'Terminal', term), c], botoesSalvar(async () => {
-      await alterarFicha(f => { f.navios = f.navios || {}; f.navios[term.value] = t.value.trim(); });
+    const lista = () => S.ficha.navios?.[term.value] || [];
+    const sel = el('select');
+    const preencher = () => {
+      sel.replaceChildren(el('option', { value: '__novo', text: '+ Novo navio' }), ...lista().map(n => el('option', { value: n.id, text: n.navio || '(sem nome)' })));
+      const alvo = semAcento(item.campos?.navio || item.texto).toUpperCase();
+      const achado = lista().find(n => n.navio && alvo.includes(semAcento(n.navio).toUpperCase().replace(/^MV\s*-?\s*/, '')));
+      sel.value = achado ? achado.id : '__novo';
+    };
+    term.addEventListener('change', preencher); preencher();
+    const [cNome, iNome] = campoLinha('Nome do navio (se for novo)', item.campos?.navio || '');
+    const semNome = () => {
+      const n = lista().find(x => x.id === sel.value)?.navio || iNome.value || '';
+      const nome = semAcento(n).toUpperCase().replace(/^MV\s*-?\s*/, '').trim();
+      let t = item.texto.replace(/\s*\n\s*/g, ' ');
+      if (nome) t = t.replace(new RegExp('^\\s*(MV\\s*-?\\s*)?' + nome.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*[-–:,.]?\\s*', 'i'), '');
+      return t.charAt(0).toUpperCase() + t.slice(1);
+    };
+    const [cLinha, tLinha] = campoTexto('Linha a registrar', semNome(), { linhas: 2 });
+    sel.addEventListener('change', () => { tLinha.value = semNome(); });
+    return abrirModal('🚢 Movimentação de navios', [citacao, el('div', { class: 'grade-2' }, el('label', { class: 'campo' }, 'Terminal', term), el('label', { class: 'campo' }, 'Navio', sel)), cNome, cLinha], botoesSalvar(async () => {
+      await alterarFicha(f => {
+        f.navios[term.value] = f.navios[term.value] || [];
+        let n = f.navios[term.value].find(x => x.id === sel.value);
+        if (!n) { n = { id: uid(), navio: iNome.value.trim().toUpperCase(), linhas: [] }; f.navios[term.value].push(n); }
+        n.linhas.push(tLinha.value.trim());
+      });
       await concluir(`Navios ${term.value === 'tore' ? 'T-ORE' : 'T-OIL'}`);
     }, 'Salvar'));
   }
   if (destino === 'OPERACAO') {
-    const cp = item.campos || {};
-    const op = {
-      tipo: tipoDoTexto(item.texto), navio: cp.navio, terminal: cp.terminal || '', quantidade: cp.quantidade,
-      movimento: cp.movimento, placa: cp.placa, horaInicial: cp.hora || item.hora
-    };
-    return abrirFormOperacao(op, { item, citacao, concluir });
+    const r = item.rascunhos?.length ? item.rascunhos : [{ tipo: 'RANCHO', horaInicial: item.campos?.hora || item.hora, placa: item.campos?.placa, terminal: item.campos?.terminal, navio: item.campos?.navio }];
+    return abrirFormOperacao({ ...r[0], navio: undefined }, { item, citacao, navios: r.map(x => x.navio).filter(Boolean), atividade: `${item.hora}h ${item.texto.replace(/\s*\n\s*/g, ' ')}` });
   }
   if (destino === 'SAIDA') {
     const abertas = operacoesAbertas();
-    const sel = el('select', {}, abertas.map(o => el('option', { value: o.id, text: `${o.tipo} · ${o.navio || '—'}${o.placa ? ' · ' + o.placa : ''} (desde ${o.horaInicial || '?'})` })));
     const placa = (item.campos?.placa || '').replace('-', '');
     const casada = abertas.find(o => placa && (o.placa || '').replace('-', '') === placa);
-    if (casada) sel.value = casada.id;
-    const [c, h] = campoLinha('Horário de saída', item.campos?.hora || item.hora, { placeholder: 'HH:MM' });
-    return abrirModal('🏁 Registrar saída', [citacao, el('label', { class: 'campo' }, 'Operação', sel), c,
-      el('p', { class: 'mudo pequeno', text: 'Com o horário final, o e-mail da operação fica pronto no Relatório.' })],
-    botoesSalvar(async () => {
-      await alterarFicha(f => { const o = f.operacoes.find(x => x.id === sel.value); if (o) o.horaFinal = h.value.trim(); });
-      await concluir('Saída registrada');
-    }, 'Registrar'));
+    if (casada) return registrarSaida(casada, item);
+    const sel = el('select', {}, abertas.map(o => el('option', { value: o.id, text: `${o.rotuloTipo} · ${o.navio || '—'}${o.placa ? ' · ' + o.placa : ''}` })));
+    return abrirModal('🏁 Qual operação saiu?', [citacao, el('label', { class: 'campo' }, 'Operação', sel)], [
+      el('button', { class: 'btn primario', onclick: () => registrarSaida(abertas.find(o => o.id === sel.value), item) }, 'Continuar')]);
   }
-}
-
-// --------------------- Formulário de operação de bordo ---------------
-function abrirFormOperacao(op = {}, ctx = {}) {
-  const editando = !!op.id;
-  const v = { ...op };
-  const tipo = el('select', {}, TIPOS_OPERACAO.map(t => el('option', { value: t, text: t })));
-  tipo.value = v.tipo || TIPOS_OPERACAO[0];
-  const terminal = el('select', {}, ['', 'T-ORE', 'T-OIL'].map(t => el('option', { value: t, text: t || '—' })));
-  terminal.value = v.terminal || '';
-  const movimento = el('select', {}, ['', 'Embarque', 'Desembarque', 'Embarque e desembarque'].map(t => el('option', { value: t, text: t || '—' })));
-  movimento.value = v.movimento || '';
-
-  const L = (r, k, ph) => campoLinha(r, v[k], { placeholder: ph });
-  const [cNavio, iNavio] = L('Navio', 'navio', 'Ex.: LILA PSARA');
-  const [cEmp, iEmp] = L('Empresa / agência / fornecedor', 'empresa');
-  const [cResp, iResp] = L('Agente / motorista responsável', 'responsavel');
-  const [cVei, iVei] = L('Veículo', 'veiculo', 'Ex.: Van, Caminhão baú');
-  const [cPla, iPla] = L('Placa', 'placa', 'ABC-1D23');
-  const [cQtd, iQtd] = L('Quantos tripulantes', 'quantidade', '03');
-  const [cHi, iHi] = L('Horário inicial', 'horaInicial', 'HH:MM');
-  const [cHf, iHf] = L('Horário final', 'horaFinal', 'vazio = em andamento');
-  const [cAut, iAut] = L('Autorizado por (Autoridades)', 'autoridades', 'S/A');
-  const [cTer, iTer] = L('Autorizados por (Terminal)', 'autorizadoTerminal', 'S/A');
-  const [cObs, iObs] = campoTexto('Observações', v.observacoes, { linhas: 2, placeholder: 'S/A' });
-
-  const tripulacao = el('div', { class: 'grade-2' }, cQtd, el('label', { class: 'campo' }, 'Embarque ou desembarque', movimento));
-  const mostrarTrip = () => { tripulacao.hidden = tipo.value !== TIPOS_OPERACAO[0]; };
-  tipo.addEventListener('change', mostrarTrip); mostrarTrip();
-
-  let chkAtiv = null, txtAtiv = null;
-  const extras = [];
-  if (ctx.item) {
-    chkAtiv = el('input', { type: 'checkbox', checked: true });
-    [, txtAtiv] = campoTexto('', ctx.item.texto, { linhas: 2 });
-    extras.push(el('label', { class: 'check' }, chkAtiv, 'Registrar também nas Atividades (Seção 4)'), txtAtiv);
-    chkAtiv.addEventListener('change', () => { txtAtiv.hidden = !chkAtiv.checked; });
-  }
-
-  abrirModal(editando ? 'Editar operação de bordo' : '✉️ Operação de bordo', [
-    ctx.citacao || null,
-    el('label', { class: 'campo' }, 'Tipo', tipo),
-    el('div', { class: 'grade-2' }, cNavio, el('label', { class: 'campo' }, 'Terminal', terminal)),
-    tripulacao,
-    el('div', { class: 'grade-2' }, cHi, cHf),
-    cEmp, cResp,
-    el('div', { class: 'grade-2' }, cVei, cPla),
-    el('div', { class: 'grade-2' }, cAut, cTer),
-    cObs, ...extras
-  ], botoesSalvar(async () => {
-    const dados = {
-      tipo: tipo.value, navio: iNavio.value.trim().toUpperCase(), terminal: terminal.value,
-      quantidade: iQtd.value.trim(), movimento: movimento.value, empresa: iEmp.value.trim(),
-      responsavel: iResp.value.trim(), veiculo: iVei.value.trim(), placa: iPla.value.trim().toUpperCase(),
-      horaInicial: iHi.value.trim(), horaFinal: iHf.value.trim(), autoridades: iAut.value.trim(),
-      autorizadoTerminal: iTer.value.trim(), observacoes: iObs.value.trim()
-    };
-    await alterarFicha(f => {
-      f.operacoes = f.operacoes || [];
-      if (editando) Object.assign(f.operacoes.find(o => o.id === op.id) || {}, dados);
-      else f.operacoes.push({ id: uid(), criadoEm: new Date().toISOString(), ...dados });
-      if (chkAtiv?.checked && txtAtiv.value.trim()) f.atividades.push({ id: uid(), texto: txtAtiv.value.trim() });
-    });
-    if (ctx.concluir) await ctx.concluir('Operação de bordo');
-    else { fecharModal(); aviso('Operação salva ✓'); }
-  }, editando ? 'Salvar' : 'Adicionar'));
 }
 
 // =====================================================================
-// ABA 3 · RELATÓRIO (as 8 seções, tudo editável)
+// ABA 3 · RELATÓRIO (8 seções)
 // =====================================================================
 function obter(obj, caminho) { return caminho.split('.').reduce((o, k) => (o == null ? undefined : o[k]), obj); }
 function definir(obj, caminho, valor) {
@@ -705,17 +915,16 @@ function campo(rotulo, caminho, { tipo = 'text', multilinha = false, linhas = 2,
   const entrada = multilinha
     ? el('textarea', { rows: linhas, value: valor ?? '', placeholder, oninput: aoDigitar })
     : el('input', { type: tipo, value: valor ?? '', placeholder, oninput: aoDigitar, inputmode: tipo === 'number' ? 'numeric' : undefined });
-  return el('label', { class: 'campo' }, rotulo, entrada);
+  return rotulo ? el('label', { class: 'campo' }, rotulo, entrada) : entrada;
 }
 
 function secao(num, titulo, ...conteudo) {
-  return el('section', { class: 'cartao' },
-    el('h2', {}, num ? el('span', { class: 'secao-num', text: num }) : null, titulo), ...conteudo);
+  return el('section', { class: 'cartao' }, el('h2', {}, num ? el('span', { class: 'secao-num', text: num }) : null, titulo), ...conteudo);
 }
 
 function editorLista(chave, { vazio, placeholder, rotuloNovo }) {
   const box = el('div', { class: 'lista' });
-  const desenhar = (focarUltimo) => {
+  const desenhar = focarUltimo => {
     const arr = S.ficha[chave] = S.ficha[chave] || [];
     box.replaceChildren();
     if (!arr.length) box.append(el('p', { class: 'mudo pequeno', style: 'margin:0', text: vazio }));
@@ -725,8 +934,7 @@ function editorLista(chave, { vazio, placeholder, rotuloNovo }) {
       box.append(el('div', { class: 'item-lista' }, t, el('div', { class: 'ferramentas' },
         el('button', { title: 'Subir', 'aria-label': 'Subir', onclick: () => mover(-1) }, '↑'),
         el('button', { title: 'Descer', 'aria-label': 'Descer', onclick: () => mover(1) }, '↓'),
-        el('button', { title: 'Remover', 'aria-label': 'Remover', onclick: () => { arr.splice(i, 1); desenhar(); agendarSalvar(); } }, '✕')
-      )));
+        el('button', { title: 'Remover', 'aria-label': 'Remover', onclick: () => { arr.splice(i, 1); desenhar(); agendarSalvar(); } }, '✕'))));
     });
     requestAnimationFrame(() => {
       box.querySelectorAll('textarea').forEach(autoAltura);
@@ -735,83 +943,49 @@ function editorLista(chave, { vazio, placeholder, rotuloNovo }) {
   };
   desenhar();
   return el('div', { class: 'lista' }, box,
-    el('div', {}, el('button', { class: 'btn pequeno', onclick: () => { S.ficha[chave].push({ id: uid(), texto: '' }); desenhar(true); } }, '+ ' + rotuloNovo)));
+    el('div', {}, el('button', { class: 'btn pequeno', onclick: () => { S.ficha[chave].push({ id: uid(), texto: `${agoraBR().hora}h ` }); desenhar(true); agendarSalvar(); } }, '+ ' + rotuloNovo)));
 }
 
-function editorAvisos() {
+function editorNavios(chave) {
   const box = el('div', { class: 'lista' });
-  const desenhar = (focar) => {
-    const arr = S.ficha.avisos = S.ficha.avisos || [];
+  const desenhar = focar => {
+    S.ficha.navios = S.ficha.navios || { tore: [], toil: [] };
+    const arr = S.ficha.navios[chave] = S.ficha.navios[chave] || [];
     box.replaceChildren();
-    if (!arr.length) box.append(el('p', { class: 'mudo pequeno', style: 'margin:0', text: 'Nenhum aviso em aberto (sai "✓ S/A").' }));
-    arr.forEach((av, i) => {
-      const ti = el('input', { type: 'text', value: av.titulo || '', placeholder: 'TÍTULO DO AVISO', oninput: e => { av.titulo = e.target.value; agendarSalvar(); } });
-      const tx = el('textarea', { rows: 2, value: av.texto || '', placeholder: 'O que acompanhar', oninput: e => { av.texto = e.target.value; autoAltura(e.target); agendarSalvar(); } });
-      box.append(el('div', { class: 'aviso-item' },
-        el('div', { class: 'linha', style: 'flex-wrap:nowrap' }, el('span', { class: 'mudo pequeno', text: `5.${i + 1}` }), ti),
-        tx,
-        el('div', { class: 'linha', style: 'justify-content:flex-end' },
-          el('button', { class: 'btn fantasma pequeno', onclick: async () => {
-            if (await confirmar('Dar baixa no aviso?', `"${av.titulo || av.texto}" sai do relatório.`, 'Dar baixa')) { arr.splice(i, 1); desenhar(); agendarSalvar(); }
-          } }, '✓ Dar baixa'))
-      ));
+    if (!arr.length) box.append(el('p', { class: 'mudo pequeno', style: 'margin:0', text: 'Sem navios (sai "✓ S/A").' }));
+    arr.forEach((n, i) => {
+      const nome = el('input', { type: 'text', value: n.navio || '', placeholder: 'NOME DO NAVIO', oninput: e => { n.navio = e.target.value.toUpperCase(); agendarSalvar(); } });
+      const linhas = el('textarea', { rows: 2, value: (n.linhas || []).join('\n'), placeholder: 'Uma linha por informação (ex.: Atracado às 08:54.)', oninput: e => { n.linhas = e.target.value.split('\n'); autoAltura(e.target); agendarSalvar(); } });
+      box.append(el('div', { class: 'navio-ed' },
+        el('div', { class: 'linha' }, nome, el('button', { class: 'btn-icone', title: 'Remover navio', onclick: () => { arr.splice(i, 1); desenhar(); agendarSalvar(); } }, '✕')),
+        linhas));
     });
-    requestAnimationFrame(() => {
-      box.querySelectorAll('textarea').forEach(autoAltura);
-      if (focar) { const ins = box.querySelectorAll('input'); ins[ins.length - 1]?.focus(); }
-    });
+    requestAnimationFrame(() => { box.querySelectorAll('textarea').forEach(autoAltura); if (focar) { const ins = box.querySelectorAll('input'); ins[ins.length - 1]?.focus(); } });
   };
   desenhar();
+  return el('div', { class: 'lista' }, box, el('div', {}, el('button', { class: 'btn pequeno', onclick: () => { S.ficha.navios[chave].push({ id: uid(), navio: '', linhas: [] }); desenhar(true); } }, '+ Navio')));
+}
+
+function listaAvisosRelatorio() {
+  const box = el('div', { class: 'lista-pend' });
+  if (!S.avisos.length) box.append(el('p', { class: 'mudo pequeno', style: 'margin:0', text: 'Nenhum aviso em aberto (sai "✓ S/A").' }));
+  S.avisos.forEach((p, i) => box.append(el('button', { class: 'pend', onclick: () => abrirPendencia(p) },
+    el('span', { class: 'ic mudo', text: `5.${i + 1}` }), el('span', { style: 'min-width:0' }, el('div', { class: 'tit', text: p.titulo }), el('div', { class: 'sub', text: p.texto || '' })), el('span', { class: 'seta', text: '›' }))));
   return el('div', { class: 'lista' }, box,
-    el('div', {}, el('button', { class: 'btn pequeno', onclick: () => { S.ficha.avisos.push({ id: uid(), titulo: '', texto: '' }); desenhar(true); } }, '+ Novo aviso')));
+    el('p', { class: 'mudo pequeno', style: 'margin:0', text: 'Avisos são pendências: atualize ou conclua (com tratativa) tocando neles. Os abertos passam para o próximo turno.' }),
+    el('div', {}, el('button', { class: 'btn pequeno', onclick: () => novaPendencia('AVISO') }, '+ Novo aviso')));
 }
 
 function listaOperacoes() {
-  const ops = S.ficha.operacoes || [];
-  if (!ops.length) return el('p', { class: 'mudo pequeno', style: 'margin:0', text: 'Nenhuma operação no turno. Elas entram pela Entrada (botão "Operação de bordo") ou aqui.' });
-  return el('div', { class: 'lista' }, ops.map(o => el('div', { class: 'op' },
-    el('div', { class: 'cartao-topo' },
-      el('div', {}, el('strong', { text: `${o.tipo}` }), el('div', { class: 'mudo pequeno', text: `${o.navio || 'Navio?'}${o.terminal ? ' · ' + o.terminal : ''}${o.placa ? ' · ' + o.placa : ''}` })),
-      el('span', { class: `etiqueta ${o.horaFinal ? 'ok' : 'atencao'}`, text: o.horaFinal ? (o.emailAbertoEm ? 'E-mail aberto' : 'Pronta p/ e-mail') : 'Em andamento' })
-    ),
-    el('div', { class: 'pequeno mudo', text: `Início ${o.horaInicial || '—'} · Fim ${o.horaFinal || 'aguardando saída'}${o.empresa ? ' · ' + o.empresa : ''}` }),
-    el('div', { class: 'linha', style: 'justify-content:flex-end' },
-      el('button', { class: 'btn fantasma pequeno', onclick: async () => {
-        if (await confirmar('Remover operação?', `${o.tipo} · ${o.navio || ''}`, 'Remover', true)) await alterarFicha(f => { f.operacoes = f.operacoes.filter(x => x.id !== o.id); });
-      } }, 'Remover'),
-      el('button', { class: 'btn pequeno', onclick: () => abrirFormOperacao(o) }, 'Editar'),
-      o.horaFinal
-        ? el('button', { class: 'btn primario pequeno', onclick: () => abrirEmail(o) }, '✉️ E-mail')
-        : el('button', { class: 'btn verde pequeno', onclick: () => registrarSaida(o) }, '🏁 Registrar saída')
-    )
-  )));
-}
-
-function registrarSaida(o) {
-  const [c, h] = campoLinha('Horário de saída', agoraBR().hora, { autofocus: true });
-  abrirModal('🏁 Registrar saída', [el('div', { class: 'citacao', text: `${o.tipo} · ${o.navio || ''}` }), c], botoesSalvar(async () => {
-    await alterarFicha(f => { const x = f.operacoes.find(y => y.id === o.id); if (x) x.horaFinal = h.value.trim(); });
-    fecharModal(); aviso('Saída registrada ✓');
-  }, 'Registrar'));
-}
-
-async function abrirEmail(o) {
-  try {
-    await salvarAgora();
-    const m = await api('GET', `/api/email/${encodeURIComponent(o.id)}`);
-    const [cPara, iPara] = campoLinha('Para', m.para, { placeholder: 'Defina os destinatários em Configurações' });
-    const [cCc, iCc] = campoLinha('Cópia (Cc)', m.cc);
-    const [cAss, iAss] = campoLinha('Assunto', m.assunto);
-    const [cCorpo, tCorpo] = campoTexto('Mensagem', m.corpo, { linhas: 14 });
-    const marcar = () => alterarFicha(f => { const x = f.operacoes.find(y => y.id === o.id); if (x) x.emailAbertoEm = new Date().toISOString(); });
-    const q = (k, v) => v ? `${k}=${encodeURIComponent(v)}` : '';
-    abrirModal('✉️ E-mail da operação', [cPara, cCc, cAss, cCorpo,
-      el('p', { class: 'mudo pequeno', text: 'Revise e anexe as evidências no Outlook antes de enviar.' })], [
-      el('button', { class: 'btn', onclick: () => copiar(`Assunto: ${iAss.value}\n\n${tCorpo.value}`) }, '📋 Copiar'),
-      el('button', { class: 'btn', onclick: () => { marcar(); window.open(`https://outlook.office.com/mail/deeplink/compose?${[q('to', iPara.value), q('cc', iCc.value), q('subject', iAss.value), q('body', tCorpo.value)].filter(Boolean).join('&')}`, '_blank', 'noopener'); } }, '🌐 Outlook Web'),
-      el('button', { class: 'btn primario', onclick: () => { marcar(); location.href = `mailto:${encodeURIComponent(iPara.value).replace(/%40/g, '@').replace(/%2C/g, ',').replace(/%3B/g, ';')}?${[q('cc', iCc.value), q('subject', iAss.value), q('body', tCorpo.value)].filter(Boolean).join('&')}`; } }, '📧 App de e-mail')
-    ]);
-  } catch (e) { aviso(e.message, true); }
+  const ops = S.operacoes || [];
+  if (!ops.length) return el('p', { class: 'mudo pequeno', style: 'margin:0', text: 'Nenhuma operação no turno.' });
+  return el('div', { class: 'lista-pend' }, ops.map(o => {
+    const st = !o.horaFinal ? 'Em andamento' : o.email?.encaminhadoEm ? 'Encaminhado ✓' : o.email?.status === 'ENVIADO' ? 'E-mail enviado ao líder' : o.email?.status === 'ERRO' ? 'Falha no e-mail' : 'E-mail pendente';
+    return el('button', { class: `pend${o.email?.status === 'ERRO' ? ' erro' : ''}`, onclick: () => abrirOperacao(o) },
+      el('span', { class: 'ic', text: o.horaFinal ? '✉️' : '🚢' }),
+      el('span', { style: 'min-width:0' }, el('div', { class: 'tit', text: `${o.rotuloTipo} · ${o.navio || '?'}` }), el('div', { class: 'sub', text: `${o.horaInicial || '—'} → ${o.horaFinal || '…'} · ${st}` })),
+      el('span', { class: 'seta', text: '›' }));
+  }));
 }
 
 function atualizarKmRodados() {
@@ -828,62 +1002,54 @@ function desenharConferencia() {
 
 function desenharRelatorio() {
   const c = $('#aba-relatorio');
+  if (!S.ficha) return;
   const turno = el('select', { onchange: e => { S.ficha.turno = e.target.value; agendarSalvar(); } },
     el('option', { value: 'DIURNO', text: 'DIURNO' }), el('option', { value: 'NOTURNO', text: 'NOTURNO' }));
   turno.value = S.ficha.turno;
+  const escala = () => { S.ficha.equipes = { saindo: 'Conforme escala', assumindo: 'Conforme escala' }; agendarSalvar(); desenharRelatorio(); };
 
   c.replaceChildren(
     el('section', { class: 'cartao' },
       el('div', { class: 'grade-2' }, el('label', { class: 'campo' }, 'Turno', turno), campo('Data', 'data', { placeholder: 'DD/MM/AAAA' })),
-      el('div', { id: 'bloco-conferencia', class: 'alertas' })
-    ),
+      el('div', { id: 'bloco-conferencia', class: 'alertas' })),
     secao('1', 'Efetivo CCOS', campo('', 'efetivo', { multilinha: true, placeholder: '✓ S/A' })),
     secao('2', 'Viatura – VTR',
       el('div', { class: 'grade-2' }, campo('Veículo', 'vtr.modelo'), campo('Placa', 'vtr.placa')),
       el('div', { class: 'grade-2' }, campo('KM inicial', 'vtr.kmInicial', { tipo: 'number' }), campo('KM final', 'vtr.kmFinal', { tipo: 'number' })),
-      el('div', { id: 'km-rodados', class: 'mudo pequeno' })
-    ),
+      el('div', { id: 'km-rodados', class: 'mudo pequeno' })),
     secao('3', 'Sistemas',
       campo('CFTV', 'sistemas.cftv', { multilinha: true, placeholder: '✓ S/A' }),
       campo('CA – Controle de acesso', 'sistemas.ca', { multilinha: true, linhas: 1, placeholder: '✓ S/A' }),
-      el('div', { class: 'grade-2' }, campo('OCR – Assertividade', 'sistemas.ocrAssertividade', { placeholder: '88,05%' }), campo('OCR – Total de leituras', 'sistemas.ocrLeituras', { tipo: 'number', placeholder: '188' }))
-    ),
-    secao('4', 'Atividades realizadas', editorLista('atividades', { vazio: 'Nenhuma atividade.', placeholder: 'Descreva a atividade', rotuloNovo: 'Nova atividade' })),
-    secao('5', 'Avisos e ações de acompanhamento', editorAvisos()),
+      el('div', { class: 'grade-2' }, campo('OCR – Assertividade', 'sistemas.ocrAssertividade', { placeholder: '88,05%' }), campo('OCR – Total de leituras', 'sistemas.ocrLeituras', { tipo: 'number', placeholder: '188' }))),
+    secao('4', 'Atividades realizadas', editorLista('atividades', { vazio: 'Nenhuma atividade.', placeholder: '19:01h Descreva a atividade', rotuloNovo: 'Nova atividade' })),
+    secao('5', 'Avisos e ações de acompanhamento', listaAvisosRelatorio()),
     secao('6', 'Movimentação de navios',
-      campo('T-ORE', 'navios.tore', { multilinha: true, linhas: 2, placeholder: 'NAVIO: situação' }),
-      campo('T-OIL', 'navios.toil', { multilinha: true, linhas: 2, placeholder: 'NAVIO: situação' })
-    ),
-    secao('7', 'Ocorrências', editorLista('ocorrencias', { vazio: 'Sem ocorrências (sai "✓ S/A").', placeholder: 'Descreva a ocorrência', rotuloNovo: 'Nova ocorrência' })),
+      el('div', { class: 'terminal-tit', text: 'T-ORE' }), editorNavios('tore'),
+      el('div', { class: 'terminal-tit', text: 'T-OIL' }), editorNavios('toil')),
+    secao('7', 'Ocorrências', editorLista('ocorrencias', { vazio: 'Sem ocorrências (sai "✓ S/A").', placeholder: '19:01h Descreva a ocorrência', rotuloNovo: 'Nova ocorrência' })),
     secao('8', 'Passagem de turno',
-      campo('Equipe saindo', 'equipes.saindo', { placeholder: 'Ex.: Ruddgero Ribeiro e Equipe CCOS' }),
-      campo('Equipe assumindo', 'equipes.assumindo', { placeholder: 'Ex.: Wallace Ferroport e Equipe US' })
-    ),
-    secao('', '✉️ Operações de bordo (e-mails)',
-      el('p', { class: 'mudo pequeno', style: 'margin:0', text: 'Não entram no texto do relatório; geram o e-mail de cada operação depois da saída do veículo.' }),
-      el('div', { id: 'lista-operacoes' }, listaOperacoes()),
-      el('div', {}, el('button', { class: 'btn pequeno', onclick: () => abrirFormOperacao({ horaInicial: agoraBR().hora }) }, '+ Nova operação'))
-    ),
+      campo('Equipe saindo', 'equipes.saindo', { placeholder: 'Conforme escala' }),
+      campo('Equipe assumindo', 'equipes.assumindo', { placeholder: 'Conforme escala' }),
+      el('div', {}, el('button', { class: 'btn fantasma pequeno', onclick: escala }, 'Usar "Conforme escala"'))),
+    secao('', '✉️ Operações de bordo',
+      el('p', { class: 'mudo pequeno', style: 'margin:0', text: 'Um e-mail por navio. Saem automaticamente para o líder de plantão quando há horário de saída.' }),
+      listaOperacoes(),
+      el('div', {}, el('button', { class: 'btn pequeno', onclick: () => abrirFormOperacao({ horaInicial: agoraBR().hora }) }, '+ Nova operação'))),
     el('div', { class: 'barra-acoes' },
       el('span', { id: 'estado-salvo', class: 'estado-salvo', text: S.sujo ? 'Salvando…' : 'Salvo ✓' }),
       el('button', { class: 'btn', onclick: abrirPrevia }, '👁 Prévia'),
-      el('button', { class: 'btn primario', onclick: publicar }, '🚀 Publicar')
-    )
+      ehLider() ? el('button', { class: 'btn primario', onclick: publicar }, '🚀 Publicar') : null)
   );
   desenharConferencia();
   atualizarKmRodados();
   requestAnimationFrame(() => c.querySelectorAll('textarea').forEach(autoAltura));
 }
 
-// --------------------------- Destinos finais ------------------------
-async function textoAtual() {
-  await salvarAgora();
-  return api('GET', '/api/ficha/texto');
-}
-
+// --------------------------- Prévia e publicação ---------------------
 async function abrirPrevia() {
   try {
-    const t = await textoAtual();
+    await salvarAgora();
+    const t = await api('GET', '/api/ficha/texto');
     const f = S.ficha;
     const nome = `Relatorio_Turno_${f.turno}_${f.data.replace(/\//g, '-')}.txt`;
     abrirModal('Prévia do relatório', [
@@ -892,246 +1058,369 @@ async function abrirPrevia() {
     ], [
       el('button', { class: 'btn', onclick: () => copiar(t.whatsapp) }, '📋 Copiar'),
       el('button', { class: 'btn', onclick: () => baixar(nome, t.simples) }, '💾 .txt'),
-      el('button', { class: 'btn', onclick: () => imprimir(t.simples) }, '📄 PDF'),
-      el('button', { class: 'btn primario', onclick: () => { fecharModal(); publicar(); } }, '🚀 Publicar')
+      el('button', { class: 'btn', onclick: () => imprimir(`CCOS — Relatório do Turno ${f.turno} · ${f.data}`, t.simples, f.equipes) }, '📄 PDF'),
+      ehLider() ? el('button', { class: 'btn primario', onclick: () => { fecharModal(); publicar(); } }, '🚀 Publicar') : null
     ]);
   } catch (e) { aviso(e.message, true); }
 }
 
-function imprimir(textoSimples) {
-  const f = S.ficha;
+function imprimir(titulo, textoSimples, equipes) {
   $('#impressao').replaceChildren(
-    el('div', { class: 'cab' },
-      el('strong', { text: 'FERROPORT · PORTO DO AÇU' }), el('br'),
-      el('span', { text: `CCOS — Relatório do Turno ${f.turno} · ${f.data} · emitido em ${agoraBR().data} ${agoraBR().hora}` })),
+    el('div', { class: 'cab' }, el('strong', { text: 'FERROPORT · PORTO DO AÇU' }), el('br'), el('span', { text: `${titulo} · emitido em ${agoraBR().data} ${agoraBR().hora}` })),
     el('pre', { text: textoSimples }),
-    el('div', { class: 'assinaturas' }, el('div', { text: `Equipe saindo: ${f.equipes?.saindo || ''}` }), el('div', { text: `Equipe assumindo: ${f.equipes?.assumindo || ''}` }))
-  );
+    equipes ? el('div', { class: 'assinaturas' }, el('div', { text: `Equipe saindo: ${equipes.saindo || ''}` }), el('div', { text: `Equipe assumindo: ${equipes.assumindo || ''}` })) : null);
   window.print();
+}
+
+async function publicarGenerico({ titulo, urlTexto, urlPublicar, textoOk }) {
+  const t = await api('GET', urlTexto);
+  const conectado = S.estado?.whatsapp?.meu?.estado === 'CONECTADO';
+  const nomeGrupo = S.config?.nomesGrupos?.[S.config?.grupoPublicacao] || '';
+  const problema = !deplantao() ? 'Para publicar, assuma o plantão na Central.' : !conectado ? 'Seu WhatsApp não está conectado (Menu › Meu perfil).' : !S.config?.grupoPublicacao ? 'O administrador ainda não escolheu o grupo de publicação.' : '';
+  if (problema) {
+    return abrirModal('Não dá para publicar agora', [el('p', { text: problema }), el('p', { class: 'mudo', text: 'Você pode copiar o texto e colar no grupo.' })], [
+      el('button', { class: 'btn primario', onclick: () => { copiar(t.whatsapp); fecharModal(); } }, '📋 Copiar texto')]);
+  }
+  const anexo = el('input', { type: 'checkbox' });
+  const ok = await confirmar(titulo, [
+    el('p', {}, 'Será enviado pelo seu WhatsApp para ', el('strong', { text: nomeGrupo || 'o grupo escolhido' }), ' exatamente como na prévia.'),
+    t.conferencia?.length ? el('div', { class: 'alertas' }, el('strong', { text: 'Antes de publicar, confira:' }), t.conferencia.map(a => el('div', { text: '• ' + a }))) : null,
+    el('label', { class: 'check' }, anexo, 'Anexar também o arquivo .txt')
+  ], 'Publicar agora');
+  if (!ok) return;
+  await api('POST', urlPublicar, { anexarTxt: anexo.checked });
+  aviso(textoOk);
 }
 
 async function publicar() {
   try {
-    const t = await textoAtual();
-    const cfg = S.config;
-    const conectado = S.estado?.whatsapp?.estado === 'CONECTADO';
-    const nomeGrupo = cfg.nomesGrupos?.[cfg.grupoPublicacao] || '';
-    if (!conectado || !cfg.grupoPublicacao) {
-      return abrirModal('Não dá para publicar agora', [
-        el('p', { text: !conectado ? 'O WhatsApp do robô não está conectado.' : 'Nenhum grupo de publicação escolhido em Configurações.' }),
-        el('p', { class: 'mudo', text: 'Você pode copiar o texto e colar no grupo manualmente.' })
-      ], [
-        el('button', { class: 'btn', onclick: () => { fecharModal(); abrirConfig(); } }, 'Configurações'),
-        el('button', { class: 'btn primario', onclick: () => { copiar(t.whatsapp); fecharModal(); } }, '📋 Copiar texto')
-      ]);
-    }
-    const anexo = el('input', { type: 'checkbox' });
-    const ok = await confirmar('Publicar no grupo?', [
-      el('p', {}, 'O relatório será enviado para ', el('strong', { text: nomeGrupo || 'o grupo escolhido' }), ' exatamente como na prévia.'),
-      t.conferencia.length ? el('div', { class: 'alertas' }, el('strong', { text: 'Antes de publicar, confira:' }), t.conferencia.map(a => el('div', { text: '• ' + a }))) : null,
-      el('label', { class: 'check' }, anexo, 'Anexar também o arquivo .txt')
-    ], 'Publicar agora');
-    if (!ok) return;
-    const r = await api('POST', '/api/ficha/publicar', { anexarTxt: anexo.checked });
-    S.ficha.publicadoEm = r.publicadoEm;
-    aviso('Relatório publicado no grupo ✓');
+    await salvarAgora();
+    await publicarGenerico({ titulo: 'Publicar o relatório no grupo?', urlTexto: '/api/ficha/texto', urlPublicar: '/api/ficha/publicar', textoOk: 'Relatório publicado no grupo ✓' });
+    await recarregarTudo();
   } catch (e) { aviso(e.message, true); }
 }
 
 // =====================================================================
-// CONFIGURAÇÕES
+// PAINÉIS: menu, escala, perfil, usuários, configurações, histórico
 // =====================================================================
-let timerWhats = null;
-let assinaturaWhats = '';
-let gruposCarregados = null;
-
-async function abrirConfig() {
-  const p = $('#painel-config');
+function abrirPainel(titulo, conteudo, aoFechar) {
+  const p = $('#painel');
+  p.replaceChildren(el('div', { class: 'painel-conteudo' },
+    el('div', { class: 'painel-topo' }, el('button', { class: 'btn-icone', 'aria-label': 'Voltar', onclick: () => fecharPainel(aoFechar) }, '←'), el('h1', { text: titulo })),
+    ...[].concat(conteudo).filter(Boolean)));
   p.hidden = false;
+  p.scrollTop = 0;
   document.body.style.overflow = 'hidden';
-  S.config = (await api('GET', '/api/config')).config;
-  desenharConfig();
-  assinaturaWhats = '';
-  await atualizarWhats();
-  clearInterval(timerWhats);
-  timerWhats = setInterval(atualizarWhats, 4000);
 }
-
-function fecharConfig() {
-  $('#painel-config').hidden = true;
+function fecharPainel(aoFechar) {
+  $('#painel').hidden = true;
   document.body.style.overflow = '';
-  clearInterval(timerWhats);
-  atualizarEstado();
+  clearInterval(S.painelTimer);
+  if (aoFechar) aoFechar();
+  recarregarTudo();
 }
 
-function desenharConfig() {
-  const cfg = S.config;
-  const L = (rotulo, chave, opts = {}) => {
-    const i = el('input', { type: opts.tipo || 'text', value: cfg[chave] ?? '', placeholder: opts.placeholder, oninput: e => { cfg[chave] = e.target.value; } });
-    return el('label', { class: 'campo' }, rotulo, i);
+function abrirMenu() {
+  const u = S.usuario;
+  const item = (ic, txt, fn) => el('button', { onclick: () => { fecharModal(); fn(); } }, el('span', { text: ic }), txt);
+  abrirModal(u.nome, [
+    el('p', { class: 'mudo pequeno', style: 'margin:0', text: `${u.email} · ${u.rotuloPerfil}` }),
+    el('div', { class: 'menu-lista' },
+      item('👤', 'Meu perfil e WhatsApp', abrirPerfil),
+      item('📦', 'Passagem da escala', abrirEscala),
+      item('🗂️', 'Turnos anteriores', abrirHistorico),
+      ehAdmin() ? item('👥', 'Usuários', abrirUsuarios) : null,
+      ehAdmin() ? item('⚙️', 'Configurações', abrirConfig) : null,
+      item('🚪', 'Sair', async () => { await api('POST', '/api/logout'); mostrarLogin(); }))
+  ]);
+}
+
+// ----------------------------- Escala --------------------------------
+let escalaDados = null;
+let timerEscala = null;
+
+async function abrirEscala() {
+  try { escalaDados = await api('GET', '/api/escala'); } catch (e) { return aviso(e.message, true); }
+  desenharEscala();
+}
+
+function salvarEscalaDepois() {
+  clearTimeout(timerEscala);
+  timerEscala = setTimeout(async () => {
+    try {
+      const r = await api('PUT', '/api/escala/passagem', { secoes: escalaDados.secoes, removidos: escalaDados.removidos });
+      escalaDados.editadoEm = r.editadoEm;
+      const e = $('#escala-salvo'); if (e) e.textContent = 'Salvo ✓';
+    } catch (e) { aviso(e.message, true); }
+  }, 700);
+}
+
+function desenharEscala() {
+  const d = escalaDados;
+  const SECOES = [['digital', '1. Pendências da Digital (CFTV e infraestrutura)'], ['avisos', '2. Avisos e ações de acompanhamento'], ['ocorrencias', '3. Resumo das ocorrências'], ['atividades', '4. Resumo das atividades realizadas']];
+  const secaoEd = (chave, titulo) => {
+    const box = el('div', { class: 'lista' });
+    const desenhar = focar => {
+      const arr = d.secoes[chave];
+      box.replaceChildren();
+      if (!arr.length) box.append(el('p', { class: 'mudo pequeno', style: 'margin:0', text: 'Nada (sai "✓ S/A").' }));
+      arr.forEach((it, i) => {
+        const t = el('textarea', { rows: 1, value: it.texto, oninput: e => { it.texto = e.target.value; autoAltura(e.target); marcar(); } });
+        box.append(el('div', { class: `item-escala${it.novo ? ' novo' : ''}` },
+          el('div', {}, t, el('small', { text: `${it.origem || ''}${it.novo ? ' · novo desde a última edição' : ''}` })),
+          el('div', { class: 'ferramentas' }, el('button', { class: 'btn-icone', title: 'Remover', onclick: () => { if (it.chave) d.removidos.push(it.chave); arr.splice(i, 1); desenhar(); marcar(); } }, '✕'))));
+      });
+      requestAnimationFrame(() => { box.querySelectorAll('textarea').forEach(autoAltura); if (focar) { const ts = box.querySelectorAll('textarea'); ts[ts.length - 1]?.focus(); } });
+    };
+    desenhar();
+    return el('section', { class: 'cartao' }, el('h2', { text: titulo }), box,
+      el('div', {}, el('button', { class: 'btn pequeno', onclick: () => { d.secoes[chave].push({ id: uid(), chave: null, texto: '', origem: 'Manual' }); desenhar(true); } }, '+ Adicionar')));
   };
-  const alertasChk = el('input', { type: 'checkbox', checked: cfg.alertasAtivos, onchange: e => { cfg.alertasAtivos = e.target.checked; } });
-  const base = el('textarea', { rows: 3, value: (cfg.atividadesBase || []).join('\n'), oninput: e => { cfg.atividadesBase = e.target.value.split('\n'); autoAltura(e.target); } });
+  const marcar = () => { const e = $('#escala-salvo'); if (e) e.textContent = 'Salvando…'; salvarEscalaDepois(); };
 
-  $('#painel-config').replaceChildren(el('div', { class: 'painel-conteudo' },
-    el('div', { class: 'painel-topo' },
-      el('button', { class: 'btn-icone', 'aria-label': 'Voltar', onclick: fecharConfig }, '←'),
-      el('h1', { text: 'Configurações' })
-    ),
-    el('section', { class: 'cartao', id: 'cfg-whats' }, el('h2', { text: 'WhatsApp' }), el('p', { class: 'mudo', text: 'Carregando…' })),
-    el('section', { class: 'cartao', id: 'cfg-grupos' }),
+  abrirPainel('📦 Passagem da escala', [
     el('section', { class: 'cartao' },
-      el('h2', { text: 'Alerta de emergência' }),
-      el('p', { class: 'mudo pequeno', style: 'margin:0', text: 'Mensagens com palavras como incêndio, acidente, ferido, vazamento geram um aviso no privado deste número.' }),
-      el('label', { class: 'check' }, alertasChk, 'Enviar alerta no privado'),
-      L('Número que recebe (55 + DDD + número)', 'alertaNumero', { tipo: 'tel', placeholder: '5522998765432' })
-    ),
-    el('section', { class: 'cartao' },
-      el('h2', { text: 'E-mails de bordo' }),
-      L('Destinatários (separe por ;)', 'emailDestinatarios', { placeholder: 'operacoes@empresa.com.br; supervisao@empresa.com.br' }),
-      L('Cópia (Cc)', 'emailCopia')
-    ),
-    el('section', { class: 'cartao' },
-      el('h2', { text: 'Padrões do relatório' }),
-      el('div', { class: 'grade-2' }, L('Viatura', 'vtrModelo'), L('Placa da viatura', 'vtrPlaca')),
-      el('label', { class: 'campo' }, 'Atividades fixas de todo turno (uma por linha)', base)
-    ),
-    el('div', {}, el('button', { class: 'btn primario largo', onclick: salvarConfig }, 'Salvar configurações')),
-    el('section', { class: 'cartao' },
-      el('h2', { text: 'Turnos anteriores' }),
-      el('div', { id: 'cfg-historico' }, el('button', { class: 'btn pequeno', onclick: carregarHistorico }, 'Ver histórico'))
-    ),
-    el('section', { class: 'cartao' },
-      el('div', { class: 'linha', style: 'justify-content:space-between' },
-        el('span', { class: 'mudo pequeno', text: `Dados guardados em: ${S.estado?.armazenamento === 'firestore' ? 'Firebase' : 'pasta "dados" do computador'}` }),
-        el('button', { class: 'btn perigo pequeno', onclick: async () => { await api('POST', '/api/logout'); fecharConfig(); mostrarLogin(); } }, 'Sair')
-      )
-    )
-  ));
-  desenharGrupos();
-  requestAnimationFrame(() => autoAltura(base));
+      el('div', { class: 'cartao-topo' },
+        el('div', {}, el('h2', { text: `Período: ${d.periodo}` }),
+          el('p', { class: 'mudo pequeno', style: 'margin:4px 0 0', text: d.escala ? `Coletando desde ${d.escala.dataInicio} (iniciada por ${d.escala.iniciadaPor?.nome || '—'}). Tudo que foi registrado nos turnos aparece aqui.` : 'Nenhuma escala iniciada: inicie para o robô coletar desde o primeiro dia.' })),
+        el('span', { id: 'escala-salvo', class: 'mudo pequeno', text: d.editadoEm ? 'Salvo ✓' : '' })),
+      el('div', { class: 'linha' },
+        ehLider() ? el('button', { class: 'btn pequeno', onclick: async () => {
+          if (await confirmar('Iniciar nova escala?', 'A escala atual vai para o histórico e a coleta recomeça a partir de hoje.', 'Iniciar')) { escalaDados = await api('POST', '/api/escala/iniciar'); desenharEscala(); aviso('Nova escala iniciada ✓'); }
+        } }, 'Iniciar nova escala') : null,
+        d.editadoEm ? el('button', { class: 'btn fantasma pequeno', onclick: async () => {
+          if (await confirmar('Restaurar o original?', 'Desfaz suas edições e remonta a partir dos registros.', 'Restaurar', true)) { escalaDados = await api('POST', '/api/escala/restaurar'); desenharEscala(); }
+        } }, 'Restaurar original') : null)),
+    ...SECOES.map(([k, t]) => secaoEd(k, t)),
+    el('div', { class: 'barra-acoes', style: 'bottom:12px' },
+      el('span', { class: 'estado-salvo', text: 'Edite à vontade: o texto sai como abaixo.' }),
+      el('button', { class: 'btn', onclick: previaEscala }, '👁 Prévia'),
+      ehLider() ? el('button', { class: 'btn primario', onclick: publicarEscala }, '🚀 Publicar') : null)
+  ]);
 }
 
-async function salvarConfig() {
+async function previaEscala() {
+  clearTimeout(timerEscala);
+  await api('PUT', '/api/escala/passagem', { secoes: escalaDados.secoes, removidos: escalaDados.removidos }).catch(() => {});
+  const t = await api('GET', '/api/escala/texto');
+  abrirModal('Prévia da passagem da escala', [el('div', { class: 'previa' }, textoWhats(t.whatsapp))], [
+    el('button', { class: 'btn', onclick: () => copiar(t.whatsapp) }, '📋 Copiar'),
+    el('button', { class: 'btn', onclick: () => baixar(`Passagem_Escala_${agoraBR().data.replace(/\//g, '-')}.txt`, t.simples) }, '💾 .txt'),
+    el('button', { class: 'btn', onclick: () => imprimir(`CCOS — Passagem da Escala · ${escalaDados.periodo}`, t.simples) }, '📄 PDF')
+  ]);
+}
+
+async function publicarEscala() {
   try {
-    S.config = (await api('PUT', '/api/config', { config: S.config })).config;
-    aviso('Configurações salvas ✓');
+    clearTimeout(timerEscala);
+    await api('PUT', '/api/escala/passagem', { secoes: escalaDados.secoes, removidos: escalaDados.removidos });
+    await publicarGenerico({ titulo: 'Publicar a passagem da escala?', urlTexto: '/api/escala/texto', urlPublicar: '/api/escala/publicar', textoOk: 'Passagem da escala publicada ✓' });
   } catch (e) { aviso(e.message, true); }
 }
 
-async function atualizarWhats() {
+// ----------------------------- Perfil --------------------------------
+async function abrirPerfil() {
+  const u = S.usuario;
+  const [cNome, iNome] = campoLinha('Nome', u.nome);
+  const [cTel, iTel] = campoLinha('Telefone (55 + DDD + número)', u.telefone, { tipo: 'tel' });
+  abrirPainel('Meu perfil', [
+    el('section', { class: 'cartao' },
+      el('h2', { text: u.nome }), el('p', { class: 'mudo pequeno', style: 'margin:0', text: `${u.email} · ${u.rotuloPerfil}` }),
+      cNome, cTel,
+      el('div', { class: 'linha' },
+        el('button', { class: 'btn primario', onclick: async () => { try { S.usuario = (await api('PUT', '/api/eu', { nome: iNome.value, telefone: iTel.value })).usuario; aviso('Perfil salvo ✓'); } catch (e) { aviso(e.message, true); } } }, 'Salvar'),
+        el('button', { class: 'btn', onclick: () => pedirTrocaSenha(false) }, 'Trocar senha'))),
+    ehLider() ? el('section', { class: 'cartao', id: 'perfil-whats' }, el('h2', { text: 'Meu WhatsApp' }), el('p', { class: 'mudo', text: 'Carregando…' })) : null
+  ]);
+  if (ehLider()) {
+    S.assinaturaWhats = '';
+    await atualizarMeuWhats();
+    clearInterval(S.painelTimer);
+    S.painelTimer = setInterval(atualizarMeuWhats, 3500);
+  }
+}
+
+async function atualizarMeuWhats() {
   try {
     const w = await api('GET', '/api/whatsapp');
-    const assinatura = `${w.estado}|${w.qrSvg ? w.qrSvg.length : 0}|${w.numero}|${w.erro}`;
-    if (assinatura === assinaturaWhats) return;
-    const mudouConexao = assinaturaWhats.split('|')[0] !== w.estado;
-    assinaturaWhats = assinatura;
-    desenharWhats(w);
-    if (mudouConexao) desenharGrupos();
+    const assinatura = `${w.estado}|${w.qrSvg ? w.qrSvg.length : 0}|${w.numero}|${w.erro}|${w.grupos.length}`;
+    if (assinatura === S.assinaturaWhats) return;
+    S.assinaturaWhats = assinatura;
+    desenharMeuWhats(w);
   } catch (_) {}
 }
 
-function desenharWhats(w) {
-  const box = $('#cfg-whats'); if (!box) return;
-  const filhos = [el('h2', { text: 'WhatsApp' })];
-  S.whats = w;
-  if (w.estado === 'CONECTADO') {
+function desenharMeuWhats(w) {
+  const box = $('#perfil-whats'); if (!box) return;
+  const filhos = [el('h2', { text: 'Meu WhatsApp' })];
+  const conectar = el('button', { class: 'btn primario', onclick: async ev => {
+    ev.target.disabled = true;
+    try { await api('POST', '/api/whatsapp/conectar'); S.assinaturaWhats = ''; aviso('Iniciando conexão…'); setTimeout(atualizarMeuWhats, 1500); }
+    catch (e) { aviso(e.message, true); ev.target.disabled = false; }
+  } }, w.pareado ? 'Reconectar' : 'Conectar meu WhatsApp');
+
+  if (!w.disponivel) {
+    filhos.push(el('p', { class: 'mudo', text: 'Biblioteca do WhatsApp não instalada no servidor.' }));
+  } else if (w.estado === 'CONECTADO') {
     filhos.push(
-      el('div', { class: 'linha' }, el('span', { class: 'etiqueta ok', text: '● Conectado' }), el('span', { class: 'mudo', text: w.numero ? `+${w.numero}` : '' })),
-      el('p', { class: 'mudo pequeno', style: 'margin:0', text: 'O robô só lê os grupos marcados abaixo e nunca escreve neles sozinho.' }),
+      el('div', { class: 'linha' }, el('span', { class: 'etiqueta ok', text: '● Conectado' }), el('span', { class: 'mudo', text: w.numero ? `+${w.numero}` : '' }), w.ehPlantao ? el('span', { class: 'etiqueta info', text: 'você está de plantão' }) : null),
+      el('div', { class: 'pequeno' }, el('span', { class: 'mudo', text: 'Lendo: ' }), w.grupos.length ? w.grupos.map(g => g.nome).join(', ') : 'nenhum grupo — escolha abaixo'),
+      el('div', { id: 'perfil-grupos' }, el('button', { class: 'btn', onclick: escolherMeusGrupos }, 'Escolher grupos')),
       el('div', {}, el('button', { class: 'btn perigo pequeno', onclick: async () => {
-        if (await confirmar('Desconectar o aparelho?', 'O robô para de ler o WhatsApp até você conectar de novo.', 'Desconectar', true)) {
-          await api('POST', '/api/whatsapp/desconectar'); assinaturaWhats = ''; atualizarWhats();
+        if (await confirmar('Desconectar seu WhatsApp?', 'O robô para de usar seu número. Para voltar, será preciso ler o QR de novo.', 'Desconectar', true)) {
+          await api('POST', '/api/whatsapp/desconectar'); S.assinaturaWhats = ''; atualizarMeuWhats();
         }
-      } }, 'Desconectar aparelho'))
-    );
+      } }, 'Desconectar')));
   } else if (w.estado === 'AGUARDANDO_PAREAMENTO') {
-    const tel = el('input', { type: 'tel', placeholder: '5522998765432' });
+    const tel = el('input', { type: 'tel', placeholder: '5522998765432', value: S.usuario.telefone || '' });
     const saida = el('div');
     filhos.push(
       el('span', { class: 'etiqueta atencao', text: 'Aguardando conexão' }),
       el('ol', { style: 'margin:0;padding-left:20px', class: 'pequeno' },
-        el('li', { text: 'No celular do robô, abra o WhatsApp > Aparelhos conectados > Conectar um aparelho.' }),
+        el('li', { text: 'No SEU celular: WhatsApp › Aparelhos conectados › Conectar um aparelho.' }),
         el('li', { text: 'Aponte a câmera para o QR abaixo.' })),
-      w.qrSvg ? Object.assign(el('div', { class: 'qr' }), { innerHTML: w.qrSvg }) : el('p', { class: 'mudo pequeno', text: 'QR indisponível — use o código por número abaixo.' }),
-      el('p', { class: 'mudo pequeno', style: 'margin:0', text: 'Sem câmera? Gere um código e digite no celular em "Conectar com número de telefone":' }),
+      w.qrSvg ? Object.assign(el('div', { class: 'qr' }), { innerHTML: w.qrSvg }) : el('p', { class: 'mudo pequeno', text: 'QR indisponível — use o código por número.' }),
+      el('p', { class: 'mudo pequeno', style: 'margin:0', text: 'Sem câmera? Gere um código e digite em "Conectar com número de telefone":' }),
       el('div', { class: 'linha', style: 'flex-wrap:nowrap' }, tel, el('button', { class: 'btn', onclick: async () => {
         try { const r = await api('POST', '/api/whatsapp/codigo', { numero: tel.value }); saida.replaceChildren(el('div', { class: 'codigo-pareamento', text: r.codigo })); }
         catch (e) { aviso(e.message, true); }
-      } }, 'Gerar código')),
-      saida
-    );
+      } }, 'Gerar código')), saida);
   } else {
-    const rot = { CONECTANDO: 'Conectando…', RECONECTANDO: 'Reconectando…', INDISPONIVEL: 'Indisponível', DESCONECTADO: 'Desconectado', ERRO: 'Erro', DESLIGADO: 'Desligado' };
+    const rot = { CONECTANDO: 'Conectando…', RECONECTANDO: 'Reconectando…', PAUSADO: w.pareado ? 'Pausado (sessão guardada)' : 'Não conectado', DESCONECTADO: 'Desconectado', ERRO: 'Erro' };
     filhos.push(el('span', { class: 'etiqueta atencao', text: rot[w.estado] || w.estado }));
     if (w.erro) filhos.push(el('p', { class: 'mudo pequeno', style: 'margin:0', text: w.erro }));
+    if (!['CONECTANDO', 'RECONECTANDO'].includes(w.estado)) filhos.push(el('div', {}, conectar));
   }
+  filhos.push(el('p', { class: 'mudo pequeno', style: 'margin:0', text: `No plano gratuito ficam ligados até ${w.maxAtivas} WhatsApps (o líder de plantão e um reserva). Os outros ficam guardados e religam sozinhos ao assumir o plantão.` }));
   box.replaceChildren(...filhos);
 }
 
-function desenharGrupos() {
-  const box = $('#cfg-grupos'); if (!box) return;
-  const cfg = S.config;
-  const conectado = S.whats?.estado === 'CONECTADO';
-  const atuais = (cfg.gruposMonitorados || []).map(id => cfg.nomesGrupos?.[id] || id);
-  const filhos = [
-    el('h2', { text: 'Grupos' }),
-    el('div', { class: 'pequeno' },
-      el('div', {}, el('span', { class: 'mudo', text: 'Lendo: ' }), atuais.length ? atuais.join(', ') : 'nenhum grupo'),
-      el('div', {}, el('span', { class: 'mudo', text: 'Publica em: ' }), cfg.nomesGrupos?.[cfg.grupoPublicacao] || '—'))
-  ];
-  if (!conectado) {
-    filhos.push(el('p', { class: 'mudo pequeno', style: 'margin:0', text: 'Conecte o WhatsApp para escolher os grupos.' }));
-    box.replaceChildren(...filhos); return;
-  }
-  if (!gruposCarregados) {
-    filhos.push(el('div', {}, el('button', { class: 'btn', onclick: async ev => {
-      ev.target.disabled = true;
-      try { gruposCarregados = (await api('GET', '/api/whatsapp/grupos')).grupos; desenharGrupos(); }
-      catch (e) { aviso(e.message, true); ev.target.disabled = false; }
-    } }, 'Escolher grupos')));
-    box.replaceChildren(...filhos); return;
-  }
-  const marcados = new Set(cfg.gruposMonitorados || []);
-  const busca = el('input', { type: 'search', placeholder: 'Filtrar grupos…' });
-  const lista = el('div', { class: 'lista-grupos' });
-  const pub = el('select', {}, el('option', { value: '', text: '— escolha —' }), gruposCarregados.map(g => el('option', { value: g.id, text: g.nome })));
-  pub.value = cfg.grupoPublicacao || '';
-  const desenharLista = () => {
-    const t = semAcento(busca.value).toLowerCase();
-    lista.replaceChildren(...gruposCarregados.filter(g => !t || semAcento(g.nome).toLowerCase().includes(t)).map(g => {
-      const c = el('input', { type: 'checkbox', checked: marcados.has(g.id), onchange: e => { e.target.checked ? marcados.add(g.id) : marcados.delete(g.id); } });
-      return el('label', { class: 'check' }, c, el('span', {}, g.nome, el('span', { class: 'mudo pequeno', text: `  ${g.membros} membros` })));
-    }));
+async function escolherMeusGrupos() {
+  const box = $('#perfil-grupos');
+  try {
+    const [{ grupos }, w] = await Promise.all([api('GET', '/api/whatsapp/grupos'), api('GET', '/api/whatsapp')]);
+    const marcados = new Set(w.grupos.map(g => g.id));
+    const busca = el('input', { type: 'search', placeholder: 'Filtrar grupos…' });
+    const lista = el('div', { class: 'lista-grupos' });
+    const desenhar = () => {
+      const t = semAcento(busca.value).toLowerCase();
+      lista.replaceChildren(...grupos.filter(g => !t || semAcento(g.nome).toLowerCase().includes(t)).map(g => el('label', { class: 'check' },
+        el('input', { type: 'checkbox', checked: marcados.has(g.id), onchange: e => { e.target.checked ? marcados.add(g.id) : marcados.delete(g.id); } }),
+        el('span', {}, g.nome, el('span', { class: 'mudo pequeno', text: `  ${g.membros} membros` })))));
+    };
+    busca.addEventListener('input', desenhar); desenhar();
+    box.replaceChildren(
+      el('p', { class: 'mudo pequeno', style: 'margin:0 0 6px', text: 'Marque só os grupos de trabalho (ex.: EQUIPE AZUL - US FERROPORT). Os demais nunca são lidos.' }),
+      busca, lista,
+      el('div', { style: 'margin-top:8px' }, el('button', { class: 'btn primario', onclick: async () => {
+        const nomes = {}; grupos.forEach(g => { if (marcados.has(g.id)) nomes[g.id] = g.nome; });
+        await api('PUT', '/api/whatsapp/grupos', { grupos: [...marcados], nomes });
+        aviso('Grupos salvos ✓'); S.assinaturaWhats = ''; atualizarMeuWhats(); carregarConfig();
+      } }, 'Salvar grupos')));
+  } catch (e) { aviso(e.message, true); }
+}
+
+// ----------------------------- Usuários (admin) ----------------------
+async function abrirUsuarios() {
+  let lista;
+  try { lista = (await api('GET', '/api/usuarios')).usuarios; } catch (e) { return aviso(e.message, true); }
+  const mostrarSenha = (nome, senha) => abrirModal('Senha provisória', [
+    el('p', { text: `Envie para ${nome} por um canal seguro. No primeiro acesso a pessoa cria a própria senha.` }),
+    el('div', { class: 'senha-box', text: senha })
+  ], [el('button', { class: 'btn', onclick: () => copiar(senha) }, '📋 Copiar'), el('button', { class: 'btn primario', 'data-fechar': true }, 'Pronto')]);
+
+  const cartoes = lista.map(x => {
+    const perfil = el('select', {}, Object.entries(S.meta.perfis).map(([k, v]) => el('option', { value: k, text: v })));
+    perfil.value = x.perfil;
+    perfil.addEventListener('change', async () => { try { await api('PUT', `/api/usuarios/${x.id}`, { perfil: perfil.value }); aviso('Perfil alterado ✓'); } catch (e) { aviso(e.message, true); perfil.value = x.perfil; } });
+    return el('div', { class: 'usuario-card' },
+      el('div', { class: 'cartao-topo' },
+        el('div', {}, el('strong', { text: x.nome }), el('div', { class: 'mudo pequeno', text: x.email })),
+        el('span', { class: `etiqueta ${x.ativo ? (x.temSenha ? 'ok' : 'atencao') : 'urgente'}`, text: !x.ativo ? 'Desativado' : x.temSenha ? (x.trocarSenha ? 'Senha provisória' : 'Ativo') : 'Sem senha' })),
+      el('div', { class: 'grade-2' }, el('label', { class: 'campo' }, 'Perfil', perfil),
+        el('div', { class: 'campo' }, 'WhatsApp', el('span', { text: x.whatsapp.pareado ? `+${x.whatsapp.numero || ''} · ${x.whatsapp.estado === 'CONECTADO' ? 'ligado' : 'guardado'}` : '—' }))),
+      el('div', { class: 'linha' },
+        el('button', { class: 'btn pequeno', onclick: async () => { try { const r = await api('POST', `/api/usuarios/${x.id}/senha`); mostrarSenha(x.nome, r.senhaProvisoria); } catch (e) { aviso(e.message, true); } } }, x.temSenha ? 'Gerar senha provisória' : 'Criar senha provisória'),
+        el('button', { class: 'btn fantasma pequeno', onclick: async () => {
+          if (x.ativo && !await confirmar(`Desativar ${x.nome}?`, 'A pessoa perde o acesso e o WhatsApp dela é desconectado do robô.', 'Desativar', true)) return;
+          try { await api('PUT', `/api/usuarios/${x.id}`, { ativo: !x.ativo }); abrirUsuarios(); } catch (e) { aviso(e.message, true); }
+        } }, x.ativo ? 'Desativar' : 'Reativar')));
+  });
+
+  const novo = () => {
+    const [c1, iNome] = campoLinha('Nome', '', { autofocus: true });
+    const [c2, iEmail] = campoLinha('E-mail (obrigatório — recebe os e-mails do robô)', '', { tipo: 'email' });
+    const [c3, iTel] = campoLinha('Telefone (opcional)', '', { tipo: 'tel' });
+    const perfil = el('select', {}, Object.entries(S.meta.perfis).map(([k, v]) => el('option', { value: k, text: v })));
+    perfil.value = 'OPERADOR';
+    abrirModal('Novo usuário', [c1, c2, c3, el('label', { class: 'campo' }, 'Perfil', perfil),
+      el('p', { class: 'mudo pequeno', style: 'margin:0', text: 'Líder: assume o plantão, conecta o WhatsApp e publica. Operador: registra e trata a entrada, não publica.' })],
+    botoesSalvar(async () => {
+      const r = await api('POST', '/api/usuarios', { nome: iNome.value, email: iEmail.value, telefone: iTel.value, perfil: perfil.value });
+      mostrarSenha(r.usuario.nome, r.senhaProvisoria);
+      abrirUsuarios();
+    }, 'Cadastrar'));
   };
-  busca.addEventListener('input', desenharLista);
-  desenharLista();
-  filhos.push(
-    el('p', { class: 'mudo pequeno', style: 'margin:0', text: 'Marque só os grupos de trabalho (ex.: EQUIPE AZUL - US FERROPORT). Os outros grupos nunca são lidos.' }),
-    busca, lista,
-    el('label', { class: 'campo' }, 'Publicar o relatório em', pub),
-    el('div', {}, el('button', { class: 'btn primario', onclick: async () => {
-      const nomes = {};
-      gruposCarregados.forEach(g => { if (marcados.has(g.id) || g.id === pub.value) nomes[g.id] = g.nome; });
-      cfg.gruposMonitorados = [...marcados];
-      cfg.grupoPublicacao = pub.value;
-      cfg.nomesGrupos = nomes;
-      await salvarConfig();
-      gruposCarregados = null; desenharGrupos();
-    } }, 'Salvar grupos'))
-  );
-  box.replaceChildren(...filhos);
+
+  abrirPainel('👥 Usuários', [
+    el('div', {}, el('button', { class: 'btn primario', onclick: novo }, '+ Novo usuário')),
+    ...cartoes
+  ]);
 }
 
-async function carregarHistorico() {
-  const box = $('#cfg-historico');
+// ----------------------------- Configurações (admin) -----------------
+async function abrirConfig() {
+  let grupos = [];
+  try { await carregarConfig(); grupos = (await api('GET', '/api/whatsapp/grupos-conhecidos')).grupos; } catch (e) { return aviso(e.message, true); }
+  const cfg = clone(S.config);
+  const L = (rotulo, chave, opts = {}) => el('label', { class: 'campo' }, rotulo, el('input', { type: opts.tipo || 'text', value: cfg[chave] ?? '', placeholder: opts.placeholder, oninput: e => { cfg[chave] = e.target.value; } }));
+  const pub = el('select', { onchange: e => { cfg.grupoPublicacao = e.target.value; } }, el('option', { value: '', text: '— escolha —' }), grupos.map(g => el('option', { value: g.id, text: g.nome })));
+  pub.value = cfg.grupoPublicacao || '';
+  const alertas = el('input', { type: 'checkbox', checked: cfg.alertasAtivos, onchange: e => { cfg.alertasAtivos = e.target.checked; } });
+  const base = el('textarea', { rows: 3, value: (cfg.atividadesBase || []).join('\n'), oninput: e => { cfg.atividadesBase = e.target.value.split('\n'); autoAltura(e.target); } });
+  const navios = el('textarea', { rows: 8, value: (cfg.navios || []).map(n => `${n.nome} ; ${n.terminal}`).join('\n'), oninput: e => {
+    cfg.navios = e.target.value.split('\n').map(l => l.split(/[;=]/)).filter(p => p[0].trim()).map(([nome, term]) => ({ nome: nome.trim(), terminal: (term || 'T-ORE').trim() })); autoAltura(e.target);
+  } });
+  const emailInfo = S.meta.email.ativo ? el('span', { class: 'etiqueta ok', text: '● E-mail do robô ativo' }) : el('span', { class: 'etiqueta atencao', style: 'white-space:normal', text: S.meta.email.motivo });
+
+  abrirPainel('⚙️ Configurações', [
+    el('section', { class: 'cartao' }, el('h2', { text: 'Publicação' }),
+      el('label', { class: 'campo' }, 'Grupo onde o relatório é publicado', pub),
+      el('p', { class: 'mudo pequeno', style: 'margin:0', text: 'A lista mostra os grupos escolhidos pelos líderes em "Meu perfil". Publica pelo WhatsApp de quem está de plantão.' })),
+    el('section', { class: 'cartao' }, el('h2', { text: 'E-mails de bordo' }), emailInfo,
+      L('Encaminhar para (lista oficial, separe por ;)', 'emailDestinatarios', { placeholder: 'operacoes@ferroport.com.br; supervisao@ferroport.com.br' }),
+      L('Cópia (Cc)', 'emailCopia'),
+      L('Se ninguém estiver de plantão, enviar para', 'emailPadrao', { placeholder: 'ruddgero.ribeiro@ferroport.com.br' }),
+      el('p', { class: 'mudo pequeno', style: 'margin:0', text: 'O robô envia cada minuta ao e-mail do líder de plantão; o líder confere, anexa as evidências e encaminha à lista oficial.' })),
+    el('section', { class: 'cartao' }, el('h2', { text: 'Alerta de emergência' }),
+      el('label', { class: 'check' }, alertas, 'Enviar alerta no privado quando houver possível emergência'),
+      L('Número que recebe (55 + DDD + número)', 'alertaNumero', { tipo: 'tel', placeholder: '5522998765432' })),
+    el('section', { class: 'cartao' }, el('h2', { text: 'Padrões do relatório' }),
+      el('div', { class: 'grade-2' }, L('Viatura', 'vtrModelo'), L('Placa da viatura', 'vtrPlaca')),
+      el('label', { class: 'campo' }, 'Atividades fixas de todo turno (uma por linha)', base)),
+    el('section', { class: 'cartao' }, el('h2', { text: 'Navios conhecidos' }),
+      el('label', { class: 'campo' }, 'Um por linha: NOME ; TERMINAL (T-ORE ou T-OIL)', navios)),
+    el('div', {}, el('button', { class: 'btn primario largo', onclick: async () => {
+      try { S.config = (await api('PUT', '/api/config', { config: cfg })).config; aviso('Configurações salvas ✓'); } catch (e) { aviso(e.message, true); }
+    } }, 'Salvar configurações')),
+    el('section', { class: 'cartao' }, el('h2', { text: 'Registro de ações' }),
+      el('div', { id: 'cfg-auditoria' }, el('button', { class: 'btn pequeno', onclick: async () => {
+        const { itens } = await api('GET', '/api/auditoria');
+        $('#cfg-auditoria').replaceChildren(el('div', { class: 'texto-bruto' }, itens.map(i => `${i.data} ${i.hora} · ${i.por} · ${i.acao}${i.detalhe ? ' — ' + i.detalhe : ''}`).join('\n')));
+      } }, 'Ver últimas ações'))),
+    el('p', { class: 'mudo pequeno', text: `Dados guardados em: ${S.meta.armazenamento === 'firestore' ? 'Firebase' : 'pasta "dados" do servidor'}` })
+  ]);
+  requestAnimationFrame(() => { autoAltura(base); autoAltura(navios); });
+}
+
+// ----------------------------- Histórico -----------------------------
+async function abrirHistorico() {
   try {
     const { itens } = await api('GET', '/api/historico');
-    box.replaceChildren(...(itens.length ? itens.map(h => el('details', { class: 'historico' },
+    abrirPainel('🗂️ Turnos anteriores', itens.length ? itens.map(h => el('details', { class: 'cartao historico' },
       el('summary', { text: `${h.data} · ${h.turno}${h.publicadoEm ? ' · publicado' : ''}` }),
       el('div', { class: 'texto-bruto', style: 'margin:8px 0', text: h.texto }),
-      el('button', { class: 'btn pequeno', onclick: () => copiar(h.texto) }, 'Copiar')
-    )) : [el('p', { class: 'mudo pequeno', text: 'Nenhum turno arquivado ainda.' })]));
+      el('button', { class: 'btn pequeno', onclick: () => copiar(h.texto) }, 'Copiar'))) : [el('p', { class: 'mudo', text: 'Nenhum turno arquivado ainda.' })]);
   } catch (e) { aviso(e.message, true); }
 }
 
@@ -1140,6 +1429,9 @@ async function carregarHistorico() {
   if ('serviceWorker' in navigator && window.isSecureContext) navigator.serviceWorker.register('/sw.js').catch(() => {});
   try {
     const s = await api('GET', '/api/sessao');
-    if (s.logado) entrar(); else mostrarLogin();
+    S.usuario = s.usuario;
+    if (!s.usuario) return mostrarLogin();
+    if (s.usuario.trocarSenha) return pedirTrocaSenha(true);
+    entrar();
   } catch (_) { mostrarLogin(); }
 })();

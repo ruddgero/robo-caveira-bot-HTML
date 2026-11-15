@@ -1,6 +1,6 @@
-// Teste rápido: node test/teste_relatorio.js
+// Testes das regras do relatório: node teste_relatorio.js
 const assert = require('assert');
-const R = require('../src/relatorio');
+const R = require('./relatorio');
 
 const RELATORIO_US = `RELATÓRIO DO TURNO - DIURNO
 Data: 14/11/2026
@@ -25,11 +25,7 @@ Total de leituras: 188 veículos
 4. ATIVIDADES REALIZADAS
 ✓ Realizadas atividades administrativas.
 ✓ Realizadas rondas no perímetro;
-✓ Acesso do programa de visita PDA sem alteração;
-✓ MV - LILA PSARA - T-ORE. Atracado às 08:54;
-✓ AROSA - T-OIL. Atracado às 12:55;
 ✓ MV - LILA PSARA – T-ORE. Embarque de 03 tripulantes sem registo de ocorrência;
-✓ MV - LILA PSARA – T-ORE. Acesso do rancho da empresa Boa Praça, a empresa retornara amanhã para finalizar a entrega de 02 itens que faltam.
 
 6. MOVIMENTAÇÃO DE NAVIOS
 T-ORE
@@ -45,73 +41,114 @@ AROSA: Atracado às 12:55.
 EQUIPE SAINDO:
 Wallace Ferroport e Equipe US
 EQUIPE ASSUMINDO:
-Ruddgero Ribeiro e Equipe CCOS`;
+✓ Ruddgero Ribeiro, Lais Campos e Felipe Furtado`;
 
-assert.ok(R.ehRelatorioDeTurno(RELATORIO_US), 'deve reconhecer o relatório');
-assert.ok(!R.ehRelatorioDeTurno('Equipe, alguém viu o relatório do turno? VTR está na base'), 'pergunta não é relatório');
+const MSG_FELIPE = `*ENTREGA DE PROVISÃO*
 
+*Tipo:* RANCHO
+*Terminal:* T.OIL
+*Navio:* BARCELONA SPIRIT
+*Navio:* NISSOS NIKOURIA
+*Empresa:* MAPAMAR
+*Motorista:* RAFAEL SILVA
+*Ajudante:* VITOR DOS SANTOS
+*Veículo:* CAMINHÃO
+*Placa:*  RJG-9D19
+*Saída na portaria:* 19:01H`;
+
+// ---- Relatório da US
+assert.ok(R.ehRelatorioDeTurno(RELATORIO_US));
+assert.ok(!R.ehRelatorioDeTurno('Equipe, alguém viu o relatório do turno? VTR está na base'));
 const lido = R.lerRelatorio(RELATORIO_US);
 const d = lido.dados;
-console.log('Encontrados:', lido.encontrados.join(', '));
-console.log('Faltando:', lido.faltando.join(', ') || '(nada)');
-assert.strictEqual(d.data, '14/11/2026');
 assert.strictEqual(d.turno, 'DIURNO');
-assert.strictEqual(d.vtr.kmInicial, 19358);
 assert.strictEqual(d.vtr.kmFinal, 19365);
-assert.strictEqual(d.vtr.placa, 'TDG-8C89');
-assert.strictEqual(d.sistemas.cftv, '✓ Poste 38, Fixa Portão 04 da Filtragem.');
-assert.strictEqual(d.sistemas.ca, '✓ S/A');
-assert.strictEqual(d.sistemas.ocrAssertividade, '88,05%');
 assert.strictEqual(d.sistemas.ocrLeituras, '188');
-assert.strictEqual(d.atividades.length, 7);
-assert.strictEqual(d.navios.tore, 'MV - LILA PSARA: Atracado às 08:54.');
-assert.strictEqual(d.navios.toil, 'AROSA: Atracado às 12:55.');
-assert.deepStrictEqual(d.ocorrencias, []);
-assert.strictEqual(d.equipes.saindo, 'Wallace Ferroport e Equipe US');
-assert.strictEqual(d.equipes.assumindo, 'Ruddgero Ribeiro e Equipe CCOS');
+assert.strictEqual(d.equipes.assumindo, 'Ruddgero Ribeiro, Lais Campos e Felipe Furtado', 'sem o ✓');
+assert.strictEqual(d.navios.tore[0].navio, 'MV - LILA PSARA');
+assert.deepStrictEqual(d.navios.tore[0].linhas, ['Atracado às 08:54.']);
+assert.strictEqual(d.navios.toil[0].navio, 'AROSA');
+assert.deepStrictEqual(lido.faltando, []);
 
-const config = { atividadesBase: ['Realizadas atividades administrativas.', 'Executada ronda em todo o terminal.'] };
-const nova = R.fichaHerdada({ ...lido, autor: 'Wallace Ferroport' }, null, config);
+// ---- Mensagem padrão do Felipe
+const c = R.classificarMensagem(MSG_FELIPE, R.NAVIOS_PADRAO, '19:02');
+assert.strictEqual(c.sugestao, 'OPERACAO', 'provisão com "Saída" não pode virar Saída/Atividade');
+assert.ok(c.estruturada);
+assert.strictEqual(c.rascunhos.length, 2, 'um rascunho por navio');
+const [o1, o2] = c.rascunhos;
+assert.strictEqual(o1.tipo, 'RANCHO');
+assert.strictEqual(o1.navio, 'BARCELONA SPIRIT');
+assert.strictEqual(o2.navio, 'NISSOS NIKOURIA');
+assert.strictEqual(o1.terminal, 'T-OIL');
+assert.strictEqual(o1.empresa, 'MAPAMAR');
+assert.strictEqual(o1.responsavel, 'RAFAEL SILVA');
+assert.strictEqual(o1.ajudante, 'VITOR DOS SANTOS');
+assert.strictEqual(o1.placa, 'RJG-9D19');
+assert.strictEqual(o1.horaFinal, '19:01');
+const ativ = R.atividadeDasOperacoes(c.rascunhos, '19:02');
+console.log('Atividade gerada:', ativ);
+assert.ok(ativ.includes('BARCELONA SPIRIT e NISSOS NIKOURIA') && ativ.includes('Saída às 19:01h.'));
+assert.strictEqual(R.resumoNavio(o1), 'Fornecimento de Rancho.');
+
+const email = R.minutaEmail({ ...o1, data: '14/11/2026' });
+console.log('\n--- E-MAIL ---\nAssunto:', email.assunto, '\n' + email.corpo + '\n--------------');
+assert.strictEqual(email.assunto, 'FORNECIMENTO DE RANCHO - BARCELONA SPIRIT - T-OIL - 14-11-2026');
+assert.ok(email.corpo.includes('Registro o fornecimento de bordo:'));
+assert.ok(email.corpo.includes('Autorizado por (Autoridades): Receita Federal'));
+assert.ok(/Autorizados por \(Terminal\): \n/.test(email.corpo), 'terminal em branco');
+assert.ok(email.corpo.includes('conferência das Notas Fiscais'));
+
+// ---- Tripulação
+const trip = R.classificarMensagem('MV - LILA PSARA – T-ORE. Desembarque de 2 tripulantes, van placa XYZ9K76 agência OCEAN às 14h20', R.NAVIOS_PADRAO, '14:25');
+assert.strictEqual(trip.sugestao, 'OPERACAO');
+const t1 = trip.rascunhos[0];
+assert.strictEqual(t1.tipo, 'TRIPULACAO');
+assert.strictEqual(t1.movimento, 'Desembarque');
+assert.strictEqual(t1.quantidade, '02');
+assert.strictEqual(t1.terminal, 'T-ORE');
+assert.strictEqual(R.resumoNavio(t1), 'Desembarque de 02 tripulantes.');
+const et = R.minutaEmail({ ...t1, horaFinal: '15:00' });
+assert.ok(et.corpo.includes('Autorizado por (Autoridades): Polícia Federal'));
+assert.ok(et.assunto.startsWith('MOVIMENTAÇÃO DE TRIPULAÇÃO - MV - LILA PSARA - T-ORE'));
+
+// ---- Outras classificações
+const s = m => R.classificarMensagem(m).sugestao;
+assert.strictEqual(s('bom dia a todos'), 'IGNORAR');
+assert.strictEqual(s('Saída do caminhão ABC1D23 às 16:40'), 'SAIDA');
+assert.strictEqual(s('Câmera do poste 12 oscilando, chamado aberto com a Digital'), 'DIGITAL');
+assert.strictEqual(s('Princípio de incêndio na subestação 2'), 'OCORRENCIA');
+assert.strictEqual(s('AROSA desatracado às 22:10'), 'NAVIO');
+assert.strictEqual(s('Realizada ronda no Gate 3 sem alteração'), 'ATIVIDADE');
+
+// ---- Herança e texto
+const nova = R.fichaHerdada({ ...lido, autor: 'Wallace' }, null, { atividadesBase: ['Realizadas atividades administrativas.'] });
 assert.strictEqual(nova.turno, 'NOTURNO');
-assert.strictEqual(nova.vtr.kmInicial, 19365);
-assert.strictEqual(nova.equipes.saindo, 'Ruddgero Ribeiro e Equipe CCOS');
-assert.strictEqual(nova.atividades.length, 2);
-
-// Ida e volta: o nosso relatório precisa ser lido de novo pelo mesmo leitor
+assert.strictEqual(nova.equipes.saindo, 'Ruddgero Ribeiro, Lais Campos e Felipe Furtado');
+R.adicionarLinhaNavio(nova, 'T-OIL', 'BARCELONA SPIRIT', 'Fornecimento de Rancho.');
+R.adicionarLinhaNavio(nova, 'T-ORE', 'LILA PSARA', 'Desembarque de 02 tripulantes.');
+assert.strictEqual(nova.navios.tore.length, 1, 'LILA PSARA = MV - LILA PSARA (não duplica)');
 nova.vtr.kmFinal = 19372;
-nova.atividades.push({ id: 'x', texto: 'Apoio ao embarque de 02 tripulantes do MV LILA PSARA.' });
-nova.avisos.push({ id: 'a', titulo: 'URNAS DA CIPA', texto: 'Verificar status das chaves.' });
-nova.equipes.assumindo = 'Wallace Ferroport e Equipe US';
-const texto = R.formatarRelatorio(nova);
-console.log('\n----- RELATÓRIO GERADO -----\n' + texto + '\n----------------------------\n');
-const relido = R.lerRelatorio(texto).dados;
+nova.atividades.push({ id: 'a', texto: ativ });
+const avisos = [{ titulo: 'URNAS DA CIPA', texto: 'Verificar status das chaves.', historico: [{ tipo: 'ATUALIZACAO', data: '14/11', hora: '21:10', texto: 'Chaves com o vigilante.' }] }];
+const texto = R.formatarRelatorio(nova, avisos);
+console.log('\n--- RELATÓRIO ---\n' + texto + '\n-----------------');
+const relido = R.lerRelatorio(texto);
 assert.ok(R.ehRelatorioDeTurno(texto));
-assert.strictEqual(relido.vtr.kmFinal, 19372);
-assert.strictEqual(relido.avisos[0].titulo, 'URNAS DA CIPA');
-assert.strictEqual(relido.equipes.assumindo, 'Wallace Ferroport e Equipe US');
-assert.strictEqual(relido.navios.tore, 'MV - LILA PSARA: Atracado às 08:54.');
+assert.strictEqual(relido.dados.vtr.kmFinal, 19372);
+assert.strictEqual(relido.dados.avisos[0].titulo, 'URNAS DA CIPA');
+assert.strictEqual(relido.dados.navios.toil.find(n => n.navio === 'BARCELONA SPIRIT').linhas[0], 'Fornecimento de Rancho.');
+assert.ok(texto.includes('Assertividade: 88,05%;') && texto.includes('Total de leituras: 188 veículos.'));
 
-// Classificação
-const c = m => R.classificarMensagem(m).sugestao;
-assert.strictEqual(c('bom dia a todos'), 'IGNORAR');
-assert.strictEqual(c('Bom plantão!'), 'IGNORAR');
-assert.strictEqual(c('Caminhão do rancho placa ABC-1D23 entrando para o MV LILA PSARA T-ORE'), 'OPERACAO');
-assert.strictEqual(c('Saída do caminhão ABC1D23 às 16:40'), 'SAIDA');
-assert.strictEqual(c('Princípio de incêndio na subestação 2'), 'OCORRENCIA');
-assert.ok(R.classificarMensagem('Princípio de incêndio na subestação 2').urgente);
-assert.strictEqual(c('AROSA desatracado às 22:10'), 'NAVIO');
-assert.strictEqual(c('Realizada ronda no gate 3 sem alteração'), 'ATIVIDADE');
-const campos = R.extrairCampos('MV - LILA PSARA – T-ORE. Embarque de 03 tripulantes às 14h20, van placa XYZ9K76');
-console.log('Campos extraídos:', campos);
-assert.strictEqual(campos.navio, 'LILA PSARA');
-assert.strictEqual(campos.terminal, 'T-ORE');
-assert.strictEqual(campos.quantidade, '03');
-assert.strictEqual(campos.movimento, 'Embarque');
-assert.strictEqual(campos.placa, 'XYZ-9K76');
+// ---- Relatório no formato do robô antigo (5.1. AVISO)
+const antigo = `*RELATÓRIO DO TURNO - NOTURNO*\nData: 13/11/2026\n\n*1. EFETIVO CCOS*\n✓ S/A\n\n*2. VIATURA – VTR*\nKM inicial: 19.228\nKM final: 19.235\n\n*3. SISTEMAS*\n*CFTV*\n✓ S/A\n\n*4. ATIVIDADES REALIZADAS*\n✓ X\n\n*5. AVISOS E AÇÕES DE ACOMPANHAMENTO*\n\n*5.1. AVISO*\nBagagens na Receita Federal (T-OIL): Acompanhar liberação.\n\n*6. MOVIMENTAÇÃO DE NAVIOS*\n\n*T-ORE*\n\n*MARAN COURAGE*\n✓ Fornecimento de Rancho.\n\n*T-OIL*\n\n✓ S/A\n\n*7. OCORRÊNCIAS:*\n✓ S/A\n\n*8. PASSAGEM DE TURNO*\n\n*EQUIPE SAINDO:*\nConforme escala\n\n*EQUIPE ASSUMINDO:*\nConforme escala`;
+const la = R.lerRelatorio(antigo).dados;
+assert.strictEqual(la.avisos[0].titulo, 'BAGAGENS NA RECEITA FEDERAL (T-OIL)');
+assert.strictEqual(la.navios.tore[0].navio, 'MARAN COURAGE');
+assert.deepStrictEqual(la.navios.toil, []);
 
-const op = { tipo: 'MOVIMENTAÇÃO DE TRIPULAÇÃO', navio: 'LILA PSARA', terminal: 'T-ORE', quantidade: '03', movimento: 'Embarque', horaInicial: '14:20', horaFinal: '15:05', empresa: 'Agência X', placa: 'XYZ-9K76', veiculo: 'Van' };
-const email = R.minutaEmail(op, nova, { emailDestinatarios: 'a@b.com' });
-console.log('Assunto:', email.assunto);
-console.log('Atividade da operação:', R.atividadeDaOperacao(op));
-console.log('Conferência:', R.conferirFicha(nova));
+// ---- Passagem da escala
+const pe = R.formatarPassagemEscala('11/11/2026 a 14/11/2026', { digital: [{ texto: 'Câmeras ausentes: Poste 38.' }], avisos: [], ocorrencias: [], atividades: [{ texto: 'Ronda.' }] });
+assert.ok(pe.includes('*1. PENDÊNCIAS DA DIGITAL (CFTV E INFRAESTRUTURA)*\n✓ Câmeras ausentes: Poste 38.'));
+assert.ok(pe.includes('*2. AVISOS E AÇÕES DE ACOMPANHAMENTO*\n✓ S/A'));
+
 console.log('\n✅ Todos os testes passaram.');

@@ -1,21 +1,89 @@
 // =====================================================================
-// FICHA DO TURNO: leitura do relatório da US, herança, texto oficial,
-// classificação de mensagens do grupo e minutas de e-mail de bordo.
-// Toda a regra de negócio do relatório fica AQUI (uma única fonte).
+// REGRAS DO RELATÓRIO (fonte única)
+//  - leitura do relatório do turno postado no grupo
+//  - herança para o novo turno
+//  - texto oficial do relatório (8 seções) e da Passagem da Escala
+//  - leitura das mensagens do grupo (inclusive o formato *Campo:* valor)
+//  - operações de bordo e modelos de e-mail
+// Padrões de texto seguem o robô antigo do CCOS.
 // =====================================================================
-const { agora, turnoPelaHora, novoId, semAcento, limparMarcador } = require('./util');
-
-const PROCEDIMENTOS_PADRAO = '(Identificação, verificação das autorizações, Check List, Briefing de segurança, inspeções, acompanhamento e monitoramento).';
-const PROCEDIMENTOS_FORNECIMENTO = '(Identificação, verificação das autorizações, Check List, Briefing de segurança, conferência das Notas Fiscais, inspeções, acompanhamento e monitoramento).';
+const {
+    agora, turnoPelaHora, dataDoTurno, diaSeguinte, novoId, semAcento, limparMarcador,
+    normalizarHora, normalizarPlaca, normalizarTerminal, normalizarTexto
+} = require('./util');
 
 // ---------------------------------------------------------------------
-// Estrutura da ficha
+// Tipos de operação de bordo
 // ---------------------------------------------------------------------
-// Data "oficial" do turno: o noturno que vira a meia-noite continua com a data em que começou
-function dataDoTurno(turno, t = agora()) {
-    return (turno === 'NOTURNO' && t.horaNum < 7) ? dataDeOntem(t.data) : t.data;
+const PROC_TRIPULACAO = '(Identificação, verificação das autorizações, Briefing de segurança, inspeções, acompanhamento e monitoramento).';
+const PROC_FORNECIMENTO = '(Identificação, verificação das autorizações, Check List, Briefing de segurança, conferência das Notas Fiscais, inspeções, acompanhamento e monitoramento).';
+
+const TIPOS_OPERACAO = {
+    TRIPULACAO: { rotulo: 'Movimentação de tripulantes', assunto: 'MOVIMENTAÇÃO DE TRIPULAÇÃO', tipo: 'Movimentação de tripulação', autoridade: 'Polícia Federal' },
+    RANCHO: { rotulo: 'Fornecimento de rancho', assunto: 'FORNECIMENTO DE RANCHO', tipo: 'Rancho', resumo: 'Fornecimento de Rancho.' },
+    MATERIAIS: { rotulo: 'Materiais e equipamentos', assunto: 'FORNECIMENTO DE MATERIAIS E EQUIPAMENTOS', tipo: 'Materiais e equipamentos', resumo: 'Fornecimento de Materiais.' },
+    DTA: { rotulo: 'DTA', assunto: 'FORNECIMENTO DE DTA', tipo: 'DTA', resumo: 'Fornecimento de DTA.' },
+    AGUA: { rotulo: 'Água potável', assunto: 'FORNECIMENTO DE ÁGUA POTÁVEL', tipo: 'Água potável', resumo: 'Fornecimento de Água Potável.' },
+    COMBUSTIVEL: { rotulo: 'Combustível', assunto: 'ABASTECIMENTO DE COMBUSTÍVEL', tipo: 'Combustível', resumo: 'Abastecimento de Combustível.' },
+    RESIDUOS: { rotulo: 'Retirada de resíduos', assunto: 'RETIRADA DE RESÍDUOS', tipo: 'Retirada de resíduos', resumo: 'Retirada de Resíduos.' },
+    K9: { rotulo: 'Inspeção K9', assunto: 'INSPEÇÃO K9', tipo: 'Inspeção K9', resumo: 'Inspeção K9.' },
+    MERGULHO: { rotulo: 'Mergulho', assunto: 'INSPEÇÃO SUBMARINA - MERGULHO', tipo: 'Inspeção submarina (mergulho)', resumo: 'Inspeção submarina (mergulho).' },
+    LACRE: { rotulo: 'Lacre / deslacração', assunto: 'LACRE - DESLACRAÇÃO', tipo: 'Lacre / deslacração', resumo: 'Lacre / deslacração.' },
+    OUTRA: { rotulo: 'Outra operação', assunto: 'OPERAÇÃO DE BORDO', tipo: 'Operação de bordo', resumo: 'Operação de bordo.' }
+};
+for (const t of Object.values(TIPOS_OPERACAO)) if (!t.autoridade) t.autoridade = 'Receita Federal';
+
+const MOVIMENTOS = ['Embarque', 'Desembarque', 'Embarque e Desembarque', 'Saída a passeio', 'Saída para atendimento médico'];
+
+const NAVIOS_PADRAO = [
+    ['MV - LILA PSARA', 'T-ORE'], ['MARAN COURAGE', 'T-ORE'], ['MARLENE OLDENDORFF', 'T-ORE'],
+    ['BARCELONA SPIRIT', 'T-OIL'], ['NISSOS NIKOURIA', 'T-OIL'], ['AROSA', 'T-OIL'], ['YUAN DONG HAI', 'T-OIL'],
+    ['EAGLE PAULINIA', 'T-OIL'], ['PERTAMINA PRIME', 'T-OIL'], ['ALMI ODYSSEY', 'T-OIL'],
+    ['SYNNOEVE KNUTSEN', 'T-OIL'], ['SEAWAYS CAPE HENRY', 'T-OIL'], ['MARAN GAS', 'T-OIL']
+].map(([nome, terminal]) => ({ nome, terminal }));
+
+function tipoOperacaoDoTexto(texto) {
+    const n = semAcento(texto).toLowerCase();
+    if (/tripula|embarque|desembarque|passeio|atendimento medico/.test(n)) return 'TRIPULACAO';
+    if (/rancho|provis|viveres|alimento/.test(n)) return 'RANCHO';
+    if (/residuo|lixo|borra/.test(n)) return 'RESIDUOS';
+    if (/agua potavel|\bagua\b/.test(n)) return 'AGUA';
+    if (/bunker|combustivel|diesel/.test(n)) return 'COMBUSTIVEL';
+    if (/\bk-?9\b|canin/.test(n)) return 'K9';
+    if (/mergulh|submarin/.test(n)) return 'MERGULHO';
+    if (/lacre|deslacra/.test(n)) return 'LACRE';
+    if (/\bdta\b/.test(n)) return 'DTA';
+    if (/materia|pecas|sobressalente|equipamento/.test(n)) return 'MATERIAIS';
+    return 'OUTRA';
 }
 
+function movimentoDoTexto(texto) {
+    const n = semAcento(texto).toUpperCase();
+    if (/ATENDIMENTO MEDICO|MEDICO|HOSPITAL/.test(n)) return 'Saída para atendimento médico';
+    if (/PASSEIO|SHORE LEAVE/.test(n)) return 'Saída a passeio';
+    const des = /DESEMBARQUE/.test(n);
+    const emb = /\bEMBARQUE/.test(n.replace(/DESEMBARQUE/g, ''));
+    if (des && emb) return 'Embarque e Desembarque';
+    if (des) return 'Desembarque';
+    if (emb) return 'Embarque';
+    return '';
+}
+
+function formatarQtdTripulantes(q) {
+    const n = parseInt(String(q || '').replace(/\D/g, ''), 10);
+    if (!n) return '01 tripulante';
+    return `${String(n).padStart(2, '0')} tripulante${n === 1 ? '' : 's'}`;
+}
+
+// Linha da seção 6 para uma operação (padrão do robô antigo)
+function resumoNavio(op) {
+    if (op.tipo === 'TRIPULACAO') return `${op.movimento || 'Embarque'} de ${formatarQtdTripulantes(op.quantidade)}.`;
+    return (TIPOS_OPERACAO[op.tipo] || TIPOS_OPERACAO.OUTRA).resumo;
+}
+
+// ---------------------------------------------------------------------
+// Ficha do turno
+// ---------------------------------------------------------------------
 function fichaVazia(config = {}) {
     const t = agora();
     const turno = turnoPelaHora(t.horaNum);
@@ -27,16 +95,49 @@ function fichaVazia(config = {}) {
         vtr: { modelo: config.vtrModelo || 'L200', placa: config.vtrPlaca || '', kmInicial: null, kmFinal: null },
         sistemas: { cftv: '', ca: '✓ S/A', ocrAssertividade: '', ocrLeituras: '' },
         atividades: (config.atividadesBase || []).map(texto => ({ id: novoId(), texto })),
-        avisos: [],
-        navios: { tore: '', toil: '' },
+        navios: { tore: [], toil: [] },
         ocorrencias: [],
-        operacoes: [],
         equipes: { saindo: '', assumindo: '' },
         herdadoDe: null,
         publicadoEm: null,
         criadoEm: t.iso,
         atualizadoEm: t.iso
     };
+}
+
+// Converte texto da seção 6 em lista { navio, linhas[] }.
+// Aceita "*NAVIO*\n✓ linha" (robô antigo) e "NAVIO: situação" (relatório da US).
+function naviosDeTexto(texto) {
+    const lista = [];
+    let atual = null;
+    for (const bruta of String(texto || '').split('\n')) {
+        const linha = bruta.trim();
+        if (!linha || ehSemAlteracao(linha)) continue;
+        const semMarc = limparMarcador(linha);
+        const titulo = linha.match(/^\*([^*]+)\*$/);
+        if (titulo) { atual = { id: novoId(), navio: titulo[1].trim().toUpperCase(), linhas: [] }; lista.push(atual); continue; }
+        const comDoisPontos = semMarc.match(/^([A-Z0-9][A-Z0-9 .\-]{2,40}?)\s*:\s*(.+)$/);
+        if (!/^[✓✔•]/.test(linha) && comDoisPontos && comDoisPontos[1] === comDoisPontos[1].toUpperCase()) {
+            const nome = comDoisPontos[1].trim();
+            let n = lista.find(x => x.navio === nome);
+            if (!n) { n = { id: novoId(), navio: nome, linhas: [] }; lista.push(n); }
+            n.linhas.push(comDoisPontos[2].trim());
+            atual = n; continue;
+        }
+        if (!atual) { atual = { id: novoId(), navio: '', linhas: [] }; lista.push(atual); }
+        atual.linhas.push(semMarc);
+    }
+    return lista;
+}
+
+function adicionarLinhaNavio(ficha, terminal, nomeNavio, linha) {
+    const chave = terminal === 'T-OIL' ? 'toil' : 'tore';
+    ficha.navios = ficha.navios || { tore: [], toil: [] };
+    ficha.navios[chave] = ficha.navios[chave] || [];
+    const alvo = semAcento(nomeNavio).toUpperCase().replace(/^MV\s*-?\s*/, '').trim();
+    let n = ficha.navios[chave].find(x => semAcento(x.navio).toUpperCase().replace(/^MV\s*-?\s*/, '').trim() === alvo);
+    if (!n) { n = { id: novoId(), navio: nomeNavio.toUpperCase(), linhas: [] }; ficha.navios[chave].push(n); }
+    if (!n.linhas.includes(linha)) n.linhas.push(linha);
 }
 
 // ---------------------------------------------------------------------
@@ -57,7 +158,6 @@ const SECOES = [
     { chave: 'passagem', teste: /PASSAGEM/ }
 ];
 
-// Cabeçalho de seção: "1. EFETIVO CCOS", "*4. ATIVIDADES REALIZADAS*", "6 - MOVIMENTAÇÃO..."
 function secaoDaLinha(linha) {
     const n = normalizar(linha);
     const m = n.match(/^(\d)\s*[.\-)]\s*(.+)$/);
@@ -82,31 +182,30 @@ function numeroKm(valor) {
 }
 
 function ehSemAlteracao(texto) {
-    return /^S\s*\/?\s*A\.?$/i.test(limparMarcador(texto)) || /^SEM ALTERAC/i.test(normalizar(limparMarcador(texto)));
+    const t = limparMarcador(texto);
+    return /^S\s*\/?\s*A\.?$/i.test(t) || /^SEM ALTERAC/i.test(normalizar(t));
 }
 
-function lerRelatorio(texto) {
-    const linhas = String(texto || '').replace(/\r/g, '').split('\n');
+function lerRelatorio(textoOriginal) {
+    const texto = normalizarTexto(textoOriginal);
+    const linhas = texto.split('\n');
     const dados = {
         data: null, turno: null, efetivo: null,
         vtr: { modelo: null, placa: null, kmInicial: null, kmFinal: null },
         sistemas: { cftv: null, ca: null, ocrAssertividade: null, ocrLeituras: null },
         atividades: [], avisos: [],
-        navios: { tore: null, toil: null },
+        navios: { tore: [], toil: [] },
         ocorrencias: [],
         equipes: { saindo: null, assumindo: null }
     };
 
-    // Cabeçalho
     for (const l of linhas.slice(0, 5)) {
-        const n = normalizar(l);
-        const mt = n.match(/TURNO\s*[-–:]?\s*(DIURNO|NOTURNO)/);
+        const mt = normalizar(l).match(/TURNO\s*[-:]?\s*(DIURNO|NOTURNO)/);
         if (mt) dados.turno = mt[1];
         const md = l.match(/Data:?\s*(\d{2}\/\d{2}\/\d{4})/i);
         if (md) dados.data = md[1];
     }
 
-    // Agrupa linhas por seção
     const blocos = {};
     let atual = null;
     for (const l of linhas) {
@@ -116,10 +215,8 @@ function lerRelatorio(texto) {
     }
     const limpo = arr => (arr || []).map(l => l.trim()).filter(Boolean);
 
-    // 1. Efetivo
     if (blocos.efetivo) dados.efetivo = limpo(blocos.efetivo).join('\n') || null;
 
-    // 2. VTR
     for (const l of limpo(blocos.vtr)) {
         const n = normalizar(l);
         let m;
@@ -129,7 +226,6 @@ function lerRelatorio(texto) {
         else if (/KM\s*FINAL/.test(n)) dados.vtr.kmFinal = numeroKm(l.split(':').slice(1).join(':'));
     }
 
-    // 3. Sistemas (subtítulos CFTV / CA / OCR)
     {
         let sub = null; const partes = { cftv: [], ca: [] };
         for (const l of limpo(blocos.sistemas)) {
@@ -148,10 +244,8 @@ function lerRelatorio(texto) {
         if (partes.ca.length) dados.sistemas.ca = partes.ca.join('\n');
     }
 
-    // 4. Atividades
     dados.atividades = limpo(blocos.atividades).map(limparMarcador).filter(t => t && !ehSemAlteracao(t));
 
-    // 5. Avisos ("5.1. TÍTULO" + descrição)
     {
         let av = null;
         for (const l of limpo(blocos.avisos)) {
@@ -161,9 +255,16 @@ function lerRelatorio(texto) {
             if (!av) { av = { titulo: '', texto: '' }; dados.avisos.push(av); }
             av.texto = (av.texto ? av.texto + '\n' : '') + limparMarcador(l);
         }
+        // "5.1. AVISO" (robô antigo): usa a 1ª linha do texto como título
+        for (const a of dados.avisos) {
+            if (/^AVISO$/i.test(a.titulo) || !a.titulo) {
+                const [primeira, ...resto] = (a.texto || '').split('\n');
+                a.titulo = primeira.split(':')[0].slice(0, 70).toUpperCase();
+                a.texto = resto.length ? resto.join('\n') : primeira;
+            }
+        }
     }
 
-    // 6. Navios (subtítulos T-ORE / T-OIL)
     {
         let sub = null; const p = { tore: [], toil: [] };
         for (const l of limpo(blocos.navios)) {
@@ -172,14 +273,12 @@ function lerRelatorio(texto) {
             if (n === 'T-OIL' || n === 'TOIL') { sub = 'toil'; continue; }
             if (sub) p[sub].push(l);
         }
-        if (p.tore.length) dados.navios.tore = p.tore.join('\n');
-        if (p.toil.length) dados.navios.toil = p.toil.join('\n');
+        dados.navios.tore = naviosDeTexto(p.tore.join('\n'));
+        dados.navios.toil = naviosDeTexto(p.toil.join('\n'));
     }
 
-    // 7. Ocorrências
     dados.ocorrencias = limpo(blocos.ocorrencias).map(limparMarcador).filter(t => t && !ehSemAlteracao(t));
 
-    // 8. Passagem de turno
     {
         let sub = null; const p = { saindo: [], assumindo: [] };
         for (const l of limpo(blocos.passagem)) {
@@ -187,21 +286,20 @@ function lerRelatorio(texto) {
             const m = l.replace(/[*_]/g, '').match(/^EQUIPE\s+(SAINDO|ASSUMINDO)\s*:?\s*(.*)$/i);
             if (m) {
                 sub = normalizar(m[1]) === 'SAINDO' ? 'saindo' : 'assumindo';
-                if (m[2].trim()) p[sub].push(m[2].trim());
+                if (m[2].trim()) p[sub].push(limparMarcador(m[2]));
                 continue;
             }
-            if (sub && !/^EQUIPE/.test(n)) p[sub].push(l);
+            if (sub && !/^EQUIPE/.test(n)) p[sub].push(limparMarcador(l));
         }
         if (p.saindo.length) dados.equipes.saindo = p.saindo.join(' ');
         if (p.assumindo.length) dados.equipes.assumindo = p.assumindo.join(' ');
     }
 
-    // Conferência: o que foi e o que não foi encontrado
     const conferencia = [
         ['Data', dados.data], ['Turno', dados.turno],
         ['KM final da VTR', dados.vtr.kmFinal], ['CFTV', dados.sistemas.cftv],
         ['Controle de acesso', dados.sistemas.ca], ['OCR', dados.sistemas.ocrAssertividade],
-        ['Navios T-ORE', dados.navios.tore], ['Navios T-OIL', dados.navios.toil],
+        ['Navios', dados.navios.tore.length + dados.navios.toil.length || null],
         ['Equipe assumindo', dados.equipes.assumindo]
     ];
     return {
@@ -214,12 +312,6 @@ function lerRelatorio(texto) {
 // ---------------------------------------------------------------------
 // Herança: monta a ficha do novo turno a partir do relatório anterior
 // ---------------------------------------------------------------------
-function dataDeOntem(dataBR) {
-    const [d, m, a] = dataBR.split('/').map(Number);
-    const dt = new Date(Date.UTC(a, m - 1, d - 1, 12));
-    return agora(dt).data;
-}
-
 function fichaHerdada(relatorio, fichaAtual, config = {}) {
     const d = relatorio.dados;
     const nova = fichaVazia(config);
@@ -227,7 +319,8 @@ function fichaHerdada(relatorio, fichaAtual, config = {}) {
     const anterior = fichaAtual || {};
 
     nova.turno = d.turno ? (d.turno === 'DIURNO' ? 'NOTURNO' : 'DIURNO') : turnoPelaHora(t.horaNum);
-    nova.data = dataDoTurno(nova.turno, t);
+    // DIURNO de D → NOTURNO de D ; NOTURNO de D → DIURNO de D+1 (sem depender do relógio)
+    nova.data = d.data && d.turno ? (d.turno === 'DIURNO' ? d.data : diaSeguinte(d.data)) : dataDoTurno(nova.turno, t);
 
     const km = d.vtr.kmFinal ?? anterior.vtr?.kmFinal ?? null;
     nova.vtr = {
@@ -241,32 +334,21 @@ function fichaHerdada(relatorio, fichaAtual, config = {}) {
         ocrAssertividade: d.sistemas.ocrAssertividade ?? '',
         ocrLeituras: d.sistemas.ocrLeituras ?? ''
     };
-    nova.navios = {
-        tore: d.navios.tore ?? anterior.navios?.tore ?? '',
-        toil: d.navios.toil ?? anterior.navios?.toil ?? ''
+    const temNavios = d.navios.tore.length || d.navios.toil.length;
+    nova.navios = temNavios
+        ? { tore: d.navios.tore, toil: d.navios.toil }
+        : JSON.parse(JSON.stringify(anterior.navios || { tore: [], toil: [] }));
+
+    nova.equipes = { saindo: d.equipes.assumindo || '', assumindo: d.equipes.saindo || '' };
+    nova.herdadoDe = {
+        relatorioId: relatorio.id || null, autor: relatorio.autor || '', data: d.data, turno: d.turno,
+        capturadoEm: relatorio.capturadoEm || t.iso, encontrados: relatorio.encontrados, faltando: relatorio.faltando
     };
-
-    // Avisos continuam até alguém dar baixa: os nossos + os do relatório recebido
-    const avisos = [...(anterior.avisos || [])];
-    for (const av of d.avisos) {
-        const chave = normalizar(av.titulo || av.texto).slice(0, 40);
-        if (!avisos.some(a => normalizar(a.titulo || a.texto).slice(0, 40) === chave)) avisos.push({ id: novoId(), ...av });
-    }
-    nova.avisos = avisos;
-
-    // Operações de bordo ainda abertas (sem horário final) continuam
-    nova.operacoes = (anterior.operacoes || []).filter(o => !o.horaFinal);
-
-    nova.equipes = {
-        saindo: d.equipes.assumindo || '',
-        assumindo: d.equipes.saindo || ''
-    };
-    nova.herdadoDe = { autor: relatorio.autor || '', data: d.data, turno: d.turno, capturadoEm: relatorio.capturadoEm || t.iso };
     return nova;
 }
 
 // ---------------------------------------------------------------------
-// Texto oficial do relatório (um único gerador para tudo)
+// Texto oficial do relatório
 // ---------------------------------------------------------------------
 function blocoTexto(texto, vazio = '✓ S/A') {
     const linhas = String(texto || '').split('\n').map(l => l.trim()).filter(Boolean);
@@ -285,16 +367,28 @@ function formatarKm(km) {
     return n === null ? '—' : n.toLocaleString('pt-BR');
 }
 
-function formatarRelatorio(f, { negrito = true } = {}) {
+function blocoNavios(lista, b) {
+    const itens = (lista || []).filter(n => (n.navio || '').trim() || (n.linhas || []).some(Boolean));
+    if (!itens.length) return '✓ S/A';
+    return itens.map(n => {
+        const linhas = (n.linhas || []).map(limparMarcador).filter(Boolean).map(l => '✓ ' + l);
+        return [n.navio ? b(n.navio.trim()) : null, ...linhas].filter(Boolean).join('\n');
+    }).join('\n\n');
+}
+
+// avisos: pendências do tipo AVISO em aberto [{titulo, texto, historico}]
+function textoAviso(p) {
+    const ultima = (p.historico || []).filter(h => h.tipo === 'ATUALIZACAO').slice(-1)[0];
+    const base = (p.texto || '').trim();
+    return ultima ? `${base}${base ? '\n' : ''}Atualização (${ultima.data} ${ultima.hora}h): ${ultima.texto}` : base;
+}
+
+function formatarRelatorio(f, avisos = [], { negrito = true } = {}) {
     const b = s => (negrito ? `*${s}*` : s);
-    const avisos = (f.avisos || []).filter(a => (a.titulo || a.texto || '').trim());
-    const blocoAvisos = avisos.length
-        ? avisos.map((a, i) => [b(`5.${i + 1}. ${(a.titulo || 'AVISO').trim()}`), (a.texto || '').trim()].filter(Boolean).join('\n')).join('\n\n')
+    const abertos = (avisos || []).filter(a => (a.titulo || a.texto || '').trim());
+    const blocoAvisos = abertos.length
+        ? abertos.map((a, i) => [b(`5.${i + 1}. ${(a.titulo || 'AVISO').trim()}`), textoAviso(a)].filter(Boolean).join('\n')).join('\n\n')
         : '✓ S/A';
-    const ocr = [
-        `Assertividade: ${f.sistemas?.ocrAssertividade || '—'}`,
-        `Total de leituras: ${f.sistemas?.ocrLeituras || '—'} veículos`
-    ].join('\n');
 
     return [
         b(`RELATÓRIO DO TURNO - ${f.turno}`),
@@ -312,10 +406,13 @@ function formatarRelatorio(f, { negrito = true } = {}) {
         b('3. SISTEMAS'),
         b('CFTV'),
         blocoTexto(f.sistemas?.cftv),
+        '',
         b('CA - CONTROLE DE ACESSO'),
         blocoTexto(f.sistemas?.ca),
-        b('OCR - RECONHECIMENTO DE PLACAS'),
-        ocr,
+        '',
+        b('OCR – RECONHECIMENTO DE PLACAS'),
+        `Assertividade: ${f.sistemas?.ocrAssertividade || '—'};`,
+        `Total de leituras: ${f.sistemas?.ocrLeituras || '—'} veículos.`,
         '',
         b('4. ATIVIDADES REALIZADAS'),
         blocoLista(f.atividades),
@@ -325,24 +422,24 @@ function formatarRelatorio(f, { negrito = true } = {}) {
         '',
         b('6. MOVIMENTAÇÃO DE NAVIOS'),
         b('T-ORE'),
-        (f.navios?.tore || '').trim() || 'S/A',
+        blocoNavios(f.navios?.tore, b),
         '',
         b('T-OIL'),
-        (f.navios?.toil || '').trim() || 'S/A',
+        blocoNavios(f.navios?.toil, b),
         '',
         b('7. OCORRÊNCIAS'),
         blocoLista(f.ocorrencias),
         '',
         b('8. PASSAGEM DE TURNO'),
         b('EQUIPE SAINDO:'),
-        (f.equipes?.saindo || '').trim() || '—',
+        (f.equipes?.saindo || '').trim() || 'Conforme escala',
+        '',
         b('EQUIPE ASSUMINDO:'),
-        (f.equipes?.assumindo || '').trim() || '—'
+        (f.equipes?.assumindo || '').trim() || 'Conforme escala'
     ].join('\n');
 }
 
-// Pendências que valem um aviso antes de publicar
-function conferirFicha(f) {
+function conferirFicha(f, operacoes = []) {
     const alertas = [];
     const ki = numeroKm(f.vtr?.kmInicial), kf = numeroKm(f.vtr?.kmFinal);
     if (ki === null || kf === null) alertas.push('KM da VTR não preenchido.');
@@ -350,69 +447,191 @@ function conferirFicha(f) {
     else if (kf - ki > 150) alertas.push(`VTR rodou ${kf - ki} km no turno — confira.`);
     if (!f.sistemas?.ocrAssertividade || !f.sistemas?.ocrLeituras) alertas.push('OCR (assertividade/leituras) não preenchido.');
     if (!(f.equipes?.saindo || '').trim() || !(f.equipes?.assumindo || '').trim()) alertas.push('Passagem de turno (equipes) incompleta.');
-    const abertas = (f.operacoes || []).filter(o => !o.horaFinal).length;
-    if (abertas) alertas.push(`${abertas} operação(ões) de bordo sem horário final.`);
+    const abertas = (operacoes || []).filter(o => !o.horaFinal).length;
+    if (abertas) alertas.push(`${abertas} operação(ões) de bordo sem horário de saída.`);
     return alertas;
 }
 
 // ---------------------------------------------------------------------
-// Classificação das mensagens do grupo (sugestão de destino)
+// Passagem da Escala (relatório consolidado da escala)
 // ---------------------------------------------------------------------
-const RE_RUIDO = /^(bom dia|boa tarde|boa noite|ok|okay|blz|beleza|valeu|vlw|obrigad[oa]|grato|ciente|recebido|show|top|joia|tmj|positivo|copiado|qsl|sim|nao|opa|ola|bom plantao|boa folga|bom descanso|amem|kkk+|rs+|ha(ha)+)(\s+(a todos|pessoal|equipe|galera|irmao|chefe))?[\s!.,]*$/;
-const RE_URGENTE = /\b(acidente|incendio|fogo|ferid[oa]s?|ambulancia|vazamento|invasao|socorrid[oa]|alagamento|sinistro|colisao|obito|afogamento|explosao|disparo|arma de fogo|emergencia)\b/;
-const RE_OCORRENCIA = /\b(avaria|danificad[oa]|quebr(ou|ado|ada)|furto|roubo|arrombamento|apreensao|inconformidade|irregularidade|recusad[oa]|barrad[oa]|sem autorizacao|nao autorizad[oa])\b/;
-const RE_OPERACAO = /\b(rancho|provis(ao|oes)|tripulantes?|tripulacao|residuos?|agua potavel|bunker|combustivel|dta|pecas de bordo|materiais|sobressalentes)\b/;
-const RE_NAVIO = /\b(atracad[oa]|desatracad[oa]|atracacao|desatracacao|fundead[oa]|pratico|eta|etb|etd|amarrad[oa])\b/;
-const RE_AVISO = /\b(acompanhar|atentar|programad[oa] para|aguardando|pendente|previsto para|prevista para|amanha)\b/;
-const RE_SAIDA = /\b(saida|saiu|deixou o terminal|liberad[oa] na saida)\b/;
-const RE_PLACA = /\b([A-Z]{3})[- ]?([0-9][A-Z0-9][0-9]{2})\b/i;
+function formatarPassagemEscala(periodo, secoes, { negrito = true } = {}) {
+    const b = s => (negrito ? `*${s}*` : s);
+    const lista = itens => blocoLista((itens || []).map(i => i.texto));
+    return [
+        b('PASSAGEM DE TURNO'),
+        `Período: ${periodo}`,
+        '',
+        b('1. PENDÊNCIAS DA DIGITAL (CFTV E INFRAESTRUTURA)'),
+        lista(secoes.digital),
+        '',
+        b('2. AVISOS E AÇÕES DE ACOMPANHAMENTO'),
+        lista(secoes.avisos),
+        '',
+        b('3. RESUMO DAS OCORRÊNCIAS'),
+        lista(secoes.ocorrencias),
+        '',
+        b('4. RESUMO DAS ATIVIDADES REALIZADAS'),
+        lista(secoes.atividades)
+    ].join('\n');
+}
 
-function extrairCampos(texto) {
-    const t = String(texto || '');
-    const placa = t.match(RE_PLACA);
-    const navio = t.match(/\b(?:MV|M\/V|NAVIO)\s*[-–:]?\s*([A-Z0-9][A-Z0-9 .]{2,30}?)(?=\s*[–\-:.,;(]|\s+T-|\s*$)/i);
-    const term = normalizar(t).match(/\bT-?(ORE|OIL)\b/);
-    const hora = t.match(/\b([01]?\d|2[0-3])\s*[:h]\s*([0-5]\d)\b/);
+// ---------------------------------------------------------------------
+// Mensagens do grupo: formato padrão "*Campo:* valor"
+// ---------------------------------------------------------------------
+const ROTULOS = [
+    [/^tipo( de operacao| de fornecimento)?$/, 'tipo'],
+    [/^terminal$/, 'terminal'],
+    [/^(navio|navios|embarcacao|mv)$/, 'navio'],
+    [/^(empresa|empresa responsavel|agencia|fornecedor|prestador)$/, 'empresa'],
+    [/^(motorista|agente|motorista autorizado|responsavel)$/, 'responsavel'],
+    [/^(ajudante|ajudantes|auxiliar)$/, 'ajudante'],
+    [/^(veiculo|carro|caminhao)$/, 'veiculo'],
+    [/^placa$/, 'placa'],
+    [/^(entrada|entrada na portaria|horario inicial|inicio|chegada|hora de entrada)$/, 'horaInicial'],
+    [/^(saida|saida na portaria|horario final|termino|hora de saida)$/, 'horaFinal'],
+    [/^(quantidade|quantos|qtd|qtde|tripulantes|n de tripulantes)$/, 'quantidade'],
+    [/^(movimento|embarque ou desembarque|movimentacao)$/, 'movimento'],
+    [/^(observacao|observacoes|obs)$/, 'observacoes']
+];
+
+function lerMensagemPadrao(textoOriginal) {
+    const texto = normalizarTexto(textoOriginal);
+    const campos = {};
+    const navios = [];
+    let titulo = '';
+    let reconhecidos = 0;
+    for (const bruta of texto.split('\n')) {
+        const linha = bruta.replace(/[*_~]/g, '').trim();
+        if (!linha) continue;
+        const m = linha.match(/^([A-Za-zÀ-ÿº°\/ .()]{2,40}?)\s*:\s*(.*)$/);
+        if (!m) { if (!titulo && !reconhecidos) titulo = linha; continue; }
+        const rot = semAcento(m[1]).toLowerCase().replace(/[().º°]/g, '').replace(/\s+/g, ' ').trim();
+        const valor = m[2].trim();
+        const achado = ROTULOS.find(([re]) => re.test(rot));
+        if (!achado) continue;
+        reconhecidos++;
+        const chave = achado[1];
+        if (chave === 'navio') {
+            valor.split(/\s*(?:,|\/|;|\s+e\s+)\s*/i).map(v => v.trim().toUpperCase()).filter(Boolean).forEach(v => navios.push(v));
+        } else if (!campos[chave]) campos[chave] = valor;
+    }
+    return { estruturada: reconhecidos >= 3, titulo, campos, navios };
+}
+
+// ---------------------------------------------------------------------
+// Classificação das mensagens (sugestão de destino)
+// ---------------------------------------------------------------------
+const RE_RUIDO = /^(bom dia|boa tarde|boa noite|ok|okay|blz|beleza|valeu|vlw|obrigad[oa]|grato|ciente|recebido|show|top|joia|tmj|positivo|copiado|qsl|sim|nao|opa|ola|oi|bom plantao|boa folga|bom descanso|amem|kkk+|rs+|ha(ha)+)(\s+(a todos|pessoal|equipe|galera|irmao|chefe))?[\s!.,]*$/;
+const RE_URGENTE = /\b(acidente|incendio|fogo|ferid[oa]s?|ambulancia|vazamento|invasao|socorrid[oa]|alagamento|sinistro|colisao|obito|afogamento|explosao|disparo|arma de fogo|emergencia)\b/;
+const RE_OCORRENCIA = /\b(avaria|danificad[oa]|quebr(ou|ado|ada)|furto|roubo|arrombamento|apreensao|inconformidade|irregularidade|recusad[oa]|barrad[oa]|sem autorizacao|nao autorizad[oa]|arriada)\b/;
+const RE_OPERACAO = /\b(rancho|provis(ao|oes)|tripulantes?|tripulacao|residuos?|agua potavel|bunker|combustivel|dta|pecas de bordo|sobressalentes|k9|mergulho|lacre|deslacracao)\b/;
+const RE_DIGITAL = /\b(digital|spda|dps|cftv|cameras?|fibra|nobreak|postes?|filtragem)\b/;
+const RE_NAVIO = /\b(atracad[oa]|desatracad[oa]|atracacao|desatracacao|fundead[oa]|pratico|eta|etb|etd|amarrad[oa])\b/;
+const RE_AVISO = /\b(acompanhar|atentar|programad[oa] para|aguardando|pendente|previsto para|prevista para|amanha|verificar)\b/;
+const RE_SAIDA = /\b(saida|saiu|deixou o terminal|liberad[oa] na saida)\b/;
+
+function navioConhecido(texto, navios = NAVIOS_PADRAO) {
+    const n = semAcento(texto).toUpperCase();
+    for (const nav of navios) {
+        const nome = semAcento(nav.nome).toUpperCase().replace(/^MV\s*-?\s*/, '').trim();
+        if (nome && new RegExp(`\\b${nome.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+')}\\b`).test(n)) return nav;
+    }
+    return null;
+}
+
+function terminalDoNavio(nome, navios = NAVIOS_PADRAO) {
+    return navioConhecido(nome, navios)?.terminal || '';
+}
+
+function extrairCampos(textoOriginal, navios = NAVIOS_PADRAO) {
+    const t = normalizarTexto(textoOriginal);
+    const navio = t.match(/\b(?:MV|M\/V|NAVIO)\s*[-:]?\s*([A-Z0-9][A-Z0-9 .]{2,30}?)(?=\s*[-:.,;(]|\s+T-|\s*$)/i);
     const qtd = t.match(/\b(\d{1,3})\s*tripulantes?\b/i);
-    const n = normalizar(t);
+    const conhecido = navioConhecido(t, navios);
     return {
-        placa: placa ? `${placa[1]}-${placa[2]}`.toUpperCase() : '',
-        navio: navio ? navio[1].trim().toUpperCase() : '',
-        terminal: term ? (term[1] === 'ORE' ? 'T-ORE' : 'T-OIL') : '',
-        hora: hora ? `${hora[1].padStart(2, '0')}:${hora[2]}` : '',
+        placa: normalizarPlaca(t),
+        navio: navio ? navio[1].trim().toUpperCase() : (conhecido ? conhecido.nome : ''),
+        terminal: normalizarTerminal(t) || conhecido?.terminal || '',
+        hora: normalizarHora(t),
         quantidade: qtd ? qtd[1].padStart(2, '0') : '',
-        movimento: /DESEMBARQUE/.test(n) && /\bEMBARQUE\b/.test(n.replace(/DESEMBARQUE/g, '')) ? 'Embarque e desembarque'
-            : /DESEMBARQUE/.test(n) ? 'Desembarque' : /EMBARQUE/.test(n) ? 'Embarque' : ''
+        movimento: movimentoDoTexto(t)
     };
 }
 
-function tipoOperacaoDoTexto(texto) {
-    const n = semAcento(String(texto || '')).toLowerCase();
-    if (/tripula/.test(n)) return 'MOVIMENTAÇÃO DE TRIPULAÇÃO';
-    if (/rancho|provis/.test(n)) return 'FORNECIMENTO DE RANCHO';
-    if (/residuo/.test(n)) return 'RETIRADA DE RESÍDUOS';
-    if (/agua potavel|agua/.test(n)) return 'FORNECIMENTO DE ÁGUA POTÁVEL';
-    if (/bunker|combustivel/.test(n)) return 'ABASTECIMENTO DE COMBUSTÍVEL';
-    if (/dta|materia|pecas|sobressalente|equipamento/.test(n)) return 'FORNECIMENTO DE MATERIAIS E EQUIPAMENTOS';
-    return 'OUTRA OPERAÇÃO';
+// Rascunhos de operação (um por navio) a partir de uma mensagem
+function rascunhosOperacao(textoOriginal, horaMensagem, navios = NAVIOS_PADRAO) {
+    const texto = normalizarTexto(textoOriginal);
+    const p = lerMensagemPadrao(texto);
+    const c = p.campos;
+    const livre = extrairCampos(texto, navios);
+    const tipo = tipoOperacaoDoTexto(`${c.tipo || ''} ${p.titulo} ${texto}`);
+    const listaNavios = p.navios.length ? p.navios : (livre.navio ? [livre.navio] : ['']);
+    const terminalGeral = normalizarTerminal(c.terminal || '') || livre.terminal;
+    const qtd = c.quantidade || livre.quantidade;
+    return listaNavios.map(nomeNavio => {
+        const conhecido = nomeNavio ? navioConhecido(nomeNavio, navios) : null;
+        return {
+            tipo,
+            navio: (conhecido && semAcento(conhecido.nome).replace(/^MV\s*-?\s*/i, '') === semAcento(nomeNavio).replace(/^MV\s*-?\s*/i, '') ? conhecido.nome : nomeNavio).toUpperCase(),
+            terminal: terminalGeral || conhecido?.terminal || '',
+            empresa: (c.empresa || '').toUpperCase(),
+            responsavel: (c.responsavel || '').toUpperCase(),
+            ajudante: (c.ajudante || '').toUpperCase(),
+            veiculo: (c.veiculo || '').toUpperCase(),
+            placa: normalizarPlaca(c.placa || '') || livre.placa,
+            quantidade: tipo === 'TRIPULACAO' ? (qtd ? String(parseInt(qtd, 10) || '').padStart(2, '0') : '') : '',
+            movimento: tipo === 'TRIPULACAO' ? (c.movimento ? movimentoDoTexto(c.movimento) || c.movimento : movimentoDoTexto(texto) || 'Embarque') : '',
+            horaInicial: normalizarHora(c.horaInicial || '') || (c.horaFinal ? '' : (livre.hora || horaMensagem || '')),
+            horaFinal: normalizarHora(c.horaFinal || ''),
+            observacoes: c.observacoes || ''
+        };
+    });
 }
 
-function classificarMensagem(texto) {
-    const n = semAcento(String(texto || '')).toLowerCase().trim();
-    const campos = extrairCampos(texto);
-    const base = { ruido: false, urgente: false, sugestao: 'ATIVIDADE', campos };
+// Frase da seção 4 para as operações de uma mensagem (padrão "✓ 19:01h ...")
+function atividadeDasOperacoes(ops, horaMensagem) {
+    if (!ops.length) return '';
+    const o = ops[0];
+    const navios = ops.map(x => x.navio).filter(Boolean);
+    const nomesNavios = navios.length > 1 ? `${navios.slice(0, -1).join(', ')} e ${navios.slice(-1)}` : (navios[0] || '');
+    const descricao = o.tipo === 'TRIPULACAO'
+        ? `${o.movimento || 'Movimentação'} de ${formatarQtdTripulantes(o.quantidade)}`
+        : (TIPOS_OPERACAO[o.tipo] || TIPOS_OPERACAO.OUTRA).resumo.replace(/\.$/, '');
+    const detalhes = [
+        o.empresa ? `empresa ${o.empresa}` : '', o.responsavel ? `motorista ${o.responsavel}` : '',
+        o.ajudante ? `ajudante ${o.ajudante}` : '',
+        (o.veiculo || o.placa) ? `${(o.veiculo || 'veículo').toLowerCase()}${o.placa ? ' placa ' + o.placa : ''}` : ''
+    ].filter(Boolean).join(', ');
+    const hora = o.horaInicial || o.horaFinal || horaMensagem || '';
+    let frase = `${hora ? hora + 'h ' : ''}${descricao}${nomesNavios ? ' – ' + nomesNavios : ''}${o.terminal ? ' – ' + o.terminal : ''}.`;
+    if (detalhes) frase += ` ${detalhes.charAt(0).toUpperCase() + detalhes.slice(1)}.`;
+    if (o.horaFinal) frase += ` Saída às ${o.horaFinal}h.`;
+    return frase;
+}
+
+function classificarMensagem(textoOriginal, navios = NAVIOS_PADRAO, horaMensagem = '') {
+    const texto = normalizarTexto(textoOriginal);
+    const n = semAcento(texto).toLowerCase().trim();
+    const campos = extrairCampos(texto, navios);
+    const padrao = lerMensagemPadrao(texto);
+    const base = { ruido: false, urgente: false, sugestao: 'ATIVIDADE', campos, estruturada: padrao.estruturada, rascunhos: [] };
+
     if (n.length < 4 || RE_RUIDO.test(n) || !/[a-z0-9]/.test(n)) return { ...base, ruido: true, sugestao: 'IGNORAR' };
     if (RE_URGENTE.test(n)) return { ...base, urgente: true, sugestao: 'OCORRENCIA' };
+
+    const ehOperacao = RE_OPERACAO.test(n) || (padrao.estruturada && /provis|fornecimento|entrega/.test(semAcento(padrao.titulo).toLowerCase()));
+    if (ehOperacao) return { ...base, sugestao: 'OPERACAO', rascunhos: rascunhosOperacao(texto, horaMensagem, navios) };
     if (RE_SAIDA.test(n) && campos.placa) return { ...base, sugestao: 'SAIDA' };
     if (RE_OCORRENCIA.test(n)) return { ...base, sugestao: 'OCORRENCIA' };
-    if (RE_OPERACAO.test(n)) return { ...base, sugestao: 'OPERACAO' };
+    if (RE_DIGITAL.test(n)) return { ...base, sugestao: 'DIGITAL' };
     if (RE_NAVIO.test(n)) return { ...base, sugestao: 'NAVIO' };
     if (RE_AVISO.test(n)) return { ...base, sugestao: 'AVISO' };
     return base;
 }
 
 // ---------------------------------------------------------------------
-// Minutas de e-mail das operações de bordo
+// Modelos de e-mail das operações de bordo
 // ---------------------------------------------------------------------
 function saudacao(horaNum) {
     if (horaNum >= 5 && horaNum < 12) return 'Prezados, bom dia!';
@@ -420,68 +639,55 @@ function saudacao(horaNum) {
     return 'Prezados, boa noite!';
 }
 
-function hh(h) { return h ? (String(h).endsWith('h') ? h : `${h}h`) : 'Em andamento'; }
+function hh(h, vazio = 'Em andamento') { const n = normalizarHora(h); return n ? `${n}h` : vazio; }
 
-function minutaEmail(op, ficha, config = {}) {
+function minutaEmail(op) {
     const t = agora();
-    const data = op.data || ficha?.data || t.data;
+    const data = op.data || t.data;
+    const tipoInfo = TIPOS_OPERACAO[op.tipo] || TIPOS_OPERACAO.OUTRA;
     const sa = v => (v && String(v).trim()) || 'S/A';
-    const veiculo = [op.veiculo, op.placa ? `Placa ${op.placa}` : ''].filter(Boolean).join(' - ') || 'S/A';
-    const tipo = op.tipo || 'OUTRA OPERAÇÃO';
-    const assunto = `${tipo} - ${(op.navio || 'NAVIO').toUpperCase()} - ${(op.terminal || '').toUpperCase()} - ${data.replace(/\//g, '-')}`;
+    const M = v => sa(v).toUpperCase();
+    const veiculo = `${M(op.veiculo)}${op.placa ? ' - Placa ' + op.placa.toUpperCase() : ''}`;
+    const assunto = `${tipoInfo.assunto} - ${(op.navio || 'NAVIO').toUpperCase()} - ${(op.terminal || '').toUpperCase()} - ${data.replace(/\//g, '-')}`;
     const L = linhas => linhas.map(l => `\t✓ ${l}`).join('\n');
-    const horarios = `Horário inicial: ${hh(op.horaInicial)}          Horário final: ${hh(op.horaFinal)}`;
+    const horarios = `Horário inicial: ${hh(op.horaInicial, 'Não informado')}                              Horário final: ${hh(op.horaFinal)}`;
+    const autoridade = op.autoridades || tipoInfo.autoridade;
+    const terminalAut = op.autorizadoTerminal || '';
     let corpo;
 
-    if (tipo === 'MOVIMENTAÇÃO DE TRIPULAÇÃO') {
-        corpo = `Registro a movimentação de tripulação:\n\n` + L([
-            `Data: ${data}`, `Navio: ${sa(op.navio)}`, `Terminal: ${sa(op.terminal)}`,
-            `Quantos: ${sa(op.quantidade)}`, `Embarque ou desembarque: ${sa(op.movimento)}`, horarios,
-            `Empresa responsável/ Agência: ${sa(op.empresa)}`,
-            `Agente/ Motorista autorizado responsável: ${sa(op.responsavel)}`,
+    if (op.tipo === 'TRIPULACAO') {
+        corpo = 'Registro a movimentação de tripulação:\n\n' + L([
+            `Data: ${data}`, `Navio: ${M(op.navio)}`, `Terminal: ${sa(op.terminal)}`,
+            `Quantos: ${formatarQtdTripulantes(op.quantidade)}`, `Embarque ou desembarque: ${sa(op.movimento)}`, horarios,
+            `Empresa responsável/ Agência: ${M(op.empresa)}`,
+            `Agente/ Motorista autorizado responsável: ${M(op.responsavel)}`,
             `Veículo utilizado: ${veiculo}`,
-            `Autorizado por (Autoridades): ${sa(op.autoridades)}`, `Autorizados por (Terminal): ${sa(op.autorizadoTerminal)}`,
+            `Autorizado por (Autoridades): ${autoridade}`, `Autorizados por (Terminal): ${terminalAut}`,
             `Observações: ${sa(op.observacoes)}`, `Status: ${op.status || 'Sem alteração'}`,
-            `Procedimentos de segurança realizados: ${PROCEDIMENTOS_PADRAO}`, `Evidências: Em anexo`
-        ]);
-    } else if (/^FORNECIMENTO DE (RANCHO|MATERIAIS)/.test(tipo)) {
-        corpo = `Registro o fornecimento de bordo:\n\n` + L([
-            `Tipo: ${tipo.replace('FORNECIMENTO DE ', '').toLowerCase().replace(/^./, c => c.toUpperCase())}`,
-            `Data: ${data}`, horarios, `Terminal: ${sa(op.terminal)}`, `Navio: ${sa(op.navio)}`,
-            `Empresa responsável/ Fornecedor: ${sa(op.empresa)}`, `Veículo utilizado: ${veiculo}`,
-            `Autorizado por (Autoridades): ${sa(op.autoridades)}`, `Autorizados por (Terminal): ${sa(op.autorizadoTerminal)}`,
-            `Observações: ${sa(op.observacoes)}`,
-            `Procedimentos de segurança realizados: ${PROCEDIMENTOS_FORNECIMENTO}`,
-            `Status: ${op.status || 'Sem alteração'}`, `Evidências: Em anexo`
+            `Procedimentos de segurança realizados: ${PROC_TRIPULACAO}`, 'Evidências: Em anexo'
         ]);
     } else {
-        corpo = `Registro a operação de ${tipo.toLowerCase()}:\n\n` + L([
-            `Tipo: ${tipo}`, `Data: ${data}`, horarios, `Terminal: ${sa(op.terminal)}`, `Navio: ${sa(op.navio)}`,
-            `Empresa responsável/ Prestador: ${sa(op.empresa)}`, `Veículo utilizado: ${veiculo}`,
-            `Autorizado por (Autoridades): ${sa(op.autoridades)}`, `Autorizados por (Terminal): ${sa(op.autorizadoTerminal)}`,
+        corpo = 'Registro o fornecimento de bordo:\n\n' + L([
+            `Tipo: ${tipoInfo.tipo}`, `Data: ${data}`, horarios, `Terminal: ${sa(op.terminal)}`, `Navio: ${M(op.navio)}`,
+            `Empresa responsável/ Fornecedor: ${M(op.empresa)}`,
+            `Motorista/ Ajudante: ${M(op.responsavel)}${op.ajudante ? ' / ' + op.ajudante.toUpperCase() : ''}`,
+            `Veículo utilizado: ${veiculo}`,
+            `Autorizado por (Autoridades): ${autoridade}`, `Autorizados por (Terminal): ${terminalAut}`,
             `Observações: ${sa(op.observacoes)}`,
-            `Procedimentos de segurança realizados: ${PROCEDIMENTOS_PADRAO}`,
-            `Status: ${op.status || 'Sem alteração'}`, `Evidências: Em anexo`
+            `Procedimentos de segurança realizados: ${PROC_FORNECIMENTO}`,
+            `Status: ${op.status || 'Sem alteração'}`, 'Evidências: Em anexo'
         ]);
     }
 
     corpo = `${saudacao(t.horaNum)}\n\n${corpo}\n\nInformo que, caso necessário, os documentos originais seguem devidamente arquivados fisicamente e digitalmente (em nosso departamento).`;
-    return { para: config.emailDestinatarios || '', cc: config.emailCopia || '', assunto, corpo };
-}
-
-// Frase para a seção 4 a partir de uma operação de bordo
-function atividadeDaOperacao(op) {
-    const navio = op.navio ? `${op.navio}${op.terminal ? ' – ' + op.terminal : ''}. ` : '';
-    let desc;
-    if (op.tipo === 'MOVIMENTAÇÃO DE TRIPULAÇÃO') desc = `${op.movimento || 'Movimentação'} de ${op.quantidade || ''} tripulante(s)`.replace(/\s+/g, ' ');
-    else desc = (op.tipo || 'Operação').toLowerCase().replace(/^./, c => c.toUpperCase());
-    const empresa = op.empresa ? ` (${op.empresa})` : '';
-    const hor = op.horaInicial ? ` Início às ${op.horaInicial}${op.horaFinal ? `, término às ${op.horaFinal}` : ''}.` : '';
-    return `${navio}${desc}${empresa}.${hor}`.replace(/\.\./g, '.');
+    return { assunto, corpo };
 }
 
 module.exports = {
-    fichaVazia, ehRelatorioDeTurno, lerRelatorio, fichaHerdada,
-    formatarRelatorio, conferirFicha, classificarMensagem, extrairCampos,
-    tipoOperacaoDoTexto, minutaEmail, atividadeDaOperacao, numeroKm
+    TIPOS_OPERACAO, MOVIMENTOS, NAVIOS_PADRAO,
+    fichaVazia, naviosDeTexto, adicionarLinhaNavio, ehRelatorioDeTurno, lerRelatorio, fichaHerdada,
+    formatarRelatorio, conferirFicha, formatarPassagemEscala, textoAviso,
+    lerMensagemPadrao, classificarMensagem, extrairCampos, rascunhosOperacao, atividadeDasOperacoes,
+    tipoOperacaoDoTexto, movimentoDoTexto, resumoNavio, minutaEmail, numeroKm, navioConhecido, terminalDoNavio,
+    formatarQtdTripulantes, ehSemAlteracao
 };

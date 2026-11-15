@@ -1,4 +1,4 @@
-FROM node:20-alpine
+FROM node:22-alpine
 ENV TZ=America/Sao_Paulo NODE_ENV=production
 RUN apk add --no-cache git tzdata
 WORKDIR /app

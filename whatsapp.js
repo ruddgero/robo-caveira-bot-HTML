@@ -1,36 +1,48 @@
 // =====================================================================
-// CONEXÃO COM O WHATSAPP (Baileys / aparelho conectado)
-// - Só lê os grupos escolhidos na tela de Configurações
-// - Nunca responde nos grupos; só envia quando VOCÊ manda publicar
-// - Sessão fica guardada (pasta ./dados ou Firestore) e reconecta sozinha
+// WHATSAPP POR LÍDER (Baileys / aparelho conectado)
+// - Cada líder conecta o próprio número
+// - Ficam ativos: o líder de plantão + 1 reserva (cabe no plano grátis);
+//   os demais ficam com a sessão GUARDADA e pausada
+// - Lê só os grupos que cada líder marcou; nunca responde nos grupos
+// - Publica pelo número do líder de plantão
 // =====================================================================
 const fs = require('fs');
 const path = require('path');
 const store = require('./store');
 
+const MAX_ATIVAS = Math.max(1, parseInt(process.env.WHATSAPP_MAX_SESSOES || '2', 10));
+const TEMPO_PAREAMENTO_MS = 6 * 60 * 1000;
+
 let baileys = null;
-let sock = null;
-let sessao = null;
-let tentativas = 0;
-let timerReconexao = null;
-let handlers = { mensagem: async () => {} };
+let logger = null;
+const sessoes = new Map();
 const nomesGrupos = new Map();
+let h = {
+    mensagem: async () => {},
+    gruposDe: () => [],          // (uid) -> ids de grupos que esse usuário liberou
+    nomeSessao: uid => `whatsapp_sessao_${uid}`,
+    liderPlantao: () => null,    // uid do líder de plantão
+    pareado: () => {},           // (uid, numero|null)
+};
 
-const status = { estado: 'DESLIGADO', qr: null, numero: null, erro: null, desde: null };
-
-function definirEstado(novo, extra = {}) {
-    Object.assign(status, { estado: novo, desde: new Date().toISOString() }, extra);
+function sessao(uid) {
+    if (!sessoes.has(uid)) {
+        sessoes.set(uid, { uid, estado: 'PAUSADO', qr: null, numero: null, erro: null, sock: null, auth: null, tentativas: 0, timer: null, ativadoEm: 0, pausada: true, aguardandoDesde: 0 });
+    }
+    return sessoes.get(uid);
 }
 
-const PASTA_SESSAO = path.join(store.PASTA_DADOS, 'sessao_whatsapp');
+function definir(s, estado, extra = {}) { Object.assign(s, { estado, desde: new Date().toISOString() }, extra); }
 
-async function abrirSessao() {
+async function abrirAuth(uid) {
+    const nome = h.nomeSessao(uid);
     if (store.db) {
         const usarSessaoFirestore = require('./sessaoFirestore');
-        return usarSessaoFirestore(store.db, baileys);
+        return usarSessaoFirestore(store.db, baileys, nome);
     }
-    const { state, saveCreds } = await baileys.useMultiFileAuthState(PASTA_SESSAO);
-    return { state, saveCreds, limpar: async () => fs.rmSync(PASTA_SESSAO, { recursive: true, force: true }) };
+    const pasta = path.join(store.PASTA_DADOS, nome);
+    const { state, saveCreds } = await baileys.useMultiFileAuthState(pasta);
+    return { state, saveCreds, limpar: async () => fs.rmSync(pasta, { recursive: true, force: true }) };
 }
 
 function textoDaMensagem(message) {
@@ -53,161 +65,207 @@ function timestampMs(t) {
     return n * 1000;
 }
 
-async function nomeDoGrupo(jid) {
+async function nomeDoGrupo(s, jid) {
     if (nomesGrupos.has(jid)) return nomesGrupos.get(jid);
-    try {
-        const meta = await sock.groupMetadata(jid);
-        nomesGrupos.set(jid, meta.subject);
-        return meta.subject;
-    } catch (_) { return ''; }
+    try { const meta = await s.sock.groupMetadata(jid); nomesGrupos.set(jid, meta.subject); return meta.subject; }
+    catch (_) { return ''; }
 }
 
-async function processar(m, historico) {
+async function processar(s, m, historico) {
     try {
         const chatId = m.key?.remoteJid || '';
         if (!chatId.endsWith('@g.us') || !m.message) return;
+        if (!h.gruposDe(s.uid).includes(chatId)) return;
         const texto = textoDaMensagem(m.message);
         if (!texto) return;
-        const editado = idEditado(m.message);
-        await handlers.mensagem({
+        const participante = m.key.participant || m.participant || '';
+        await h.mensagem({
             id: m.key.id,
-            editaId: editado || null,
+            editaId: idEditado(m.message) || null,
             chatId,
-            grupoNome: await nomeDoGrupo(chatId),
-            autor: m.pushName || (m.key.participant || '').split('@')[0],
+            grupoNome: await nomeDoGrupo(s, chatId),
+            autor: m.pushName || participante.split('@')[0],
+            remetenteNumero: participante.endsWith('@s.whatsapp.net') ? participante.split('@')[0] : '',
             texto,
             timestamp: timestampMs(m.messageTimestamp),
             fromMe: !!m.key.fromMe,
-            historico
+            historico,
+            viaUid: s.uid
         });
     } catch (e) {
         console.error('⚠️  [WHATSAPP] Erro ao processar mensagem:', e.message);
     }
 }
 
-async function conectar() {
-    clearTimeout(timerReconexao);
-    definirEstado('CONECTANDO', { qr: null, erro: null });
-    sessao = await abrirSessao();
+async function conectar(s) {
+    clearTimeout(s.timer);
+    s.pausada = false;
+    definir(s, 'CONECTANDO', { qr: null, erro: null });
+    s.auth = await abrirAuth(s.uid);
     const { version } = await baileys.fetchLatestBaileysVersion().catch(() => ({ version: undefined }));
-    const logger = require('pino')({ level: 'silent' });
 
-    sock = baileys.default({
+    const sock = baileys.default({
         version,
         logger,
-        auth: {
-            creds: sessao.state.creds,
-            keys: baileys.makeCacheableSignalKeyStore(sessao.state.keys, logger)
-        },
+        auth: { creds: s.auth.state.creds, keys: baileys.makeCacheableSignalKeyStore(s.auth.state.keys, logger) },
         browser: baileys.Browsers ? baileys.Browsers.macOS('Chrome') : ['Caveira Bot', 'Chrome', '120.0.0'],
-        markOnlineOnConnect: false,          // não "rouba" as notificações do seu celular
+        markOnlineOnConnect: false,          // não "rouba" as notificações do celular do líder
         syncFullHistory: false,
         shouldIgnoreJid: jid => !jid || jid.endsWith('@broadcast') || jid.endsWith('@newsletter'),
         getMessage: async () => undefined
     });
+    s.sock = sock;
+    const atual = () => s.sock === sock && !s.pausada;
 
-    sock.ev.on('creds.update', () => sessao.saveCreds().catch(e => console.error('Erro ao salvar sessão:', e.message)));
+    sock.ev.on('creds.update', () => s.auth.saveCreds().catch(e => console.error('Erro ao salvar sessão:', e.message)));
 
     sock.ev.on('connection.update', async ({ connection, lastDisconnect, qr }) => {
-        if (qr) definirEstado('AGUARDANDO_PAREAMENTO', { qr });
+        if (!atual()) return;
+        if (qr) {
+            if (!s.aguardandoDesde) s.aguardandoDesde = Date.now();
+            if (Date.now() - s.aguardandoDesde > TEMPO_PAREAMENTO_MS) {
+                await pausar(s.uid, 'Tempo para conectar esgotado. Toque em "Conectar" de novo.');
+                return;
+            }
+            definir(s, 'AGUARDANDO_PAREAMENTO', { qr });
+        }
         if (connection === 'open') {
-            tentativas = 0;
-            definirEstado('CONECTADO', { qr: null, numero: (sock.user?.id || '').split(':')[0].split('@')[0] });
-            console.log(`💀 [WHATSAPP] Conectado (${status.numero}). Lendo apenas os grupos escolhidos, em silêncio.`);
-            try {
-                const grupos = await sock.groupFetchAllParticipating();
-                Object.values(grupos).forEach(g => nomesGrupos.set(g.id, g.subject));
-            } catch (_) {}
+            s.tentativas = 0; s.aguardandoDesde = 0;
+            const numero = (sock.user?.id || '').split(':')[0].split('@')[0];
+            definir(s, 'CONECTADO', { qr: null, numero, erro: null });
+            h.pareado(s.uid, numero);
+            console.log(`💀 [WHATSAPP] ${s.uid} conectado (+${numero}).`);
+            try { Object.values(await sock.groupFetchAllParticipating()).forEach(g => nomesGrupos.set(g.id, g.subject)); } catch (_) {}
         }
         if (connection === 'close') {
             const codigo = lastDisconnect?.error?.output?.statusCode;
             if (codigo === baileys.DisconnectReason.loggedOut) {
-                console.log('🔌 [WHATSAPP] Aparelho desconectado pelo celular. Limpando sessão para novo pareamento.');
-                await sessao.limpar().catch(() => {});
-                definirEstado('DESCONECTADO', { erro: 'O aparelho foi desconectado. Conecte novamente.' });
-                timerReconexao = setTimeout(conectar, 3000);
+                console.log(`🔌 [WHATSAPP] ${s.uid}: aparelho desconectado pelo celular.`);
+                await s.auth.limpar().catch(() => {});
+                s.sock = null;
+                definir(s, 'DESCONECTADO', { numero: null, qr: null, erro: 'O aparelho foi desconectado pelo celular. Conecte de novo.' });
+                h.pareado(s.uid, null);
                 return;
             }
-            tentativas += 1;
-            const espera = Math.min(60, 2 ** Math.min(tentativas, 6)) * 1000;
-            definirEstado('RECONECTANDO', { erro: `Conexão caiu (código ${codigo || '?'}). Nova tentativa em ${espera / 1000}s.` });
-            timerReconexao = setTimeout(() => conectar().catch(erroFatal), espera);
+            s.tentativas += 1;
+            const espera = Math.min(60, 2 ** Math.min(s.tentativas, 6)) * 1000;
+            definir(s, 'RECONECTANDO', { erro: `Conexão caiu (código ${codigo || '?'}). Nova tentativa em ${espera / 1000}s.` });
+            s.timer = setTimeout(() => { if (!s.pausada) conectar(s).catch(e => falha(s, e)); }, espera);
         }
     });
 
-    sock.ev.on('groups.update', updates => updates.forEach(u => u.subject && nomesGrupos.set(u.id, u.subject)));
-
-    sock.ev.on('messaging-history.set', ({ messages }) => {
-        (messages || []).forEach(m => processar(m, true));
-    });
-
-    sock.ev.on('messages.upsert', ({ messages, type }) => {
-        (messages || []).forEach(m => processar(m, type !== 'notify'));
-    });
+    sock.ev.on('groups.update', ups => ups.forEach(u => u.subject && nomesGrupos.set(u.id, u.subject)));
+    sock.ev.on('messaging-history.set', ({ messages }) => { if (atual()) (messages || []).forEach(m => processar(s, m, true)); });
+    sock.ev.on('messages.upsert', ({ messages, type }) => { if (atual()) (messages || []).forEach(m => processar(s, m, type !== 'notify')); });
 }
 
-function erroFatal(e) {
-    console.error('❌ [WHATSAPP] Falha ao conectar:', e.message);
-    definirEstado('ERRO', { erro: e.message });
-    timerReconexao = setTimeout(() => conectar().catch(erroFatal), 30000);
+function falha(s, e) {
+    console.error(`❌ [WHATSAPP] ${s.uid}: falha ao conectar:`, e.message);
+    definir(s, 'ERRO', { erro: e.message });
+    s.timer = setTimeout(() => { if (!s.pausada) conectar(s).catch(err => falha(s, err)); }, 30000);
 }
 
-async function iniciar(opcoes) {
-    handlers = { ...handlers, ...opcoes };
-    try {
-        baileys = require('@whiskeysockets/baileys');
-    } catch (e) {
-        definirEstado('INDISPONIVEL', { erro: 'Biblioteca do WhatsApp não instalada. Rode "npm install".' });
-        console.error('⚠️  [WHATSAPP] Biblioteca não instalada — rode "npm install". O painel funciona, mas sem WhatsApp.');
-        return;
-    }
-    conectar().catch(erroFatal);
-}
+function ativas() { return [...sessoes.values()].filter(s => !s.pausada && s.sock); }
 
-function exigirConexao() {
-    if (!sock || status.estado !== 'CONECTADO') {
-        const e = new Error('WhatsApp não está conectado. Abra Configurações > WhatsApp.'); e.status = 409; throw e;
+async function liberarVaga(uidNovo) {
+    const outras = ativas().filter(s => s.uid !== uidNovo);
+    while (outras.length >= MAX_ATIVAS) {
+        const plantao = h.liderPlantao();
+        outras.sort((a, b) => (a.uid === plantao) - (b.uid === plantao) || a.ativadoEm - b.ativadoEm);
+        const saida = outras.shift();
+        await pausar(saida.uid, 'Pausado para liberar memória (sessão guardada). Reconecta sozinho ao assumir o plantão.');
     }
 }
 
-async function listarGrupos() {
-    exigirConexao();
-    const grupos = await sock.groupFetchAllParticipating();
+// Liga (ou religa) a sessão de um usuário
+async function ativar(uid) {
+    if (!baileys) { const e = new Error('Biblioteca do WhatsApp não instalada. Rode "npm install".'); e.status = 503; throw e; }
+    const s = sessao(uid);
+    s.ativadoEm = Date.now();
+    if (!s.pausada && s.sock) return status(uid);
+    await liberarVaga(uid);
+    s.aguardandoDesde = 0;
+    await conectar(s).catch(e => falha(s, e));
+    return status(uid);
+}
+
+async function pausar(uid, motivo = null) {
+    const s = sessao(uid);
+    s.pausada = true;
+    clearTimeout(s.timer);
+    const sock = s.sock;
+    s.sock = null;
+    if (sock) { try { sock.end(undefined); } catch (_) {} }
+    definir(s, 'PAUSADO', { qr: null, erro: motivo });
+}
+
+async function desconectar(uid) {
+    const s = sessao(uid);
+    s.pausada = true;
+    clearTimeout(s.timer);
+    try { if (s.sock) await s.sock.logout(); } catch (_) {}
+    s.sock = null;
+    try { const auth = s.auth || await abrirAuth(uid); await auth.limpar(); } catch (_) {}
+    definir(s, 'DESCONECTADO', { numero: null, qr: null, erro: null });
+    h.pareado(uid, null);
+}
+
+function status(uid) {
+    if (!baileys) return { estado: 'INDISPONIVEL', erro: 'Biblioteca do WhatsApp não instalada.' };
+    const s = sessoes.get(uid);
+    if (!s) return { estado: 'PAUSADO', numero: null, qr: null, erro: null };
+    return { estado: s.estado, numero: s.numero, qr: s.qr, erro: s.erro };
+}
+
+function exigir(uid) {
+    const s = sessoes.get(uid);
+    if (!s || !s.sock || s.estado !== 'CONECTADO') {
+        const e = new Error('O WhatsApp do líder de plantão não está conectado. Ele precisa conectar em "Meu perfil".'); e.status = 409; throw e;
+    }
+    return s;
+}
+
+async function listarGrupos(uid) {
+    const s = exigir(uid);
+    const grupos = await s.sock.groupFetchAllParticipating();
     return Object.values(grupos)
         .map(g => { nomesGrupos.set(g.id, g.subject); return { id: g.id, nome: g.subject || 'Grupo sem nome', membros: g.participants?.length || 0 }; })
         .sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
 }
 
-async function enviarTexto(jid, texto) {
-    exigirConexao();
-    return sock.sendMessage(jid, { text: texto });
+async function enviarTexto(uid, jid, texto) { return exigir(uid).sock.sendMessage(jid, { text: texto }); }
+
+async function enviarDocumento(uid, jid, conteudo, nomeArquivo, legenda) {
+    return exigir(uid).sock.sendMessage(jid, { document: Buffer.from(conteudo, 'utf-8'), fileName: nomeArquivo, mimetype: 'text/plain', caption: legenda });
 }
 
-async function enviarDocumento(jid, conteudo, nomeArquivo, legenda) {
-    exigirConexao();
-    return sock.sendMessage(jid, { document: Buffer.from(conteudo, 'utf-8'), fileName: nomeArquivo, mimetype: 'text/plain', caption: legenda });
-}
-
-async function pedirCodigo(numero) {
-    if (!sock || status.estado !== 'AGUARDANDO_PAREAMENTO') {
-        const e = new Error(status.estado === 'CONECTADO' ? 'O WhatsApp já está conectado.' : 'Aguarde alguns segundos até o QR aparecer e tente de novo.');
-        e.status = 409; throw e;
+async function pedirCodigo(uid, numero) {
+    const s = sessoes.get(uid);
+    if (!s || !s.sock || s.estado !== 'AGUARDANDO_PAREAMENTO') {
+        const e = new Error(s?.estado === 'CONECTADO' ? 'O WhatsApp já está conectado.' : 'Aguarde o QR aparecer e tente de novo.'); e.status = 409; throw e;
     }
     const n = String(numero || '').replace(/\D/g, '');
     if (n.length < 12) { const e = new Error('Digite o número com 55 + DDD + número. Ex.: 5522998765432'); e.status = 400; throw e; }
-    const codigo = await sock.requestPairingCode(n);
+    const codigo = await s.sock.requestPairingCode(n);
     return codigo?.match(/.{1,4}/g)?.join('-') || codigo;
 }
 
-async function desconectar() {
-    clearTimeout(timerReconexao);
-    try { if (sock) await sock.logout(); } catch (_) {}
-    try { if (sessao) await sessao.limpar(); } catch (_) {}
-    definirEstado('DESCONECTADO', { numero: null, qr: null });
-    timerReconexao = setTimeout(() => conectar().catch(erroFatal), 2000);
+async function iniciar(opcoes, uidsParaLigar = []) {
+    h = { ...h, ...opcoes };
+    try {
+        baileys = require('@whiskeysockets/baileys');
+        logger = require('pino')({ level: 'silent' });
+    } catch (e) {
+        console.error('⚠️  [WHATSAPP] Biblioteca não instalada — rode "npm install". O painel funciona, mas sem WhatsApp.');
+        return;
+    }
+    for (const uid of uidsParaLigar.slice(0, MAX_ATIVAS)) {
+        sessao(uid).ativadoEm = Date.now();
+        conectar(sessao(uid)).catch(e => falha(sessao(uid), e));
+    }
 }
 
 module.exports = {
-    iniciar, status, listarGrupos, enviarTexto, enviarDocumento, pedirCodigo, desconectar,
-    nomesGrupos
+    MAX_ATIVAS, iniciar, ativar, pausar, desconectar, status, listarGrupos, enviarTexto, enviarDocumento, pedirCodigo,
+    nomesGrupos, disponivel: () => !!baileys
 };

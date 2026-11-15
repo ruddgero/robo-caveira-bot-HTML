@@ -1,6 +1,6 @@
 // =====================================================================
-// SERVIDOR WEB: entrega a tela (pasta public) e a API, tudo protegido
-// por senha. Usa só o módulo http do Node (sem dependências extras).
+// SERVIDOR WEB: entrega a tela e a API. Login por pessoa e permissões
+// por perfil (Administrador, Líder, Operador). Só módulos nativos do Node.
 // =====================================================================
 const http = require('http');
 const fs = require('fs');
@@ -8,70 +8,64 @@ const path = require('path');
 const crypto = require('crypto');
 
 const nucleo = require('./nucleo');
+const usuarios = require('./usuarios');
 const whatsapp = require('./whatsapp');
+const email = require('./email');
 const store = require('./store');
 const R = require('./relatorio');
 const { agora } = require('./util');
 
-// Arquivos da tela ficam na mesma pasta do servidor. SÓ estes podem ser
-// entregues ao navegador — qualquer outro arquivo (código, .env, dados) é bloqueado.
+// Arquivos da tela: SÓ estes podem ser entregues ao navegador
 const PASTA_PUBLICA = __dirname;
 const ARQUIVOS_PUBLICOS = new Set(['/index.html', '/app.js', '/style.css', '/manifest.json', '/sw.js', '/icon.svg']);
 const COOKIE = 'cv_sessao';
-const DURACAO_SESSAO_MS = 14 * 24 * 60 * 60 * 1000; // 14 dias
+const DURACAO_SESSAO_MS = 14 * 24 * 60 * 60 * 1000;
 let SEGREDO = null;
 
 const TIPOS = {
     '.html': 'text/html; charset=utf-8', '.js': 'application/javascript; charset=utf-8',
-    '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8',
-    '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.webmanifest': 'application/manifest+json'
+    '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml'
 };
 
-// ------------------------- Sessão / login -----------------------------
+// ------------------------- Sessão -------------------------------------
 function assinar(dados) {
     const corpo = Buffer.from(JSON.stringify(dados)).toString('base64url');
-    const sig = crypto.createHmac('sha256', SEGREDO).update(corpo).digest('base64url');
-    return `${corpo}.${sig}`;
+    return `${corpo}.${crypto.createHmac('sha256', SEGREDO).update(corpo).digest('base64url')}`;
 }
 
-function validar(token) {
+function usuarioDoToken(token) {
     if (!token || !token.includes('.')) return null;
     const [corpo, sig] = token.split('.');
     const esperado = crypto.createHmac('sha256', SEGREDO).update(corpo).digest('base64url');
-    if (sig.length !== esperado.length || !crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(esperado))) return null;
+    if (!sig || sig.length !== esperado.length || !crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(esperado))) return null;
     try {
         const d = JSON.parse(Buffer.from(corpo, 'base64url').toString());
-        return d.exp > Date.now() ? d : null;
+        if (d.exp < Date.now()) return null;
+        const u = usuarios.porId(d.uid);
+        return u && u.ativo && u.versaoSenha === d.v ? u : null;
     } catch (_) { return null; }
 }
 
 function lerCookies(req) {
     return Object.fromEntries((req.headers.cookie || '').split(';').map(c => c.trim().split('=')).filter(p => p[0]).map(([k, ...v]) => [k, decodeURIComponent(v.join('='))]));
 }
+const ehHttps = req => req.headers['x-forwarded-proto'] === 'https' || !!req.socket.encrypted;
 
-function ehHttps(req) {
-    return req.headers['x-forwarded-proto'] === 'https' || !!req.socket.encrypted;
+function definirCookie(req, res, u) {
+    const token = assinar({ uid: u.id, v: u.versaoSenha, exp: Date.now() + DURACAO_SESSAO_MS });
+    res.setHeader('Set-Cookie', `${COOKIE}=${token}; HttpOnly; Path=/; SameSite=Strict; Max-Age=${DURACAO_SESSAO_MS / 1000}${ehHttps(req) ? '; Secure' : ''}`);
 }
 
-const tentativasLogin = new Map();
-function bloqueadoPorTentativas(ip) {
-    const t = tentativasLogin.get(ip);
+const tentativas = new Map();
+function bloqueado(chave) {
+    const t = tentativas.get(chave);
     if (!t) return false;
-    if (Date.now() - t.inicio > 10 * 60 * 1000) { tentativasLogin.delete(ip); return false; }
+    if (Date.now() - t.inicio > 10 * 60 * 1000) { tentativas.delete(chave); return false; }
     return t.n >= 6;
 }
-function registrarFalha(ip) {
-    const t = tentativasLogin.get(ip) || { n: 0, inicio: Date.now() };
-    t.n += 1; tentativasLogin.set(ip, t);
-}
+function falhou(chave) { const t = tentativas.get(chave) || { n: 0, inicio: Date.now() }; t.n++; tentativas.set(chave, t); }
 
-function senhaConfere(digitada) {
-    const a = crypto.createHash('sha256').update(String(digitada || '')).digest();
-    const b = crypto.createHash('sha256').update(String(process.env.APP_SENHA || '')).digest();
-    return crypto.timingSafeEqual(a, b);
-}
-
-// ------------------------- Utilidades HTTP ----------------------------
+// ------------------------- HTTP ---------------------------------------
 function enviarJson(res, status, dados) {
     res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
     res.end(JSON.stringify(dados));
@@ -82,7 +76,7 @@ function lerCorpo(req) {
         let tamanho = 0; const partes = [];
         req.on('data', c => {
             tamanho += c.length;
-            if (tamanho > 1024 * 1024) { falha(Object.assign(new Error('Conteúdo muito grande.'), { status: 413 })); req.destroy(); return; }
+            if (tamanho > 2 * 1024 * 1024) { falha(Object.assign(new Error('Conteúdo muito grande.'), { status: 413 })); req.destroy(); return; }
             partes.push(c);
         });
         req.on('end', () => {
@@ -102,10 +96,7 @@ function servirArquivo(req, res, caminhoUrl) {
         res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' }); return res.end('Não encontrado');
     }
     const ext = path.extname(arquivo);
-    res.writeHead(200, {
-        'Content-Type': TIPOS[ext] || 'application/octet-stream',
-        'Cache-Control': ext === '.html' || rel === '/sw.js' ? 'no-cache' : 'public, max-age=300'
-    });
+    res.writeHead(200, { 'Content-Type': TIPOS[ext] || 'application/octet-stream', 'Cache-Control': ext === '.html' || rel === '/sw.js' ? 'no-cache' : 'public, max-age=120' });
     fs.createReadStream(arquivo).pipe(res);
 }
 
@@ -115,112 +106,301 @@ async function qrComoSvg(texto) {
     catch (_) { return null; }
 }
 
-// ------------------------- Rotas da API -------------------------------
+const erro = (msg, status = 400) => Object.assign(new Error(msg), { status });
+const LIDERES = ['ADMIN', 'LIDER'];
+
+// ------------------------- Rotas --------------------------------------
 const rotas = [];
-const rota = (metodo, padrao, fn, publica = false) => {
+function rota(metodo, padrao, fn, opcoes = {}) {
     const nomes = [];
     const re = new RegExp('^' + padrao.replace(/:(\w+)/g, (_, n) => { nomes.push(n); return '([^/]+)'; }) + '$');
-    rotas.push({ metodo, re, nomes, fn, publica });
-};
+    rotas.push({ metodo, re, nomes, fn, ...opcoes });
+}
 
-rota('GET', '/ping', async () => ({ ok: true, whatsapp: whatsapp.status.estado, hora: agora().hora }), true);
+function exigirPlantao(u) {
+    if (nucleo.estado.plantao.liderId !== u.id) throw erro('Assuma o plantão para publicar (botão "Assumir plantão" na Central).', 409);
+}
 
+function marcas() {
+    const e = nucleo.estado;
+    return {
+        ficha: e.versao,
+        pendencias: `${e.pendencias.length}:${e.pendencias.reduce((s, p) => s + (p.historico?.length || 0), 0)}:${e.pendencias.filter(p => p.status === 'ABERTA').length}`,
+        operacoes: `${e.operacoes.length}:${e.operacoes.filter(o => o.horaFinal).length}:${e.operacoes.filter(o => o.email?.enviadoEm || o.email?.erro).length}`,
+        relatorios: `${e.relatorios[0]?.id || ''}:${e.relatorios[0]?.herdadoEm || ''}:${e.plantao.relatorioPendenteId || ''}`,
+        plantao: `${e.plantao.liderId || ''}:${e.plantao.sugerirNovaEscala ? 1 : 0}:${e.escala?.id || ''}`
+    };
+}
+
+function resumoRelatorio(r) {
+    if (!r) return null;
+    const { texto, assinatura, ...resto } = r;
+    return { ...resto, texto };
+}
+
+function operacaoParaTela(o) {
+    return { ...o, rotuloTipo: R.TIPOS_OPERACAO[o.tipo]?.rotulo || o.tipo };
+}
+
+function pendenciaParaTela(p) {
+    const horas = (Date.now() - new Date(p.criadoEm).getTime()) / 3600000;
+    return { ...p, turnosAberto: Math.max(1, Math.ceil(horas / 12)) };
+}
+
+rota('GET', '/ping', async () => ({ ok: true, hora: agora().hora }), { publica: true });
+
+// --- Login
 rota('POST', '/api/login', async (req, res, { corpo }) => {
     const ip = req.headers['x-forwarded-for']?.split(',')[0].trim() || req.socket.remoteAddress;
-    if (bloqueadoPorTentativas(ip)) return [429, { erro: 'Muitas tentativas. Aguarde 10 minutos.' }];
-    if (!senhaConfere(corpo.senha)) { registrarFalha(ip); return [401, { erro: 'Senha incorreta.' }]; }
-    tentativasLogin.delete(ip);
-    const token = assinar({ exp: Date.now() + DURACAO_SESSAO_MS });
-    res.setHeader('Set-Cookie', `${COOKIE}=${token}; HttpOnly; Path=/; SameSite=Strict; Max-Age=${DURACAO_SESSAO_MS / 1000}${ehHttps(req) ? '; Secure' : ''}`);
-    return { ok: true };
-}, true);
+    const chave = `${ip}|${String(corpo.email || '').toLowerCase()}`;
+    if (bloqueado(chave)) return [429, { erro: 'Muitas tentativas. Aguarde 10 minutos.' }];
+    const u = usuarios.autenticar(corpo.email, corpo.senha);
+    if (!u) { falhou(chave); return [401, { erro: 'E-mail ou senha incorretos.' }]; }
+    tentativas.delete(chave);
+    definirCookie(req, res, u);
+    nucleo.auditar(u, 'Entrou no sistema');
+    return { ok: true, usuario: usuarios.publico(u) };
+}, { publica: true });
 
 rota('POST', '/api/logout', async (req, res) => {
     res.setHeader('Set-Cookie', `${COOKIE}=; HttpOnly; Path=/; SameSite=Strict; Max-Age=0`);
     return { ok: true };
-}, true);
+}, { publica: true });
 
-rota('GET', '/api/sessao', async (req) => ({ logado: !!validar(lerCookies(req)[COOKIE]) }), true);
+rota('GET', '/api/sessao', async req => ({ usuario: usuarios.publico(usuarioDoToken(lerCookies(req)[COOKIE])) }), { publica: true });
 
-rota('GET', '/api/estado', async () => {
+rota('POST', '/api/eu/senha', async (req, res, { corpo, u }) => {
+    const atualizado = await usuarios.trocarSenha(u.id, corpo.atual, corpo.nova);
+    definirCookie(req, res, atualizado);
+    nucleo.auditar(u, 'Trocou a senha');
+    return { ok: true, usuario: usuarios.publico(atualizado) };
+}, { permiteTroca: true });
+
+rota('PUT', '/api/eu', async (req, res, { corpo, u }) => ({ usuario: usuarios.publico(await usuarios.atualizar(u.id, { nome: corpo.nome, telefone: corpo.telefone })) }));
+
+rota('GET', '/api/meta', async () => ({
+    tipos: Object.fromEntries(Object.entries(R.TIPOS_OPERACAO).map(([k, v]) => [k, { rotulo: v.rotulo, autoridade: v.autoridade }])),
+    movimentos: R.MOVIMENTOS, perfis: usuarios.ROTULO_PERFIL,
+    email: { ativo: email.configurado(), motivo: email.motivoIndisponivel() },
+    whatsappMax: whatsapp.MAX_ATIVAS, armazenamento: store.modo
+}));
+
+// --- Estado geral (consultado a cada poucos segundos)
+rota('GET', '/api/estado', async (req, res, { u }) => {
     const e = nucleo.estado;
+    const lider = nucleo.liderDePlantao();
     return {
-        whatsapp: { estado: whatsapp.status.estado, numero: whatsapp.status.numero, erro: whatsapp.status.erro },
-        pendentes: e.entrada.filter(i => i.status === 'pendente').length,
+        usuario: usuarios.publico(u),
+        plantao: {
+            liderId: e.plantao.liderId || null, liderNome: lider?.nome || null, assumidoEm: e.plantao.assumidoEm || null,
+            sugerirNovaEscala: !!e.plantao.sugerirNovaEscala && !!lider, relatorioPendenteId: e.plantao.relatorioPendenteId || null
+        },
+        whatsapp: { meu: whatsapp.status(u.id), plantao: lider ? whatsapp.status(lider.id) : null },
+        turno: { turno: e.ficha.turno, data: e.ficha.data },
+        pendentesEntrada: e.entrada.filter(i => i.status === 'pendente').length,
         urgentes: e.entrada.filter(i => i.status === 'pendente' && i.urgente).length,
-        relatorioUS: e.relatorioUS ? { capturadoEm: e.relatorioUS.capturadoEm, herdadoEm: e.relatorioUS.herdadoEm } : null,
-        fichaVersao: e.versao,
-        configurado: e.config.gruposMonitorados.length > 0,
-        armazenamento: store.modo
+        pendenciasAbertas: e.pendencias.filter(p => p.status === 'ABERTA').length,
+        marcas: marcas()
     };
 });
 
-// Ficha do turno
-rota('GET', '/api/ficha', async () => ({ ficha: nucleo.estado.ficha, conferencia: R.conferirFicha(nucleo.estado.ficha) }));
-rota('PUT', '/api/ficha', async (req, res, { corpo }) => {
-    const ficha = await nucleo.salvarFicha(corpo.ficha, corpo.versao);
-    return { ficha, conferencia: R.conferirFicha(ficha) };
+// --- Central do Plantão
+rota('GET', '/api/central', async () => {
+    const e = nucleo.estado;
+    const limite = Date.now() - 24 * 3600 * 1000;
+    return {
+        ficha: { id: e.ficha.id, turno: e.ficha.turno, data: e.ficha.data, herdadoDe: e.ficha.herdadoDe, publicadoEm: e.ficha.publicadoEm, vtr: e.ficha.vtr, atividades: e.ficha.atividades.length, ocorrencias: e.ficha.ocorrencias.length },
+        conferencia: nucleo.conferencia(),
+        pendencias: e.pendencias.filter(p => p.status === 'ABERTA' || new Date(p.concluidoEm || 0).getTime() > limite).map(pendenciaParaTela),
+        operacoes: nucleo.operacoesDaFicha(e.ficha.id).map(operacaoParaTela),
+        relatorios: e.relatorios.map(resumoRelatorio),
+        relatorioPendente: resumoRelatorio(e.relatorios.find(r => r.id === e.plantao.relatorioPendenteId)),
+        escala: e.escala ? { id: e.escala.id, dataInicio: e.escala.dataInicio, iniciadaPor: e.escala.iniciadaPor } : null,
+        emailAtivo: email.configurado(),
+        destinatario: nucleo.destinatarioEmail()
+    };
 });
-rota('GET', '/api/ficha/texto', async () => ({
-    whatsapp: R.formatarRelatorio(nucleo.estado.ficha),
-    simples: R.formatarRelatorio(nucleo.estado.ficha, { negrito: false }),
-    conferencia: R.conferirFicha(nucleo.estado.ficha)
+
+rota('POST', '/api/plantao/assumir', async (req, res, { u }) => {
+    const p = await nucleo.assumirPlantao(u);
+    if (u.whatsapp?.pareado) whatsapp.ativar(u.id).catch(() => {});
+    return { plantao: p };
+}, { perfis: LIDERES });
+
+rota('POST', '/api/plantao/manter-turno', async (req, res, { u }) => { await nucleo.dispensarRelatorioPendente(u); return { ok: true }; }, { perfis: LIDERES });
+
+// --- Ficha do turno
+rota('GET', '/api/ficha', async () => ({
+    ficha: nucleo.estado.ficha, conferencia: nucleo.conferencia(),
+    avisos: nucleo.avisosAbertos().map(pendenciaParaTela),
+    operacoes: nucleo.operacoesDaFicha(nucleo.estado.ficha.id).map(operacaoParaTela)
 }));
-rota('POST', '/api/ficha/herdar', async () => ({ ficha: await nucleo.herdar() }));
-rota('POST', '/api/ficha/nova', async () => ({ ficha: await nucleo.novaFichaEmBranco() }));
-rota('POST', '/api/ficha/publicar', async (req, res, { corpo }) => {
-    const cfg = nucleo.estado.config;
-    if (!cfg.grupoPublicacao) return [409, { erro: 'Escolha o grupo de publicação em Configurações.' }];
-    const f = nucleo.estado.ficha;
-    const texto = R.formatarRelatorio(f);
-    await whatsapp.enviarTexto(cfg.grupoPublicacao, texto);
-    if (corpo.anexarTxt) {
-        const nome = `Relatorio_Turno_${f.turno}_${f.data.replace(/\//g, '-')}.txt`;
-        await whatsapp.enviarDocumento(cfg.grupoPublicacao, R.formatarRelatorio(f, { negrito: false }), nome, '📄 Arquivo do relatório');
+
+rota('PUT', '/api/ficha', async (req, res, { corpo }) => {
+    try {
+        const ficha = await nucleo.salvarFicha(corpo.ficha, corpo.versao);
+        return { ficha, conferencia: nucleo.conferencia() };
+    } catch (e) {
+        if (e.status === 409) return [409, { erro: e.message, ficha: nucleo.estado.ficha }];
+        throw e;
     }
-    await nucleo.marcarPublicado(texto);
+});
+
+rota('GET', '/api/ficha/texto', async () => ({
+    whatsapp: nucleo.textoRelatorio(), simples: nucleo.textoRelatorio({ negrito: false }), conferencia: nucleo.conferencia()
+}));
+
+rota('POST', '/api/ficha/herdar', async (req, res, { corpo, u }) => ({ ficha: await nucleo.herdar(corpo.relatorioId, u) }), { perfis: LIDERES });
+rota('POST', '/api/ficha/nova', async (req, res, { u }) => ({ ficha: await nucleo.novaFichaEmBranco(u) }), { perfis: LIDERES });
+
+rota('POST', '/api/ficha/publicar', async (req, res, { corpo, u }) => {
+    exigirPlantao(u);
+    const cfg = nucleo.estado.config;
+    if (!cfg.grupoPublicacao) throw erro('O administrador precisa escolher o grupo de publicação em Configurações.', 409);
+    const f = nucleo.estado.ficha;
+    const texto = nucleo.textoRelatorio();
+    await whatsapp.enviarTexto(u.id, cfg.grupoPublicacao, texto);
+    if (corpo.anexarTxt) {
+        await whatsapp.enviarDocumento(u.id, cfg.grupoPublicacao, nucleo.textoRelatorio({ negrito: false }), `Relatorio_Turno_${f.turno}_${f.data.replace(/\//g, '-')}.txt`, '📄 Arquivo do relatório');
+    }
+    await nucleo.marcarPublicado(texto, u);
     return { ok: true, publicadoEm: nucleo.estado.ficha.publicadoEm };
-});
+}, { perfis: LIDERES });
 
-// Relatório da US
-rota('GET', '/api/relatorio-us', async () => ({ relatorio: nucleo.estado.relatorioUS }));
-rota('POST', '/api/relatorio-us', async (req, res, { corpo }) => {
+// --- Relatórios da equipe anterior
+rota('GET', '/api/relatorios', async () => ({ relatorios: nucleo.estado.relatorios.map(resumoRelatorio) }));
+rota('POST', '/api/relatorios', async (req, res, { corpo, u }) => {
     const texto = String(corpo.texto || '').trim();
-    if (texto.length < 50) return [400, { erro: 'Cole o texto completo do relatório.' }];
-    return { relatorio: await nucleo.registrarRelatorioUS({ texto, autor: corpo.autor || 'Colado manualmente', manual: true }) };
+    if (texto.length < 50) throw erro('Cole o texto completo do relatório.');
+    return { relatorio: resumoRelatorio(await nucleo.registrarRelatorio({ texto, autor: 'Colado manualmente', manual: true }, u)) };
 });
 
-// Caixa de entrada
+// --- Entrada
 rota('GET', '/api/entrada', async () => ({ itens: nucleo.estado.entrada.slice().reverse() }));
 rota('POST', '/api/entrada/:id', async (req, res, { corpo, params }) => ({ item: await nucleo.atualizarItemEntrada(params.id, corpo) }));
 
-// E-mail de operação de bordo
-rota('GET', '/api/email/:opId', async (req, res, { params }) => {
-    const op = (nucleo.estado.ficha.operacoes || []).find(o => o.id === params.opId);
-    if (!op) return [404, { erro: 'Operação não encontrada.' }];
-    return R.minutaEmail(op, nucleo.estado.ficha, nucleo.estado.config);
+// --- Pendências
+rota('GET', '/api/pendencias', async () => ({ pendencias: nucleo.estado.pendencias.map(pendenciaParaTela) }));
+rota('POST', '/api/pendencias', async (req, res, { corpo, u }) => {
+    const p = await nucleo.criarPendencia(corpo, u, corpo.entradaId ? 'Mensagem do grupo' : 'Registrada manualmente');
+    if (corpo.entradaId) await nucleo.atualizarItemEntrada(corpo.entradaId, { status: 'usado', destino: p.tipo === 'DIGITAL' ? 'Pendência da Digital' : 'Aviso' }).catch(() => {});
+    return { pendencia: pendenciaParaTela(p) };
+});
+rota('PUT', '/api/pendencias/:id', async (req, res, { corpo, params, u }) => ({ pendencia: pendenciaParaTela(await nucleo.editarPendencia(params.id, corpo, u)) }));
+rota('POST', '/api/pendencias/:id/atualizar', async (req, res, { corpo, params, u }) => ({ pendencia: pendenciaParaTela(await nucleo.atualizarPendencia(params.id, corpo.texto, u)) }));
+rota('POST', '/api/pendencias/:id/concluir', async (req, res, { corpo, params, u }) => ({ pendencia: pendenciaParaTela(await nucleo.concluirPendencia(params.id, corpo, u)) }));
+rota('POST', '/api/pendencias/:id/reabrir', async (req, res, { params, u }) => ({ pendencia: pendenciaParaTela(await nucleo.reabrirPendencia(params.id, u)) }));
+rota('POST', '/api/pendencias/:id/excluir', async (req, res, { params, u }) => { await nucleo.excluirPendencia(params.id, u); return { ok: true }; }, { perfis: LIDERES });
+
+// --- Operações de bordo
+rota('GET', '/api/operacoes', async () => ({ operacoes: nucleo.operacoesDaFicha(nucleo.estado.ficha.id).map(operacaoParaTela) }));
+rota('POST', '/api/operacoes', async (req, res, { corpo, u }) => {
+    const ops = await nucleo.registrarOperacoes(corpo.operacoes, { atividadeTexto: corpo.atividadeTexto || '', entradaId: corpo.entradaId || null, autor: corpo.autor || '', usuario: u });
+    if (corpo.entradaId) await nucleo.atualizarItemEntrada(corpo.entradaId, { status: 'usado', destino: ops.length > 1 ? `${ops.length} operações de bordo` : 'Operação de bordo' }).catch(() => {});
+    return { operacoes: ops.map(operacaoParaTela) };
+});
+rota('PUT', '/api/operacoes/:id', async (req, res, { corpo, params, u }) => ({ operacao: operacaoParaTela(await nucleo.atualizarOperacao(params.id, corpo, u)) }));
+rota('POST', '/api/operacoes/:id/saida', async (req, res, { corpo, params, u }) => {
+    const o = await nucleo.registrarSaida(params.id, corpo.hora, u);
+    if (corpo.entradaId) await nucleo.atualizarItemEntrada(corpo.entradaId, { status: 'usado', destino: 'Saída registrada' }).catch(() => {});
+    return { operacao: operacaoParaTela(o) };
+});
+rota('POST', '/api/operacoes/:id/excluir', async (req, res, { params, u }) => { await nucleo.excluirOperacao(params.id, u); return { ok: true }; });
+rota('GET', '/api/operacoes/:id/email', async (req, res, { params }) => {
+    const o = nucleo.estado.operacoes.find(x => x.id === params.id);
+    if (!o) throw erro('Operação não encontrada.', 404);
+    const m = R.minutaEmail(o);
+    return { ...m, para: nucleo.estado.config.emailDestinatarios || '', cc: nucleo.estado.config.emailCopia || '', lider: nucleo.destinatarioEmail(), status: o.email || {}, emailAtivo: email.configurado() };
+});
+rota('POST', '/api/operacoes/:id/enviar-email', async (req, res, { params, u }) => {
+    const o = nucleo.estado.operacoes.find(x => x.id === params.id);
+    if (!o) throw erro('Operação não encontrada.', 404);
+    const r = await nucleo.enviarEmailOperacao(o, { forcar: true, usuario: u });
+    if (r.email?.status !== 'ENVIADO') throw erro(r.email?.erro || 'Não foi possível enviar.', 502);
+    return { operacao: operacaoParaTela(r) };
+});
+rota('POST', '/api/operacoes/:id/marcar', async (req, res, { corpo, params, u }) => {
+    if (!['encaminhadoEm', 'abertoEm'].includes(corpo.campo)) throw erro('Campo inválido.');
+    return { operacao: operacaoParaTela(await nucleo.marcarEmailOperacao(params.id, corpo.campo, u)) };
 });
 
-// Histórico
+// --- Escala
+rota('GET', '/api/escala', async () => nucleo.construirPassagem());
+rota('POST', '/api/escala/iniciar', async (req, res, { u }) => { await nucleo.iniciarEscala(u); return nucleo.construirPassagem(); }, { perfis: LIDERES });
+rota('POST', '/api/escala/continuar', async (req, res, { u }) => { await nucleo.continuarEscala(u); return { ok: true }; }, { perfis: LIDERES });
+rota('PUT', '/api/escala/passagem', async (req, res, { corpo, u }) => nucleo.salvarPassagem(corpo, u));
+rota('POST', '/api/escala/restaurar', async (req, res, { u }) => nucleo.restaurarPassagem(u));
+rota('GET', '/api/escala/texto', async () => ({ whatsapp: nucleo.textoPassagem(), simples: nucleo.textoPassagem({ negrito: false }) }));
+rota('POST', '/api/escala/publicar', async (req, res, { corpo, u }) => {
+    exigirPlantao(u);
+    const cfg = nucleo.estado.config;
+    if (!cfg.grupoPublicacao) throw erro('O administrador precisa escolher o grupo de publicação em Configurações.', 409);
+    await whatsapp.enviarTexto(u.id, cfg.grupoPublicacao, nucleo.textoPassagem());
+    if (corpo.anexarTxt) await whatsapp.enviarDocumento(u.id, cfg.grupoPublicacao, nucleo.textoPassagem({ negrito: false }), `Passagem_Escala_${agora().data.replace(/\//g, '-')}.txt`, '📄 Passagem da escala');
+    nucleo.auditar(u, 'Publicou a passagem da escala');
+    return { ok: true };
+}, { perfis: LIDERES });
+
+// --- Histórico
 rota('GET', '/api/historico', async () => ({
-    itens: (await store.listarHistorico(30)).map(h => ({ id: h.id, data: h.ficha.data, turno: h.ficha.turno, publicadoEm: h.ficha.publicadoEm, texto: R.formatarRelatorio(h.ficha, { negrito: false }) }))
+    itens: (await store.listarHistorico(40)).map(h => {
+        const f = h.ficha;
+        if (f.tipo === 'ESCALA') return { id: h.id, tipo: 'ESCALA', data: f.dataInicio, turno: 'Escala', texto: R.formatarPassagemEscala(f.dataInicio, f.passagem?.secoes || { digital: [], avisos: [], ocorrencias: [], atividades: [] }, { negrito: false }) };
+        return { id: h.id, tipo: 'TURNO', data: f.data, turno: f.turno, publicadoEm: f.publicadoEm, texto: R.formatarRelatorio({ ...f, navios: f.navios && typeof f.navios.tore !== 'string' ? f.navios : { tore: [], toil: [] } }, f.avisos || [], { negrito: false }) };
+    })
 }));
 
-// Configurações
-rota('GET', '/api/config', async () => {
-    const { ultimoTextoPublicado, ...cfg } = nucleo.estado.config;
-    return { config: cfg };
-});
-rota('PUT', '/api/config', async (req, res, { corpo }) => {
-    const { ultimoTextoPublicado, ...cfg } = await nucleo.salvarConfig(corpo.config || {});
-    return { config: cfg };
-});
+// --- Configurações
+rota('GET', '/api/config', async () => { const { ultimoTextoPublicado, ...cfg } = nucleo.estado.config; return { config: cfg }; });
+rota('PUT', '/api/config', async (req, res, { corpo, u }) => { const { ultimoTextoPublicado, ...cfg } = await nucleo.salvarConfig(corpo.config || {}, u); return { config: cfg }; }, { perfis: ['ADMIN'] });
+rota('GET', '/api/auditoria', async () => ({ itens: nucleo.estado.auditoria.slice().reverse().slice(0, 200) }), { perfis: ['ADMIN'] });
 
-// WhatsApp
-rota('GET', '/api/whatsapp', async () => ({ ...whatsapp.status, qr: undefined, qrSvg: await qrComoSvg(whatsapp.status.qr) }));
-rota('GET', '/api/whatsapp/grupos', async () => ({ grupos: await whatsapp.listarGrupos() }));
-rota('POST', '/api/whatsapp/codigo', async (req, res, { corpo }) => ({ codigo: await whatsapp.pedirCodigo(corpo.numero) }));
-rota('POST', '/api/whatsapp/desconectar', async () => { await whatsapp.desconectar(); return { ok: true }; });
+// --- Usuários (administrador)
+rota('GET', '/api/usuarios', async () => ({
+    usuarios: usuarios.todos().map(x => ({ ...usuarios.publico(x), whatsapp: { pareado: !!x.whatsapp?.pareado, numero: x.whatsapp?.numero || null, ...whatsapp.status(x.id), qr: undefined } }))
+}), { perfis: ['ADMIN'] });
+rota('POST', '/api/usuarios', async (req, res, { corpo, u }) => {
+    const r = await usuarios.criar(corpo);
+    nucleo.auditar(u, 'Cadastrou usuário', `${r.usuario.nome} (${r.usuario.perfil})`);
+    return { usuario: usuarios.publico(r.usuario), senhaProvisoria: r.senhaProvisoria };
+}, { perfis: ['ADMIN'] });
+rota('PUT', '/api/usuarios/:id', async (req, res, { corpo, params, u }) => {
+    const x = await usuarios.atualizar(params.id, corpo, { porAdmin: true });
+    if (corpo.ativo === false) await whatsapp.desconectar(x.id).catch(() => {});
+    nucleo.auditar(u, 'Alterou usuário', `${x.nome}`);
+    return { usuario: usuarios.publico(x) };
+}, { perfis: ['ADMIN'] });
+rota('POST', '/api/usuarios/:id/senha', async (req, res, { params, u }) => {
+    const senha = await usuarios.redefinirSenha(params.id);
+    nucleo.auditar(u, 'Gerou senha provisória', usuarios.porId(params.id)?.nome);
+    return { senhaProvisoria: senha };
+}, { perfis: ['ADMIN'] });
+
+// --- WhatsApp do próprio usuário (líderes)
+rota('GET', '/api/whatsapp', async (req, res, { u }) => {
+    const st = whatsapp.status(u.id);
+    return {
+        ...st, qr: undefined, qrSvg: await qrComoSvg(st.qr), disponivel: whatsapp.disponivel(), maxAtivas: whatsapp.MAX_ATIVAS,
+        grupos: (u.whatsapp?.grupos || []).map(id => ({ id, nome: nucleo.estado.config.nomesGrupos?.[id] || whatsapp.nomesGrupos.get(id) || id })),
+        pareado: !!u.whatsapp?.pareado, ehPlantao: nucleo.estado.plantao.liderId === u.id
+    };
+}, { perfis: LIDERES });
+rota('POST', '/api/whatsapp/conectar', async (req, res, { u }) => ({ status: { ...(await whatsapp.ativar(u.id)), qr: undefined } }), { perfis: LIDERES });
+rota('GET', '/api/whatsapp/grupos', async (req, res, { u }) => ({ grupos: await whatsapp.listarGrupos(u.id) }), { perfis: LIDERES });
+rota('PUT', '/api/whatsapp/grupos', async (req, res, { corpo, u }) => {
+    const ids = (corpo.grupos || []).map(String).filter(id => id.endsWith('@g.us'));
+    await usuarios.atualizarWhatsapp(u.id, { grupos: ids });
+    const nomes = { ...(nucleo.estado.config.nomesGrupos || {}), ...(corpo.nomes || {}) };
+    await nucleo.salvarConfig({ nomesGrupos: nomes }, u);
+    nucleo.auditar(u, 'Escolheu grupos do WhatsApp', ids.map(id => nomes[id] || id).join(', '));
+    return { ok: true };
+}, { perfis: LIDERES });
+rota('POST', '/api/whatsapp/codigo', async (req, res, { corpo, u }) => ({ codigo: await whatsapp.pedirCodigo(u.id, corpo.numero) }), { perfis: LIDERES });
+rota('POST', '/api/whatsapp/desconectar', async (req, res, { u }) => { await whatsapp.desconectar(u.id); nucleo.auditar(u, 'Desconectou o WhatsApp'); return { ok: true }; }, { perfis: LIDERES });
+// Grupos para o administrador escolher o grupo de publicação
+rota('GET', '/api/whatsapp/grupos-conhecidos', async () => ({
+    grupos: Object.entries({ ...Object.fromEntries(whatsapp.nomesGrupos), ...(nucleo.estado.config.nomesGrupos || {}) }).map(([id, nome]) => ({ id, nome }))
+}), { perfis: ['ADMIN'] });
 
 // ------------------------- Servidor -----------------------------------
 async function tratar(req, res) {
@@ -237,18 +417,24 @@ async function tratar(req, res) {
         return servirArquivo(req, res, req.url);
     }
     try {
-        if (!r.publica && !validar(lerCookies(req)[COOKIE])) return enviarJson(res, 401, { erro: 'Faça login novamente.' });
+        let u = null;
+        if (!r.publica) {
+            u = usuarioDoToken(lerCookies(req)[COOKIE]);
+            if (!u) return enviarJson(res, 401, { erro: 'Faça login novamente.' });
+            if (u.trocarSenha && !r.permiteTroca) return enviarJson(res, 403, { erro: 'Troque sua senha provisória para continuar.', trocarSenha: true });
+            if (r.perfis && !r.perfis.includes(u.perfil)) return enviarJson(res, 403, { erro: 'Seu perfil não tem permissão para esta ação.' });
+        }
         if (req.method !== 'GET' && req.headers['x-caveira'] !== '1') return enviarJson(res, 403, { erro: 'Requisição recusada.' });
         const m = url.match(r.re);
         const params = Object.fromEntries(r.nomes.map((n, i) => [n, decodeURIComponent(m[i + 1])]));
         const corpo = req.method === 'GET' ? {} : await lerCorpo(req);
-        const saida = await r.fn(req, res, { corpo, params });
+        const saida = await r.fn(req, res, { corpo, params, u });
         if (Array.isArray(saida)) return enviarJson(res, saida[0], saida[1]);
         return enviarJson(res, 200, saida);
     } catch (e) {
         const st = e.status || 500;
         if (st >= 500) console.error(`❌ [API] ${req.method} ${url}:`, e);
-        return enviarJson(res, st, { erro: st >= 500 ? 'Erro interno: ' + e.message : e.message });
+        return enviarJson(res, st, { erro: st >= 500 && st !== 502 && st !== 503 ? 'Erro interno: ' + e.message : e.message });
     }
 }
 
