@@ -4,11 +4,11 @@
 // =====================================================================
 try { require('dotenv').config(); } catch (_) { /* .env opcional quando as variáveis vêm do servidor */ }
 
-const store = require('./src/store');
-const nucleo = require('./src/nucleo');
-const whatsapp = require('./src/whatsapp');
-const servidor = require('./src/servidor');
-const { agora } = require('./src/util');
+const store = require('./store');
+const nucleo = require('./nucleo');
+const whatsapp = require('./whatsapp');
+const servidor = require('./servidor');
+const { agora } = require('./util');
 
 async function principal() {
     console.log('💀 CAVEIRA BOT CCOS — iniciando...');
