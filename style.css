@@ -310,3 +310,12 @@ input:-webkit-autofill, input:-webkit-autofill:hover, input:-webkit-autofill:foc
   .barra-acoes { bottom: 16px; }
   .modal-caixa { max-width: 720px; }
 }
+/* Celular: nada pode ficar mais largo que a tela */
+.aba, .duas-colunas > div, .rel-desktop > .aba, .hist-desktop > .aba { grid-template-columns: minmax(0, 1fr); }
+.cartao, .faixa { min-width: 0; }
+html, body { overflow-x: clip; }
+@media (max-width: 600px) {
+  .barra-acoes { flex-wrap: wrap; gap: 6px; padding: 8px; }
+  .barra-acoes .estado-salvo { flex-basis: 100%; text-align: center; }
+  .barra-acoes .btn { flex: 1 1 0; min-width: 0; padding: 10px 4px; font-size: 13px; white-space: nowrap; }
+}
