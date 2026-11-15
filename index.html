@@ -3,23 +3,30 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#0b1120">
+  <meta name="theme-color" content="#0a0c12">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <title>Caveira Bot · CCOS</title>
   <link rel="manifest" href="/manifest.json">
   <link rel="icon" href="/icon.svg" type="image/svg+xml">
-  <link rel="apple-touch-icon" href="/icon.svg">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
   <canvas id="fundo-animado" aria-hidden="true"></canvas>
 
+  <!-- CAPA DE ABERTURA -->
+  <div id="capa" class="capa" aria-hidden="true">
+    <img src="/logo.svg" alt="" class="capa-logo">
+    <p class="capa-sub">CCOS · Porto do Açu</p>
+    <div class="capa-barra"><span></span></div>
+  </div>
+
   <!-- LOGIN -->
   <section id="tela-login" class="login" hidden>
     <form id="form-login" class="login-caixa">
-      <img src="/icon.svg" alt="" class="login-logo">
-      <h1>Caveira Bot</h1>
+      <img src="/logo.svg" alt="Caveira Bot" class="login-logo">
+      <h1 class="sr-only">Caveira Bot</h1>
       <p class="mudo">CCOS · Porto do Açu</p>
       <input type="email" id="login-email" placeholder="Seu e-mail" autocomplete="username" required>
       <input type="password" id="login-senha" placeholder="Senha" autocomplete="current-password" required>

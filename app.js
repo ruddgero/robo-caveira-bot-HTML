@@ -178,7 +178,16 @@ function botoesSalvar(onSalvar, rotulo = 'Salvar', classe = 'primario') {
 }
 
 // ------------------------------ Login -------------------------------
+// Capa de abertura: fica no mínimo 0,9 s e some quando a primeira tela estiver pronta
+const INICIO_CAPA = performance.now();
+function esconderCapa() {
+  const c = document.getElementById('capa');
+  if (!c || c.classList.contains('saindo')) return;
+  setTimeout(() => { c.classList.add('saindo'); setTimeout(() => c.remove(), 500); }, Math.max(0, 900 - (performance.now() - INICIO_CAPA)));
+}
+
 function mostrarLogin() {
+  esconderCapa();
   clearInterval(S.timerEstado);
   $('#app').hidden = true; $('#painel').hidden = true; fecharModal();
   $('#tela-login').hidden = false;
@@ -227,9 +236,10 @@ async function entrar() {
     [S.meta, S.estado] = await Promise.all([api('GET', '/api/meta'), api('GET', '/api/estado')]);
     S.usuario = S.estado.usuario;
     await Promise.all([carregarCentral(), carregarFicha(), carregarEntrada(), carregarConfig()]);
-  } catch (e) { if (e.status !== 403 && e.status !== 401) aviso(e.message, true); return; }
+  } catch (e) { esconderCapa(); if (e.status !== 403 && e.status !== 401) aviso(e.message, true); return; }
   desenharTopo();
   trocarAba(S.aba);
+  esconderCapa();
   clearInterval(S.timerEstado);
   S.timerEstado = setInterval(atualizarEstado, 6000);
 }
@@ -2238,7 +2248,7 @@ async function abrirHistorico() {
     const s = await api('GET', '/api/sessao');
     S.usuario = s.usuario;
     if (!s.usuario) return mostrarLogin();
-    if (s.usuario.trocarSenha) return pedirTrocaSenha(true);
+    if (s.usuario.trocarSenha) { esconderCapa(); return pedirTrocaSenha(true); }
     entrar();
   } catch (_) { mostrarLogin(); }
 })();

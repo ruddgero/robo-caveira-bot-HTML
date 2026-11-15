@@ -18,14 +18,14 @@ const { gerarXlsx } = require('./xlsx');
 
 // Arquivos da tela: SÓ estes podem ser entregues ao navegador
 const PASTA_PUBLICA = __dirname;
-const ARQUIVOS_PUBLICOS = new Set(['/index.html', '/app.js', '/style.css', '/manifest.json', '/sw.js', '/icon.svg']);
+const ARQUIVOS_PUBLICOS = new Set(['/index.html', '/app.js', '/style.css', '/manifest.json', '/sw.js', '/icon.svg', '/logo.svg', '/icon-192.png', '/icon-512.png', '/apple-touch-icon.png']);
 const COOKIE = 'cv_sessao';
 const DURACAO_SESSAO_MS = 14 * 24 * 60 * 60 * 1000;
 let SEGREDO = null;
 
 const TIPOS = {
     '.html': 'text/html; charset=utf-8', '.js': 'application/javascript; charset=utf-8',
-    '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml'
+    '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png'
 };
 
 // ------------------------- Sessão -------------------------------------

@@ -1,5 +1,8 @@
-node_modules
-dados
+node_modules/
 .env
-.git
+.env.*
+!.env.example
+dados/
 *.log
+.DS_Store
+Thumbs.db
