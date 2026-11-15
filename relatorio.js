@@ -683,8 +683,12 @@ function minutaEmail(op) {
     return { assunto, corpo };
 }
 
+function ehMensagemDeSaida(texto) {
+    return RE_SAIDA.test(semAcento(normalizarTexto(texto)).toLowerCase());
+}
+
 module.exports = {
-    TIPOS_OPERACAO, MOVIMENTOS, NAVIOS_PADRAO,
+    ehMensagemDeSaida, TIPOS_OPERACAO, MOVIMENTOS, NAVIOS_PADRAO,
     fichaVazia, naviosDeTexto, adicionarLinhaNavio, ehRelatorioDeTurno, lerRelatorio, fichaHerdada,
     formatarRelatorio, conferirFicha, formatarPassagemEscala, textoAviso,
     lerMensagemPadrao, classificarMensagem, extrairCampos, rascunhosOperacao, atividadeDasOperacoes,

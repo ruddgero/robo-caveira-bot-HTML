@@ -21,6 +21,8 @@ const CONFIG_PADRAO = {
     emailDestinatarios: '',
     emailCopia: '',
     emailPadrao: '',
+    emailDiretoOficial: false,      // true = envia direto para a lista oficial (cópia para o líder)
+    minutaNoWhatsapp: true,         // se o e-mail não puder sair, manda a minuta no WhatsApp do líder
     vtrModelo: 'L200',
     vtrPlaca: 'TDG-8C89',
     atividadesBase: [
@@ -37,7 +39,7 @@ const estado = {
     escala: null, plantao: {}, auditoria: []
 };
 
-const handlers = { alerta: null, plantaoMudou: null };
+const handlers = { alerta: null, plantaoMudou: null, minutaWhatsapp: null };
 const timers = {};
 
 function erro(msg, status = 400) { return Object.assign(new Error(msg), { status }); }
@@ -120,6 +122,7 @@ async function carregar() {
 
 function aoAlerta(fn) { handlers.alerta = fn; }
 function aoMudarPlantao(fn) { handlers.plantaoMudou = fn; }
+function aoPrecisarMinutaWhatsapp(fn) { handlers.minutaWhatsapp = fn; }
 
 // =====================================================================
 // Auditoria
@@ -364,11 +367,20 @@ async function atualizarPendencia(id, texto, usuario) {
     return p;
 }
 
-async function editarPendencia(id, { titulo, texto, tipo }, usuario) {
+async function editarPendencia(id, { titulo, texto, tipo, tratativa }, usuario) {
     const p = pendencia(id);
-    if (titulo !== undefined) p.titulo = String(titulo).trim().toUpperCase();
+    if (titulo !== undefined) {
+        if (!String(titulo).trim()) throw erro('O título não pode ficar vazio.');
+        p.titulo = String(titulo).trim().toUpperCase();
+    }
     if (texto !== undefined) p.texto = String(texto).trim();
     if (tipo === 'AVISO' || tipo === 'DIGITAL') p.tipo = tipo;
+    if (tratativa !== undefined && p.status === 'CONCLUIDA') {
+        if (!String(tratativa).trim()) throw erro('Informe como foi resolvido.');
+        p.tratativa = String(tratativa).trim();
+        const ult = [...p.historico].reverse().find(h => h.tipo === 'CONCLUSAO');
+        if (ult) ult.texto = p.tratativa;
+    }
     await salvarPendencias();
     auditar(usuario, 'Editou pendência', p.titulo);
     return p;
@@ -447,23 +459,44 @@ function destinatarioEmail() {
 async function enviarEmailOperacao(op, { forcar = false, usuario = null } = {}) {
     if (!op.horaFinal && !forcar) return op;
     if (op.email?.enviadoEm && !forcar) return op;
-    if (!email.configurado()) {
-        op.email = { ...(op.email || {}), status: 'SEM_CONTA', erro: email.motivoIndisponivel() };
-        await salvarOperacoes();
-        return op;
-    }
-    const para = destinatarioEmail();
+    const cfg = estado.config;
     const { assunto, corpo } = R.minutaEmail(op);
-    try {
-        await email.enviar({ para, assunto, corpo });
-        op.email = { status: 'ENVIADO', enviadoEm: agora().iso, para };
-        auditar(usuario, 'E-mail de bordo enviado ao líder', `${assunto} → ${para}`);
-    } catch (e) {
-        op.email = { ...(op.email || {}), status: 'ERRO', erro: e.message, tentativaEm: agora().iso };
-        console.error('⚠️  [E-MAIL] Falha ao enviar:', e.message);
+    const lider = destinatarioEmail();
+    const direto = !!(cfg.emailDiretoOficial && cfg.emailDestinatarios);
+    const para = direto ? cfg.emailDestinatarios : lider;
+    const cc = direto ? [lider, cfg.emailCopia].filter(Boolean).join('; ') : '';
+
+    const reserva = async motivo => {
+        op.email = { ...(op.email || {}), status: email.configurado() ? 'ERRO' : 'SEM_CONTA', erro: motivo, tentativaEm: agora().iso };
+        if (cfg.minutaNoWhatsapp && handlers.minutaWhatsapp && !op.email.whatsappEm) {
+            try {
+                if (await handlers.minutaWhatsapp({ assunto, corpo, op })) op.email.whatsappEm = agora().iso;
+            } catch (e) { console.error('⚠️  [MINUTA WHATSAPP]', e.message); }
+        }
+    };
+
+    if (!email.configurado()) {
+        await reserva(email.motivoIndisponivel());
+    } else {
+        try {
+            await email.enviar({ para, cc, assunto, corpo });
+            op.email = { status: 'ENVIADO', enviadoEm: agora().iso, para, cc, direto };
+            if (direto) op.email.encaminhadoEm = op.email.enviadoEm; // já foi para a lista oficial
+            auditar(usuario, direto ? 'E-mail de bordo enviado à lista oficial' : 'E-mail de bordo enviado ao líder', `${assunto} → ${para}`);
+        } catch (e) {
+            console.error('⚠️  [E-MAIL] Falha ao enviar:', e.message);
+            await reserva(e.message);
+        }
     }
     await salvarOperacoes();
     return op;
+}
+
+// Todas as minutas que ainda não foram encaminhadas (para copiar manualmente)
+function minutasPendentes() {
+    return estado.operacoes
+        .filter(o => o.horaFinal && !o.email?.encaminhadoEm)
+        .map(o => ({ id: o.id, navio: o.navio, tipo: o.tipo, status: o.email?.status || 'PENDENTE', ...R.minutaEmail(o) }));
 }
 
 // Cria uma operação por navio, a linha da seção 4 e as linhas da seção 6
@@ -582,19 +615,45 @@ async function receberMensagem(msg) {
     if (item.urgente && Date.now() - item.ts < 30 * 60 * 1000 && handlers.alerta && estado.config.alertasAtivos) handlers.alerta(item);
 }
 
+function mesmaPlaca(a, b) { return a && b && a.replace(/-/g, '') === b.replace(/-/g, ''); }
+function mesmoNavio(a, b) {
+    const n = x => semAcento(x || '').toUpperCase().replace(/^MV\s*-?\s*/, '').replace(/[^A-Z0-9]/g, '');
+    return !a || !b || n(a) === n(b);
+}
+
 async function processarAutomatico(item) {
-    if (item.sugestao === 'OPERACAO' && item.estruturada && item.rascunhos?.length && item.rascunhos[0].navio) {
-        await registrarOperacoes(item.rascunhos, {
-            atividadeTexto: R.atividadeDasOperacoes(item.rascunhos, item.hora), entradaId: item.id, autor: item.autor
-        });
-        item.status = 'usado';
-        item.destino = item.rascunhos.length > 1 ? `${item.rascunhos.length} operações de bordo (automático)` : 'Operação de bordo (automático)';
-        salvarEntradaDepois();
+    const ehSaida = R.ehMensagemDeSaida(item.texto);
+
+    if (item.sugestao === 'OPERACAO' && item.rascunhos?.length && item.rascunhos[0].navio) {
+        const r0 = item.rascunhos[0];
+        // texto livre só é automático com dados suficientes (navio + terminal + placa/empresa/quantidade)
+        const suficiente = item.estruturada || (r0.terminal && (r0.placa || r0.empresa || r0.quantidade));
+        if (!suficiente) return;
+
+        const abertas = estado.operacoes.filter(o => !o.horaFinal);
+        const criar = [];
+        let saidas = 0;
+        for (const r of item.rascunhos) {
+            const aberta = r.placa && abertas.find(o => mesmaPlaca(o.placa, r.placa) && mesmoNavio(o.navio, r.navio));
+            if (aberta && (r.horaFinal || ehSaida)) {
+                await registrarSaida(aberta.id, r.horaFinal || item.campos?.hora || item.hora, null);
+                saidas++;
+            } else if (!ehSaida || r.horaFinal) {
+                criar.push(r);
+            }
+        }
+        if (criar.length) {
+            await registrarOperacoes(criar, { atividadeTexto: R.atividadeDasOperacoes(criar, item.hora), entradaId: item.id, autor: item.autor });
+        }
+        if (criar.length || saidas) {
+            item.status = 'usado';
+            item.destino = [criar.length ? `${criar.length > 1 ? criar.length + ' operações' : 'Operação'} de bordo` : '', saidas ? 'saída registrada' : ''].filter(Boolean).join(' + ') + ' (automático)';
+            salvarEntradaDepois();
+        }
         return;
     }
-    if (item.sugestao === 'SAIDA' && item.campos?.placa) {
-        const placa = item.campos.placa.replace('-', '');
-        const abertas = estado.operacoes.filter(o => !o.horaFinal && (o.placa || '').replace('-', '') === placa);
+    if ((item.sugestao === 'SAIDA' || ehSaida) && item.campos?.placa) {
+        const abertas = estado.operacoes.filter(o => !o.horaFinal && mesmaPlaca(o.placa, item.campos.placa));
         if (abertas.length) {
             for (const o of abertas) await registrarSaida(o.id, item.campos.hora || item.hora, null);
             item.status = 'usado';
@@ -712,7 +771,7 @@ function textoPassagem({ negrito = true } = {}) {
 }
 
 module.exports = {
-    estado, carregar, aoAlerta, aoMudarPlantao, auditar,
+    estado, carregar, aoAlerta, aoMudarPlantao, aoPrecisarMinutaWhatsapp, auditar, minutasPendentes,
     salvarConfig, liderDePlantao, assumirPlantao,
     salvarFicha, herdar, novaFichaEmBranco, marcarPublicado, textoRelatorio, conferencia, avisosAbertos, operacoesDaFicha,
     registrarRelatorio, dispensarRelatorioPendente,

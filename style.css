@@ -92,14 +92,14 @@ input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--primario);
 .alertas { display: grid; gap: 6px; padding: 10px 12px; border-radius: 10px; background: #2a2010; border: 1px solid #5a4313; color: #fcd34d; font-size: 13.5px; }
 
 /* ---------- Abas inferiores ---------- */
-.abas { position: fixed; bottom: 0; left: 0; right: 0; z-index: 20; display: grid; grid-template-columns: repeat(3, 1fr); background: rgba(17, 26, 46, .97); border-top: 1px solid var(--borda); padding-bottom: env(safe-area-inset-bottom); backdrop-filter: blur(10px); }
+.abas { position: fixed; bottom: 0; left: 0; right: 0; z-index: 20; display: grid; grid-template-columns: repeat(4, 1fr); background: rgba(17, 26, 46, .97); border-top: 1px solid var(--borda); padding-bottom: env(safe-area-inset-bottom); backdrop-filter: blur(10px); }
 .abas button { position: relative; display: grid; justify-items: center; gap: 2px; padding: 9px 0 10px; border: 0; background: none; color: var(--mudo); font-size: 12px; font-weight: 600; cursor: pointer; }
 .abas .ic { font-size: 19px; filter: grayscale(1); opacity: .7; }
 .abas button.ativa { color: var(--texto); }
 .abas button.ativa .ic { filter: none; opacity: 1; }
 .badge { position: absolute; top: 5px; left: calc(50% + 8px); min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--vermelho); color: #fff; font-size: 11px; line-height: 18px; text-align: center; }
 @media (min-width: 900px) {
-  .abas { top: 0; bottom: auto; left: 50%; right: auto; transform: translateX(-50%); width: 360px; background: transparent; border: 0; padding: 12px 0; backdrop-filter: none; }
+  .abas { top: 0; bottom: auto; left: 50%; right: auto; transform: translateX(-50%); width: 500px; background: transparent; border: 0; padding: 12px 0; backdrop-filter: none; }
   .abas button { grid-auto-flow: column; gap: 6px; align-items: center; padding: 8px 10px; border-radius: 10px; font-size: 13.5px; }
   .abas button.ativa { background: var(--superficie-2); }
   .badge { position: static; }

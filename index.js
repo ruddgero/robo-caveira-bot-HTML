@@ -28,6 +28,19 @@ async function principal() {
         whatsapp.enviarTexto(lider.id, `${numero}@s.whatsapp.net`, texto).catch(e => console.error('Falha no alerta:', e.message));
     });
 
+    // E-mail não saiu (sem conta ou erro): manda a minuta no WhatsApp do próprio líder, pronta para copiar
+    nucleo.aoPrecisarMinutaWhatsapp(async ({ assunto, corpo, op }) => {
+        const lider = nucleo.liderDePlantao() || usuarios.admin();
+        if (!lider) return false;
+        const st = whatsapp.status(lider.id);
+        if (st.estado !== 'CONECTADO' || !st.numero) return false;
+        const jid = `${st.numero}@s.whatsapp.net`;
+        await whatsapp.enviarTexto(lider.id, jid, `✉️ *E-mail de bordo pronto para enviar*\n${op.navio || ''} · ${op.terminal || ''}\n\nAbaixo: 1) assunto  2) texto. Copie e cole no Outlook.`);
+        await whatsapp.enviarTexto(lider.id, jid, assunto);
+        await whatsapp.enviarTexto(lider.id, jid, corpo);
+        return true;
+    });
+
     // Quem assume o plantão tem o WhatsApp religado (se já tinha conectado antes)
     nucleo.aoMudarPlantao(uid => {
         const u = usuarios.porId(uid);

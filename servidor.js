@@ -207,7 +207,7 @@ rota('GET', '/api/estado', async (req, res, { u }) => {
 // --- Central do Plantão
 rota('GET', '/api/central', async () => {
     const e = nucleo.estado;
-    const limite = Date.now() - 24 * 3600 * 1000;
+    const limite = Date.now() - 7 * 24 * 3600 * 1000;
     return {
         ficha: { id: e.ficha.id, turno: e.ficha.turno, data: e.ficha.data, herdadoDe: e.ficha.herdadoDe, publicadoEm: e.ficha.publicadoEm, vtr: e.ficha.vtr, atividades: e.ficha.atividades.length, ocorrencias: e.ficha.ocorrencias.length },
         conferencia: nucleo.conferencia(),
@@ -290,7 +290,7 @@ rota('PUT', '/api/pendencias/:id', async (req, res, { corpo, params, u }) => ({ 
 rota('POST', '/api/pendencias/:id/atualizar', async (req, res, { corpo, params, u }) => ({ pendencia: pendenciaParaTela(await nucleo.atualizarPendencia(params.id, corpo.texto, u)) }));
 rota('POST', '/api/pendencias/:id/concluir', async (req, res, { corpo, params, u }) => ({ pendencia: pendenciaParaTela(await nucleo.concluirPendencia(params.id, corpo, u)) }));
 rota('POST', '/api/pendencias/:id/reabrir', async (req, res, { params, u }) => ({ pendencia: pendenciaParaTela(await nucleo.reabrirPendencia(params.id, u)) }));
-rota('POST', '/api/pendencias/:id/excluir', async (req, res, { params, u }) => { await nucleo.excluirPendencia(params.id, u); return { ok: true }; }, { perfis: LIDERES });
+rota('POST', '/api/pendencias/:id/excluir', async (req, res, { params, u }) => { await nucleo.excluirPendencia(params.id, u); return { ok: true }; });
 
 // --- Operações de bordo
 rota('GET', '/api/operacoes', async () => ({ operacoes: nucleo.operacoesDaFicha(nucleo.estado.ficha.id).map(operacaoParaTela) }));
@@ -312,6 +312,9 @@ rota('GET', '/api/operacoes/:id/email', async (req, res, { params }) => {
     const m = R.minutaEmail(o);
     return { ...m, para: nucleo.estado.config.emailDestinatarios || '', cc: nucleo.estado.config.emailCopia || '', lider: nucleo.destinatarioEmail(), status: o.email || {}, emailAtivo: email.configurado() };
 });
+rota('GET', '/api/emails/pendentes', async () => ({
+    minutas: nucleo.minutasPendentes(), para: nucleo.estado.config.emailDestinatarios || '', cc: nucleo.estado.config.emailCopia || ''
+}));
 rota('POST', '/api/operacoes/:id/enviar-email', async (req, res, { params, u }) => {
     const o = nucleo.estado.operacoes.find(x => x.id === params.id);
     if (!o) throw erro('Operação não encontrada.', 404);

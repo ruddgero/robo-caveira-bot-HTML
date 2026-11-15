@@ -248,15 +248,20 @@ function desenharTopo() {
   const n = e?.pendentesEntrada || 0;
   be.hidden = !n; be.textContent = n > 99 ? '99+' : n;
   be.style.background = e?.urgentes ? 'var(--vermelho)' : 'var(--primario)';
+  const bp = $('#badge-pendencias');
+  const np = S.central ? itensPendentes().length : (e?.pendenciasAbertas || 0);
+  bp.hidden = !np; bp.textContent = np > 99 ? '99+' : np;
+  bp.style.background = S.central && emailsPendentes().some(o => o.email?.status === 'ERRO') ? 'var(--vermelho)' : 'var(--ambar)';
   const bc = $('#badge-central');
   const alerta = (e?.plantao?.relatorioPendenteId ? 1 : 0) + (e?.plantao?.sugerirNovaEscala && deplantao() ? 1 : 0) + (!e?.plantao?.liderId ? 1 : 0);
   bc.hidden = !alerta; bc.textContent = '!'; bc.style.background = 'var(--ambar)';
 }
 
 function trocarAba(nome) {
-  S.aba = ['central', 'entrada', 'relatorio'].includes(nome) ? nome : 'central';
+  S.aba = ['pendencias', 'central', 'entrada', 'relatorio'].includes(nome) ? nome : 'central';
   document.querySelectorAll('.abas button').forEach(b => b.classList.toggle('ativa', b.dataset.aba === S.aba));
   document.querySelectorAll('.aba').forEach(s => { s.hidden = s.id !== `aba-${S.aba}`; });
+  if (S.aba === 'pendencias') desenharPendencias();
   if (S.aba === 'central') desenharCentral();
   if (S.aba === 'entrada') desenharEntrada();
   if (S.aba === 'relatorio') desenharRelatorio();
@@ -286,6 +291,7 @@ async function atualizarEstado() {
     if (m.pendencias !== a.pendencias || m.operacoes !== a.operacoes || m.relatorios !== a.relatorios || m.plantao !== a.plantao || m.ficha !== a.ficha) {
       await carregarCentral();
       if (S.aba === 'central' && livre) desenharCentral();
+      if (S.aba === 'pendencias' && livre) desenharPendencias();
     }
     if (S.estado.pendentesEntrada !== ant?.pendentesEntrada || S.estado.urgentes !== ant?.urgentes || m.operacoes !== a.operacoes) {
       await carregarEntrada();
@@ -373,6 +379,7 @@ async function recarregarTudo() {
   await Promise.all([carregarCentral(), carregarFicha(), carregarEntrada()]);
   try { S.estado = await api('GET', '/api/estado'); } catch (_) {}
   desenharTopo();
+  if (S.aba === 'pendencias') desenharPendencias();
   if (S.aba === 'central') desenharCentral();
   if (S.aba === 'entrada') desenharEntrada();
   if (S.aba === 'relatorio') desenharRelatorio();
@@ -404,7 +411,7 @@ function desenharCentral() {
         ehLider() && !deplantao() ? el('button', { class: 'btn pequeno', onclick: assumir }, 'Assumir') : el('span', { class: 'etiqueta ok', text: deplantao() ? 'Você' : 'Ativo' })),
       el('div', { class: 'contadores' },
         contador(E.urgentes, 'Urgentes', () => { S.filtroEntrada = 'pendente'; trocarAba('entrada'); }, E.urgentes > 0),
-        contador(emailsPendentes().length, 'E-mails', () => { S.filtroPend = 'emails'; desenharCentral(); }, emailsPendentes().some(o => o.email?.status === 'ERRO')),
+        contador(emailsPendentes().length, 'E-mails', () => { S.filtroPend = 'emails'; trocarAba('pendencias'); }, emailsPendentes().some(o => o.email?.status === 'ERRO')),
         contador(E.pendentesEntrada, 'Na entrada', () => { S.filtroEntrada = 'pendente'; trocarAba('entrada'); }))));
   }
 
@@ -432,7 +439,13 @@ function desenharCentral() {
         el('button', { class: 'btn fantasma', onclick: async () => { await api('POST', '/api/plantao/manter-turno'); recarregarTudo(); } }, 'Manter meu turno')) : null));
   }
 
-  c.append(cartaoPassagemTurno(), cartaoPendencias());
+  const n = itensPendentes().length;
+  c.append(cartaoPassagemTurno(),
+    el('button', { class: 'pend', onclick: () => { S.filtroPend = 'todas'; trocarAba('pendencias'); } },
+      el('span', { class: 'ic', text: '📌' }),
+      el('span', { style: 'min-width:0' }, el('div', { class: 'tit', text: n ? `${n} pendência${n > 1 ? 's' : ''} em aberto` : 'Nenhuma pendência em aberto' }),
+        el('div', { class: 'sub', text: 'Avisos, Digital, operações e e-mails ficam na aba Pendências' })),
+      el('span', { class: 'seta', text: '›' })));
   c.append(el('div', { class: 'rodape-discreto' }, el('button', { onclick: abrirEscala }, '📦 Passagem da escala')));
 }
 
@@ -541,11 +554,19 @@ function itensPendentes() {
   }
   for (const o of emailsPendentes()) {
     const st = o.email?.status;
+    const zap = o.email?.whatsappEm ? ' · minuta no seu WhatsApp' : '';
     const sub = st === 'ENVIADO' ? `Enviado ao líder ${quando(o.email.enviadoEm)} · falta encaminhar`
-      : st === 'ERRO' ? `Falha no envio: ${o.email.erro}` : st === 'SEM_CONTA' ? 'E-mail do robô não configurado · gerar manualmente' : 'Aguardando envio';
+      : st === 'ERRO' ? `Falha no envio${zap} · toque para copiar` : st === 'SEM_CONTA' ? `Pronto para copiar${zap}` : 'Gerando…';
     itens.push({ grupo: 'emails', ic: '✉️', tit: `E-mail · ${o.rotuloTipo} · ${o.navio || ''}`, sub, erro: st === 'ERRO', abrir: () => abrirEmail(o) });
   }
   return itens;
+}
+
+function desenharPendencias() {
+  const c = $('#aba-pendencias');
+  if (!S.central) return;
+  c.replaceChildren(cartaoPendencias());
+  desenharTopo();
 }
 
 function cartaoPendencias() {
@@ -560,16 +581,18 @@ function cartaoPendencias() {
         el('button', { class: 'btn pequeno', onclick: () => novaPendencia('DIGITAL') }, '+ Digital'))),
     el('div', { class: 'filtros' }, filtros.map(([v, t]) => {
       const n = v === 'todas' ? itens.length : itens.filter(i => i.grupo === v).length;
-      return el('button', { class: 'filtro' + (S.filtroPend === v ? ' ativo' : ''), onclick: () => { S.filtroPend = v; desenharCentral(); } }, `${t}${n ? ` (${n})` : ''}`);
+      return el('button', { class: 'filtro' + (S.filtroPend === v ? ' ativo' : ''), onclick: () => { S.filtroPend = v; desenharPendencias(); } }, `${t}${n ? ` (${n})` : ''}`);
     })),
+    emailsPendentes().length && (S.filtroPend === 'emails' || S.filtroPend === 'todas')
+      ? el('div', {}, el('button', { class: 'btn pequeno', onclick: copiarTodosEmails }, `📋 Copiar todos os e-mails (${emailsPendentes().length})`)) : null,
     visiveis.length
       ? el('div', { class: 'lista-pend' }, visiveis.map(i => el('button', { class: `pend${i.erro ? ' erro' : ''}`, onclick: i.abrir },
         el('span', { class: 'ic', text: i.ic }), el('span', { style: 'min-width:0' }, el('div', { class: 'tit', text: i.tit }), el('div', { class: 'sub', text: i.sub })), el('span', { class: 'seta', text: '›' }))))
       : el('div', { class: 'vazio' }, el('span', { class: 'ic', text: '✅' }), 'Nada pendente aqui.'),
     concluidas.length ? el('details', {},
-      el('summary', { class: 'mudo pequeno', style: 'cursor:pointer', text: `Concluídas nas últimas 24h (${concluidas.length})` }),
+      el('summary', { class: 'mudo pequeno', style: 'cursor:pointer', text: `Concluídas nos últimos 7 dias (${concluidas.length})` }),
       el('div', { class: 'lista-pend', style: 'margin-top:8px' }, concluidas.map(p => el('button', { class: 'pend concluida', onclick: () => abrirPendencia(p) },
-        el('span', { class: 'ic', text: '✓' }), el('span', { style: 'min-width:0' }, el('div', { class: 'tit', text: p.titulo }), el('div', { class: 'sub', text: `${p.concluidoPor?.nome || ''}: ${p.tratativa || ''}` })), el('span', { class: 'seta', text: '›' }))))) : null
+        el('span', { class: 'ic', text: '✓' }), el('span', { style: 'min-width:0' }, el('div', { class: 'tit', text: p.titulo }), el('div', { class: 'sub', text: `Resolvido por ${p.concluidoPor?.nome || '?'}: ${p.tratativa || ''}` })), el('span', { class: 'seta', text: '›' }))))) : null
   );
 }
 
@@ -597,18 +620,30 @@ function abrirPendencia(p) {
     abrirModal(`Atualizar · ${p.titulo}`, [c], botoesSalvar(() => acao(() => api('POST', `/api/pendencias/${p.id}/atualizar`, { texto: t.value }), 'Atualização registrada ✓'), 'Registrar'));
   };
   const concluir = () => {
-    const [c, t] = campoTexto('Tratativa (o que foi feito)', '', { autofocus: true, placeholder: 'Ex.: Chaves entregues ao Sr. X às 21h.' });
+    const [c, t] = campoTexto('Como foi resolvido? (obrigatório)', '', { autofocus: true, linhas: 4, placeholder: 'Ex.: Receita liberou as bagagens às 21h; entregues ao agente Sr. X.' });
     const chk = el('input', { type: 'checkbox', checked: true });
     abrirModal(`Concluir · ${p.titulo}`, [c, el('label', { class: 'check' }, chk, 'Registrar também nas Atividades do turno')],
-      botoesSalvar(() => acao(() => api('POST', `/api/pendencias/${p.id}/concluir`, { tratativa: t.value, registrarAtividade: chk.checked }), 'Pendência concluída ✓'), 'Concluir', 'verde'));
+      botoesSalvar(() => {
+        if (!t.value.trim()) { t.focus(); throw new Error('Informe como foi resolvido para concluir.'); }
+        return acao(() => api('POST', `/api/pendencias/${p.id}/concluir`, { tratativa: t.value, registrarAtividade: chk.checked }), 'Pendência concluída ✓');
+      }, '✓ Concluir', 'verde'));
   };
-  const editar = () => {
+  const corrigir = () => {
     const [c1, ti] = campoLinha('Título', p.titulo);
     const [c2, tx] = campoTexto('Descrição', p.texto);
     const tipo = el('select', {}, el('option', { value: 'AVISO', text: 'Aviso (seção 5)' }), el('option', { value: 'DIGITAL', text: 'Pendência da Digital' }));
     tipo.value = p.tipo;
-    abrirModal('Editar pendência', [c1, c2, el('label', { class: 'campo' }, 'Tipo', tipo)],
-      botoesSalvar(() => acao(() => api('PUT', `/api/pendencias/${p.id}`, { titulo: ti.value, texto: tx.value, tipo: tipo.value }), 'Pendência atualizada ✓')));
+    const [c3, tr] = !aberta ? campoTexto('Como foi resolvido', p.tratativa || '', { linhas: 3 }) : [null, null];
+    abrirModal('Corrigir pendência', [c1, c2, el('label', { class: 'campo' }, 'Tipo', tipo), c3],
+      botoesSalvar(() => {
+        if (!ti.value.trim()) throw new Error('O título não pode ficar vazio.');
+        if (tr && !tr.value.trim()) throw new Error('Informe como foi resolvido.');
+        return acao(() => api('PUT', `/api/pendencias/${p.id}`, { titulo: ti.value, texto: tx.value, tipo: tipo.value, ...(tr ? { tratativa: tr.value } : {}) }), 'Pendência corrigida ✓');
+      }));
+  };
+  const apagar = async () => {
+    if (await confirmar('Apagar esta pendência?', `"${p.titulo}" será removida de vez (fica registrado na auditoria). Para dar baixa normal, use "Concluir".`, 'Apagar', true))
+      acao(() => api('POST', `/api/pendencias/${p.id}/excluir`), 'Pendência apagada');
   };
 
   abrirModal(p.titulo || 'Pendência', [
@@ -617,14 +652,18 @@ function abrirPendencia(p) {
       el('span', { class: `etiqueta ${aberta ? '' : 'ok'}`, text: aberta ? `Aberta há ${p.turnosAberto} turno(s)` : 'Concluída' })),
     p.texto ? el('div', { class: 'citacao', text: p.texto }) : null,
     p.origem ? el('p', { class: 'mudo pequeno', style: 'margin:0', text: `Origem: ${p.origem}` }) : null,
-    !aberta && p.tratativa ? el('div', { class: 'alertas', style: 'background:#0f2a1d;border-color:#1d4d33;color:#86efac' }, el('strong', { text: 'Tratativa: ' }), p.tratativa) : null,
+    !aberta && p.tratativa ? el('div', { class: 'alertas', style: 'background:#0f2a1d;border-color:#1d4d33;color:#86efac' }, el('strong', { text: 'Como foi resolvido: ' }), p.tratativa) : null,
     el('h3', { text: 'Histórico' }), linhaTempo
   ], aberta ? [
-    ehLider() ? el('button', { class: 'btn fantasma pequeno', onclick: async () => { if (await confirmar('Excluir pendência?', 'Use só para registros feitos por engano. Para dar baixa, use "Concluir".', 'Excluir', true)) acao(() => api('POST', `/api/pendencias/${p.id}/excluir`), 'Excluída'); } }, 'Excluir') : null,
-    el('button', { class: 'btn', onclick: editar }, 'Editar'),
+    el('button', { class: 'btn fantasma pequeno', style: 'color:var(--vermelho)', onclick: apagar }, '🗑 Apagar'),
+    el('button', { class: 'btn', onclick: corrigir }, '✏️ Corrigir'),
     el('button', { class: 'btn', onclick: atualizar }, 'Atualizar'),
     el('button', { class: 'btn verde', onclick: concluir }, '✓ Concluir')
-  ] : [el('button', { class: 'btn', onclick: () => acao(() => api('POST', `/api/pendencias/${p.id}/reabrir`), 'Reaberta') }, 'Reabrir')]);
+  ] : [
+    el('button', { class: 'btn fantasma pequeno', style: 'color:var(--vermelho)', onclick: apagar }, '🗑 Apagar'),
+    el('button', { class: 'btn', onclick: corrigir }, '✏️ Corrigir'),
+    el('button', { class: 'btn', onclick: () => acao(() => api('POST', `/api/pendencias/${p.id}/reabrir`), 'Reaberta') }, 'Reabrir')
+  ]);
 }
 
 // ---------------------- Operações de bordo e e-mail ------------------
@@ -667,8 +706,10 @@ async function abrirEmail(o) {
     const [cAss, iAss] = campoLinha('Assunto', m.assunto);
     const [cCorpo, tCorpo] = campoTexto('Mensagem', m.corpo, { linhas: 14 });
     const st = m.status || {};
-    const situacao = st.status === 'ENVIADO' ? `✓ Enviado para ${st.para} ${quando(st.enviadoEm)}` :
-      st.status === 'ERRO' ? `⚠ Falha no envio automático: ${st.erro}` : !m.emailAtivo ? 'E-mail do robô não configurado: use os botões abaixo.' : 'Ainda não enviado.';
+    const zap = st.whatsappEm ? ' A minuta também foi enviada no seu WhatsApp.' : '';
+    const situacao = st.status === 'ENVIADO' ? `✓ Enviado para ${st.para}${st.cc ? ' (cc ' + st.cc + ')' : ''} ${quando(st.enviadoEm)}` :
+      st.status === 'ERRO' ? `⚠ O envio automático falhou (${st.erro}).${zap} Copie abaixo e envie manualmente.` :
+      !m.emailAtivo ? `E-mail gerado automaticamente.${zap} Copie e envie pelo Outlook.` : 'Será enviado assim que houver horário de saída.';
     const q = (k, v) => v ? `${k}=${encodeURIComponent(v)}` : '';
     const marcar = campo => api('POST', `/api/operacoes/${o.id}/marcar`, { campo }).catch(() => {});
     abrirModal('✉️ E-mail da operação', [
@@ -676,12 +717,24 @@ async function abrirEmail(o) {
       cPara, cCc, cAss, cCorpo,
       el('p', { class: 'mudo pequeno', text: 'Confira, anexe as evidências e envie para a lista oficial. Depois toque em "Encaminhado".' })
     ], [
-      el('button', { class: 'btn', onclick: () => copiar(`Assunto: ${iAss.value}\n\n${tCorpo.value}`) }, '📋 Copiar'),
+      el('button', { class: 'btn', onclick: () => copiar(iAss.value) }, '📋 Assunto'),
+      el('button', { class: 'btn', onclick: () => copiar(tCorpo.value) }, '📋 Texto'),
       el('button', { class: 'btn', onclick: () => { marcar('abertoEm'); window.open(`https://outlook.office.com/mail/deeplink/compose?${[q('to', iPara.value), q('cc', iCc.value), q('subject', iAss.value), q('body', tCorpo.value)].filter(Boolean).join('&')}`, '_blank', 'noopener'); } }, '🌐 Outlook Web'),
       el('button', { class: 'btn', onclick: () => { marcar('abertoEm'); location.href = `mailto:${iPara.value.replace(/\s/g, '')}?${[q('cc', iCc.value), q('subject', iAss.value), q('body', tCorpo.value)].filter(Boolean).join('&')}`; } }, '📧 App de e-mail'),
       m.emailAtivo ? el('button', { class: 'btn', onclick: async () => { try { await api('POST', `/api/operacoes/${o.id}/enviar-email`); aviso('Reenviado ao líder ✓'); fecharModal(); recarregarTudo(); } catch (e) { aviso(e.message, true); } } }, '↻ Reenviar ao líder') : null,
       el('button', { class: 'btn verde', onclick: async () => { await marcar('encaminhadoEm'); fecharModal(); aviso('Marcado como encaminhado ✓'); recarregarTudo(); } }, '✓ Encaminhado')
     ]);
+  } catch (e) { aviso(e.message, true); }
+}
+
+async function copiarTodosEmails() {
+  try {
+    const { minutas, para, cc } = await api('GET', '/api/emails/pendentes');
+    if (!minutas.length) return aviso('Nenhum e-mail pendente.');
+    const sep = '\n\n————————————————————\n\n';
+    const texto = minutas.map((m, i) => `E-MAIL ${i + 1} de ${minutas.length}\nPARA: ${para || '(lista oficial)'}${cc ? '\nCC: ' + cc : ''}\nASSUNTO: ${m.assunto}\n\n${m.corpo}`).join(sep);
+    await copiar(texto);
+    aviso(`${minutas.length} e-mail(s) copiado(s) ✓`);
   } catch (e) { aviso(e.message, true); }
 }
 
@@ -1203,7 +1256,8 @@ async function abrirResumo() {
     bloco('📌 Avisos em aberto', avisos.length, avisos.map(p => { const u = ultimaAtualizacao(p); return linhaItem('📌', p.titulo, `${p.texto || ''}${u ? `\nÚltima atualização (${u.data} ${u.hora}h, ${u.por}): ${u.texto}` : ''}\nAberto há ${p.turnosAberto} turno(s)`, () => abrirPendencia(p)); }), 'Nenhum aviso em aberto.'),
     bloco('🛠️ Pendências da Digital', digital.length, digital.map(p => linhaItem('🛠️', p.titulo, `${p.texto || ''}\nAberta há ${p.turnosAberto} turno(s)`, () => abrirPendencia(p))), 'Nenhuma pendência da Digital.'),
     bloco('🚢 Operações em andamento', opsAndamento.length, opsAndamento.map(o => linhaItem('🚢', `${o.rotuloTipo} · ${o.navio || '?'}`, `Desde ${o.horaInicial || '?'}${o.placa ? ' · placa ' + o.placa : ''}${o.empresa ? ' · ' + o.empresa : ''}`, () => abrirOperacao(o))), 'Nenhuma operação aguardando saída.'),
-    bloco('✉️ E-mails a encaminhar', emails.length, emails.map(o => linhaItem('✉️', `${o.rotuloTipo} · ${o.navio || ''}`, o.email?.status === 'ENVIADO' ? `No e-mail do líder desde ${quando(o.email.enviadoEm)}` : (o.email?.erro || 'Aguardando envio'), () => abrirEmail(o), o.email?.status === 'ERRO' ? ' erro' : '')), 'Tudo encaminhado.'),
+    bloco('✉️ E-mails a encaminhar', emails.length, emails.map(o => linhaItem('✉️', `${o.rotuloTipo} · ${o.navio || ''}`, o.email?.status === 'ENVIADO' ? `No e-mail do líder desde ${quando(o.email.enviadoEm)}` : `Pronto para copiar${o.email?.whatsappEm ? ' · minuta no seu WhatsApp' : ''}`, () => abrirEmail(o), o.email?.status === 'ERRO' ? ' erro' : '')), 'Tudo encaminhado.'),
+    emails.length ? el('div', {}, el('button', { class: 'btn', onclick: copiarTodosEmails }, `📋 Copiar todos os e-mails (${emails.length})`)) : null,
     el('section', { class: 'cartao' }, el('h2', { text: '🏁 Situação do terminal' }),
       el('div', { class: 'grade-2' },
         info('VTR', `${F.vtr?.modelo || ''} ${F.vtr?.placa || ''}\nKM inicial ${F.vtr?.kmInicial != null ? Number(F.vtr.kmInicial).toLocaleString('pt-BR') : '—'}`),
@@ -1473,7 +1527,11 @@ async function abrirConfig() {
       L('Encaminhar para (lista oficial, separe por ;)', 'emailDestinatarios', { placeholder: 'operacoes@ferroport.com.br; supervisao@ferroport.com.br' }),
       L('Cópia (Cc)', 'emailCopia'),
       L('Se ninguém estiver de plantão, enviar para', 'emailPadrao', { placeholder: 'ruddgero.ribeiro@ferroport.com.br' }),
-      el('p', { class: 'mudo pequeno', style: 'margin:0', text: 'O robô envia cada minuta ao e-mail do líder de plantão; o líder confere, anexa as evidências e encaminha à lista oficial.' })),
+      el('label', { class: 'check' }, el('input', { type: 'checkbox', checked: !!cfg.emailDiretoOficial, onchange: e => { cfg.emailDiretoOficial = e.target.checked; } }),
+        'Enviar direto para a lista oficial (sem revisão do líder; o líder vai em cópia)'),
+      el('label', { class: 'check' }, el('input', { type: 'checkbox', checked: cfg.minutaNoWhatsapp !== false, onchange: e => { cfg.minutaNoWhatsapp = e.target.checked; } }),
+        'Se o e-mail não puder sair, mandar a minuta no WhatsApp do líder'),
+      el('p', { class: 'mudo pequeno', style: 'margin:0', text: 'Os e-mails são gerados sozinhos (um por navio) quando a operação tem horário de saída. Padrão: vão para o líder de plantão conferir e encaminhar.' })),
     el('section', { class: 'cartao' }, el('h2', { text: 'Alerta de emergência' }),
       el('label', { class: 'check' }, alertas, 'Enviar alerta no privado quando houver possível emergência'),
       L('Número que recebe (55 + DDD + número)', 'alertaNumero', { tipo: 'tel', placeholder: '5522998765432' })),

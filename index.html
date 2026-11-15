@@ -45,12 +45,14 @@
     </header>
 
     <main id="conteudo">
+      <section id="aba-pendencias" class="aba" hidden></section>
       <section id="aba-central" class="aba"></section>
       <section id="aba-entrada" class="aba" hidden></section>
       <section id="aba-relatorio" class="aba" hidden></section>
     </main>
 
     <nav class="abas">
+      <button data-aba="pendencias"><span class="ic">📌</span>Pendências<span id="badge-pendencias" class="badge" hidden></span></button>
       <button data-aba="central" class="ativa"><span class="ic">🧭</span>Central<span id="badge-central" class="badge" hidden></span></button>
       <button data-aba="entrada"><span class="ic">📥</span>Entrada<span id="badge-entrada" class="badge" hidden></span></button>
       <button data-aba="relatorio"><span class="ic">📑</span>Relatório</button>
