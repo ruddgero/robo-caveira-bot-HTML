@@ -44,9 +44,40 @@ const db = admin.apps.length ? admin.firestore() : null;
 // ==========================================
 // 2. PARÂMETROS OPERACIONAIS DOS GRUPOS E LÍDER
 // ==========================================
+let configuracaoGrupos = {
+    grupo1: { id: process.env.WHATSAPP_GRUPO_1 || '', nome: 'Operações T-ORE & T-OIL' },
+    grupo2: { id: process.env.WHATSAPP_GRUPO_2 || '', nome: 'Segurança & CCOS Portuário' }
+};
+
+// Tenta restaurar grupos salvos no disco local
+try {
+    const arqConfig = path.join(__dirname, 'config_grupos.json');
+    if (fs.existsSync(arqConfig)) {
+        const dados = JSON.parse(fs.readFileSync(arqConfig, 'utf8'));
+        if (dados && (dados.grupo1 || dados.grupo2)) {
+            configuracaoGrupos = { ...configuracaoGrupos, ...dados };
+            console.log('📂 [CONFIG GRUPOS] Restaurados do disco local.');
+        }
+    }
+} catch (e) {
+    console.warn('⚠️ Falha ao ler config_grupos.json:', e.message);
+}
+
+// Sincroniza grupos com Firebase Firestore se ativo
+if (db) {
+    db.collection('config_sistema').doc('grupos_whatsapp').get().then(doc => {
+        if (doc.exists) {
+            const dados = doc.data();
+            configuracaoGrupos = { ...configuracaoGrupos, ...dados };
+            GRUPOS_MONITORADOS = [configuracaoGrupos.grupo1?.id || '', configuracaoGrupos.grupo2?.id || ''].filter(Boolean);
+            console.log(`☁️ [FIREBASE] Grupos sincronizados da nuvem: ${configuracaoGrupos.grupo1?.nome} / ${configuracaoGrupos.grupo2?.nome}`);
+        }
+    }).catch(() => {});
+}
+
 let GRUPOS_MONITORADOS = [
-    process.env.WHATSAPP_GRUPO_1 || '',
-    process.env.WHATSAPP_GRUPO_2 || ''
+    configuracaoGrupos.grupo1?.id || '',
+    configuracaoGrupos.grupo2?.id || ''
 ].filter(Boolean);
 
 const NUMERO_LIDER_RUDDGERO = process.env.WHATSAPP_NUMERO_LIDER || '5522999999999@s.whatsapp.net';
@@ -623,11 +654,83 @@ app.get('/api/status', async (req, res) => {
         whatsappConexao: statusConexaoWhatsApp,
         qrCode: qrCodeAtual,
         gruposMonitorados: GRUPOS_MONITORADOS.length,
+        configuracaoGrupos,
         vtr: plantao.vtr,
         sistemas: plantao.sistemas,
         turno: plantao.tipoTurno,
         data: plantao.data
     });
+});
+
+// Endpoint 1.2: Listar grupos do WhatsApp conectado
+app.get('/api/grupos-whatsapp', async (req, res) => {
+    try {
+        if (!sockWhatsApp || statusConexaoWhatsApp !== 'CONECTADO') {
+            return res.json({
+                conectado: false,
+                grupos: [],
+                configurados: configuracaoGrupos,
+                mensagem: 'WhatsApp ainda não conectado no servidor. Conecte o aparelho para listar os grupos.'
+            });
+        }
+
+        const todosGrupos = await sockWhatsApp.groupFetchAllParticipating();
+        const lista = Object.values(todosGrupos).map(g => ({
+            id: g.id,
+            nome: g.subject || 'Grupo sem nome',
+            participantesQtd: g.participants ? g.participants.length : 0
+        })).sort((a, b) => a.nome.localeCompare(b.nome));
+
+        return res.json({
+            conectado: true,
+            grupos: lista,
+            configurados: configuracaoGrupos
+        });
+    } catch (err) {
+        console.error("Erro ao listar grupos do WhatsApp:", err);
+        return res.status(500).json({ conectado: false, erro: err.message, configurados: configuracaoGrupos });
+    }
+});
+
+// Endpoint 1.3: Salvar direcionamento dos 2 grupos monitorados
+app.post('/api/configurar-grupos', async (req, res) => {
+    try {
+        const { grupo1Id, grupo1Nome, grupo2Id, grupo2Nome } = req.body;
+
+        configuracaoGrupos = {
+            grupo1: {
+                id: grupo1Id || configuracaoGrupos.grupo1?.id || '',
+                nome: grupo1Nome || configuracaoGrupos.grupo1?.nome || 'Operações T-ORE & T-OIL'
+            },
+            grupo2: {
+                id: grupo2Id || configuracaoGrupos.grupo2?.id || '',
+                nome: grupo2Nome || configuracaoGrupos.grupo2?.nome || 'Segurança & CCOS Portuário'
+            }
+        };
+
+        GRUPOS_MONITORADOS = [configuracaoGrupos.grupo1.id, configuracaoGrupos.grupo2.id].filter(Boolean);
+
+        // Grava no disco local
+        try {
+            fs.writeFileSync(path.join(__dirname, 'config_grupos.json'), JSON.stringify(configuracaoGrupos, null, 2));
+        } catch (_) {}
+
+        // Grava no Firestore se ativo
+        if (db) {
+            db.collection('config_sistema').doc('grupos_whatsapp').set(configuracaoGrupos, { merge: true }).catch(() => {});
+        }
+
+        console.log(`✅ [GRUPOS ATUALIZADOS] G1: "${configuracaoGrupos.grupo1.nome}" (${configuracaoGrupos.grupo1.id}) | G2: "${configuracaoGrupos.grupo2.nome}" (${configuracaoGrupos.grupo2.id})`);
+
+        return res.json({
+            sucesso: true,
+            mensagem: 'Grupos configurados com sucesso no CAVEIRA BOT!',
+            configurados: configuracaoGrupos,
+            totalMonitorados: GRUPOS_MONITORADOS.length
+        });
+    } catch (err) {
+        return res.status(500).json({ sucesso: false, erro: err.message });
+    }
 });
 
 // Endpoint 1.1: Sincronização Unificada de Plantão (Single Source of Truth)
@@ -701,7 +804,7 @@ app.post('/api/disparar-relatorio', verificarAutenticacao, async (req, res) => {
     }
 
     if (GRUPOS_MONITORADOS.length === 0) {
-        return res.status(400).json({ sucesso: false, erro: 'Nenhum grupo configurado nas variáveis WHATSAPP_GRUPO_1 ou WHATSAPP_GRUPO_2.' });
+        return res.status(400).json({ sucesso: false, erro: 'Nenhum grupo configurado! Na aba WhatsApp, selecione os grupos no menu e clique em "Confirmar Grupos".' });
     }
 
     const plantao = await carregarPlantaoAtivo();
