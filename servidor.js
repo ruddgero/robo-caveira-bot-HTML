@@ -13,7 +13,10 @@ const store = require('./store');
 const R = require('./relatorio');
 const { agora } = require('./util');
 
-const PASTA_PUBLICA = path.join(__dirname, '..', 'public');
+// Arquivos da tela ficam na mesma pasta do servidor. SÓ estes podem ser
+// entregues ao navegador — qualquer outro arquivo (código, .env, dados) é bloqueado.
+const PASTA_PUBLICA = __dirname;
+const ARQUIVOS_PUBLICOS = new Set(['/index.html', '/app.js', '/style.css', '/manifest.json', '/sw.js', '/icon.svg']);
 const COOKIE = 'cv_sessao';
 const DURACAO_SESSAO_MS = 14 * 24 * 60 * 60 * 1000; // 14 dias
 let SEGREDO = null;
@@ -94,8 +97,8 @@ function lerCorpo(req) {
 function servirArquivo(req, res, caminhoUrl) {
     let rel = decodeURIComponent(caminhoUrl.split('?')[0]);
     if (rel === '/' || !path.extname(rel)) rel = '/index.html';
-    const arquivo = path.normalize(path.join(PASTA_PUBLICA, rel));
-    if (!arquivo.startsWith(PASTA_PUBLICA) || !fs.existsSync(arquivo) || fs.statSync(arquivo).isDirectory()) {
+    const arquivo = path.join(PASTA_PUBLICA, path.basename(rel));
+    if (!ARQUIVOS_PUBLICOS.has(rel) || !fs.existsSync(arquivo)) {
         res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' }); return res.end('Não encontrado');
     }
     const ext = path.extname(arquivo);
