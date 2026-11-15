@@ -251,11 +251,21 @@ const SECOES = [
     { chave: 'passagem', teste: /PASSAGEM/ }
 ];
 
+const INICIO_SECAO = /^(EFETIVO|VIATURA|VTR\b|SISTEMAS|ATIVIDADES|AVISOS|MOVIMENTACAO|NAVIOS|OCORRENCIA|PASSAGEM)/;
 function secaoDaLinha(linha) {
     const n = normalizar(linha);
     const m = n.match(/^(\d)\s*[.\-)]\s*(.+)$/);
-    if (!m || m[2].length > 60) return null;
-    const s = SECOES.find(sec => sec.teste.test(m[2]));
+    if (m) {
+        if (m[2].length > 60) return null;
+        const s = SECOES.find(sec => sec.teste.test(m[2]));
+        return s ? s.chave : null;
+    }
+    // relatórios sem numeração: "*EFETIVO CCOS*", "ATIVIDADES REALIZADAS:", "PASSAGEM DE TURNO"
+    const bruta = String(linha || '').trim();
+    const cabecalho = /^\*[^*]+\*:?$/.test(bruta) || (bruta === bruta.toUpperCase() && /[A-Z]/.test(n));
+    const nome = n.replace(/:$/, '').trim();
+    if (!cabecalho || nome.length > 50 || !INICIO_SECAO.test(nome)) return null;
+    const s = SECOES.find(sec => sec.teste.test(nome));
     return s ? s.chave : null;
 }
 
@@ -283,8 +293,8 @@ function dataDoTexto(texto) {
 function ehRelatorioDeTurno(texto) {
     if (!texto || typeof texto !== 'string' || texto.length < 80) return false;
     const linhas = texto.split('\n').map(l => l.trim()).filter(Boolean);
-    const topo = linhas.slice(0, 3).map(normalizar).join(' ');
-    if (!/RELATORIO (DO |DE )?TURNO/.test(topo)) return false;
+    const topo = linhas.slice(0, 6).map(normalizar).join(' ');
+    if (!/RELATORIO (DO |DE )?(TURNO|PLANTAO|SERVICO)|RELATORIO (DIURNO|NOTURNO)/.test(topo)) return false;
     const secoes = new Set(linhas.map(secaoDaLinha).filter(Boolean));
     return secoes.size >= 3;
 }
@@ -313,11 +323,11 @@ function lerRelatorio(textoOriginal) {
         equipes: { saindo: null, assumindo: null }
     };
 
-    for (const l of linhas.slice(0, 5)) {
-        const mt = normalizar(l).match(/TURNO\s*[-:]?\s*(DIURNO|NOTURNO)/);
-        if (mt) dados.turno = mt[1];
-        const md = l.match(/Data:?\s*(\d{2}\/\d{2}\/\d{4})/i);
-        if (md) dados.data = md[1];
+    for (const l of linhas.slice(0, 6)) {
+        const mt = normalizar(l).match(/\b(DIURNO|NOTURNO)\b/);
+        if (mt && !dados.turno) dados.turno = mt[1];
+        const md = l.match(/(\d{1,2})\/(\d{1,2})\/(\d{4}|\d{2})\b/);
+        if (md && !dados.data) dados.data = `${md[1].padStart(2, '0')}/${md[2].padStart(2, '0')}/${md[3].length === 2 ? '20' + md[3] : md[3]}`;
     }
 
     const blocos = {};
@@ -374,7 +384,7 @@ function lerRelatorio(textoOriginal) {
             if (/^AVISO$/i.test(a.titulo) || !a.titulo) {
                 const [primeira, ...resto] = (a.texto || '').split('\n');
                 a.titulo = primeira.split(':')[0].slice(0, 70).toUpperCase();
-                a.texto = resto.length ? resto.join('\n') : primeira;
+                a.texto = resto.length ? resto.join('\n') : (primeira.includes(':') ? primeira.split(':').slice(1).join(':').trim() : '');
             }
         }
     }
@@ -831,6 +841,22 @@ function turnoAnterior(turno, data) {
     return turno === 'NOTURNO' ? { turno: 'DIURNO', data } : { turno: 'NOTURNO', data: dataDeOntem(data) };
 }
 
+// Converte qualquer relatório postado no grupo para o padrão do robô
+function padronizarRelatorio(texto, extra = {}) {
+    const { dados: d } = lerRelatorio(texto);
+    const f = fichaVazia({});
+    f.turno = d.turno || extra.turno || f.turno;
+    f.data = d.data || extra.data || f.data;
+    f.efetivo = d.efetivo || '✓ S/A';
+    f.vtr = { modelo: d.vtr.modelo || '', placa: d.vtr.placa || '', kmInicial: d.vtr.kmInicial, kmFinal: d.vtr.kmFinal };
+    f.sistemas = { cftv: d.sistemas.cftv || '', ca: d.sistemas.ca || '', ocrAssertividade: d.sistemas.ocrAssertividade || '', ocrLeituras: d.sistemas.ocrLeituras || '' };
+    f.atividades = d.atividades.map(t => ({ id: novoId(), texto: t }));
+    f.navios = d.navios;
+    f.ocorrencias = d.ocorrencias.map(t => ({ id: novoId(), texto: t }));
+    f.equipes = { saindo: d.equipes.saindo || '', assumindo: d.equipes.assumindo || '' };
+    return formatarRelatorio(f, d.avisos);
+}
+
 // Linhas para o Excel a partir do texto do relatório: [seção, conteúdo]
 function linhasExcel(texto) {
     const linhas = [];
@@ -851,7 +877,7 @@ function linhasExcel(texto) {
 }
 
 module.exports = {
-    ehRelatorioFlexivel, turnoDoTexto, dataDoTexto,
+    padronizarRelatorio, ehRelatorioFlexivel, turnoDoTexto, dataDoTexto,
     proximoTurno, turnoAnterior, linhasExcel,
     ehMensagemDeSaida, TIPOS_OPERACAO, MOVIMENTOS, NAVIOS_PADRAO,
     fichaVazia, naviosDeTexto, adicionarLinhaNavio, ehRelatorioDeTurno, lerRelatorio, fichaHerdada,

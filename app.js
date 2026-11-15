@@ -1784,14 +1784,21 @@ function desenharHistorico() {
 async function abrirRelatorioHist(h) {
   try {
     const { relatorio: r } = await api('GET', `/api/relatorios-hist/${encodeURIComponent(h.id)}`);
-    const simples = r.texto.replace(/\*/g, '');
+    const temPadrao = !!r.padrao;
+    let original = !temPadrao;
+    const atual = () => (original ? r.texto : r.padrao);
+    const previa = el('div', { class: 'previa' }, textoWhats(atual()));
+    const alternar = el('button', { class: 'btn fantasma pequeno', onclick: () => { original = !original; previa.replaceChildren(textoWhats(atual())); alternar.textContent = original ? '✨ Ver no padrão do robô' : '📜 Ver como foi postado'; } }, '📜 Ver como foi postado');
     const corpo = [
-      el('div', { class: 'mudo pequeno', text: `${r.autor || 'autor desconhecido'} · ${ORIGENS[r.origem] || r.origem}` }),
-      el('div', { class: 'previa' }, textoWhats(r.texto))
+      el('div', { class: 'linha', style: 'justify-content:space-between' },
+        el('span', { class: 'mudo pequeno', text: `${r.autor || 'autor desconhecido'} · ${ORIGENS[r.origem] || r.origem}${temPadrao ? ' · no padrão do robô' : ''}` }),
+        temPadrao ? alternar : null),
+      previa
     ];
+    const simples = () => atual().replace(/\*/g, '');
     const botoes = [
-      el('button', { class: 'btn', onclick: () => copiar(r.texto) }, '📋 Copiar'),
-      el('button', { class: 'btn', onclick: () => imprimir(`CCOS — Relatório do Turno ${r.turno} · ${r.data}`, simples, null) }, '📄 PDF'),
+      el('button', { class: 'btn', onclick: () => copiar(atual()) }, '📋 Copiar'),
+      el('button', { class: 'btn', onclick: () => imprimir(`CCOS — Relatório do Turno ${r.turno} · ${r.data}`, simples(), null) }, '📄 PDF'),
       el('button', { class: 'btn', onclick: () => baixarArquivo(`/api/relatorios-hist/${encodeURIComponent(r.id)}/xlsx`, 'Relatorio.xlsx') }, '📊 Excel'),
       ehLider() ? el('button', { class: 'btn primario', onclick: async () => {
         if (!await confirmar('Começar o turno a partir deste relatório?', `O turno atual vai para os rascunhos arquivados e o novo herda KM, navios, avisos e equipes de ${r.turno} ${r.data}.`, 'Herdar')) return;

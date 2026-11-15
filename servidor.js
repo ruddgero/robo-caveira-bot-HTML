@@ -297,12 +297,16 @@ rota('GET', '/api/relatorios-hist', async () => ({ relatorios: nucleo.historicoO
 rota('GET', '/api/relatorios-hist/:id', async (req, res, { params }) => {
     const h = nucleo.estado.historico.find(x => x.id === params.id);
     if (!h) throw erro('Relatório não encontrado.', 404);
-    return { relatorio: { ...metaHist(h), texto: h.texto } };
+    let padrao = '';
+    try { padrao = R.padronizarRelatorio(h.texto, { data: h.data, turno: h.turno }); } catch (_) { padrao = ''; }
+    return { relatorio: { ...metaHist(h), texto: h.texto, padrao } };
 });
 rota('GET', '/api/relatorios-hist/:id/xlsx', async (req, res, { params }) => {
     const h = nucleo.estado.historico.find(x => x.id === params.id);
     if (!h) throw erro('Relatório não encontrado.', 404);
-    return { __arquivo: true, tipo: XLSX, nome: nomeArquivo('Relatorio', h.turno, h.data), dados: gerarXlsx([{ nome: 'Relatório', larguras: [36, 100], linhas: R.linhasExcel(h.texto) }]) };
+    let texto = h.texto;
+    try { texto = R.padronizarRelatorio(h.texto, { data: h.data, turno: h.turno }); } catch (_) {}
+    return { __arquivo: true, tipo: XLSX, nome: nomeArquivo('Relatorio', h.turno, h.data), dados: gerarXlsx([{ nome: 'Relatório', larguras: [36, 100], linhas: R.linhasExcel(texto) }]) };
 });
 rota('POST', '/api/relatorios-hist/:id/herdar', async (req, res, { params, u }) => ({ ficha: await nucleo.herdarDoHistorico(params.id, u) }), { perfis: LIDERES });
 rota('POST', '/api/relatorios-hist/importar', async (req, res, { corpo, u }) => nucleo.importarMensagens(corpo.mensagens, u), { perfis: LIDERES });
