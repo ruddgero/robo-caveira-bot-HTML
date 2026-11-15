@@ -265,7 +265,7 @@ function ehRelatorioDeTurno(texto) {
     const topo = linhas.slice(0, 3).map(normalizar).join(' ');
     if (!/RELATORIO (DO |DE )?TURNO/.test(topo)) return false;
     const secoes = new Set(linhas.map(secaoDaLinha).filter(Boolean));
-    return secoes.size >= 4;
+    return secoes.size >= 3;
 }
 
 function numeroKm(valor) {

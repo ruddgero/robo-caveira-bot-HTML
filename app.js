@@ -393,6 +393,11 @@ function desenharTopo() {
   bc.hidden = !alerta; bc.textContent = '!'; bc.style.background = 'var(--ambar)';
 }
 
+// Computador (tela larga): menu lateral, prévia ao vivo do relatório e histórico lado a lado
+const MQ_DESKTOP = window.matchMedia('(min-width: 1024px)');
+const ehDesktop = () => MQ_DESKTOP.matches;
+MQ_DESKTOP.addEventListener?.('change', () => { if (S.ficha) redesenharAba(); });
+
 // Navegação: 4 abas principais; Plantão e Pendências têm subabas
 const GRUPOS = { plantao: ['central', 'relatorio', 'emails'], pendencias: ['pendencias', 'entrada'], historico: ['historico'], painel: ['painel'] };
 const ROTULOS_SUB = { central: 'Turno', relatorio: 'Relatório', emails: 'E-mails', pendencias: 'Pendências', entrada: 'Mensagens do grupo' };
@@ -513,6 +518,7 @@ async function salvarFicha(tentativa = 0) {
     S.fichaBase = clone(r.ficha); S.conferencia = r.conferencia;
     marcarEstadoSalvo('Salvo ✓');
     desenharConferencia();
+    atualizarPreviaViva();
   } catch (e) {
     if (e.status === 409 && e.dados?.ficha && tentativa < 2) {
       // outra pessoa (ou o robô) mexeu ao mesmo tempo: junta as duas versões
@@ -1550,6 +1556,21 @@ async function abrirEquipes() {
   ]);
 }
 
+function atualizarPreviaViva() {
+  const alvo = $('#previa-viva-texto');
+  if (!alvo) return;
+  clearTimeout(S.timerPrevia);
+  S.timerPrevia = setTimeout(async () => {
+    try { const t = await api('GET', '/api/ficha/texto'); const a = $('#previa-viva-texto'); if (a) a.replaceChildren(textoWhats(t.whatsapp)); } catch (_) {}
+  }, 500);
+}
+
+function painelPreviaViva() {
+  return el('aside', { class: 'cartao previa-viva' },
+    el('div', { class: 'cartao-topo' }, el('h2', { text: 'Prévia ao vivo' }), el('span', { class: 'mudo pequeno', text: 'como sai no WhatsApp' })),
+    el('div', { id: 'previa-viva-texto', class: 'previa' }, el('span', { class: 'mudo', text: 'Carregando…' })));
+}
+
 function desenharRelatorio() {
   const c = $('#aba-relatorio');
   if (!S.ficha) return;
@@ -1557,7 +1578,7 @@ function desenharRelatorio() {
     el('option', { value: 'DIURNO', text: 'DIURNO' }), el('option', { value: 'NOTURNO', text: 'NOTURNO' }));
   turno.value = S.ficha.turno;
 
-  c.replaceChildren(
+  const blocos = [
     el('section', { class: 'cartao' },
       el('div', { id: 'progresso-rel', class: 'progresso' }, el('strong', { text: '' }), el('div', { class: 'barra' }, el('span'))),
       el('div', { class: 'grade-2' }, el('label', { class: 'campo' }, 'Turno', turno), campo('Data', 'data', { placeholder: 'DD/MM/AAAA' })),
@@ -1588,8 +1609,11 @@ function desenharRelatorio() {
       el('button', { class: 'btn', onclick: exportarPdf }, '📄 PDF'),
       el('button', { class: 'btn', onclick: async () => { await salvarAgora(); baixarArquivo('/api/ficha/xlsx', 'Relatorio.xlsx'); } }, '📊 Excel'),
       ehLider() ? el('button', { class: 'btn primario', onclick: publicar }, '🚀 Publicar') : null)
-  );
+  ];
+  if (ehDesktop()) c.replaceChildren(el('div', { class: 'rel-desktop' }, el('div', { class: 'aba' }, ...blocos), painelPreviaViva()));
+  else c.replaceChildren(...blocos);
   atualizarProgresso();
+  atualizarPreviaViva();
   desenharConferencia();
   atualizarKmRodados();
   requestAnimationFrame(() => c.querySelectorAll('textarea').forEach(autoAltura));
@@ -1734,7 +1758,7 @@ function desenharHistorico() {
     if (!grupos.has(chave)) grupos.set(chave, []);
     grupos.get(chave).push(h);
   }
-  c.replaceChildren(
+  const partes = [
     el('section', { class: 'cartao' },
       el('div', { class: 'cartao-topo' }, el('h2', { text: `Histórico de relatórios (${S.historico.length})` }),
         ehLider() ? el('button', { class: 'btn pequeno', onclick: importarConversa }, '📥 Importar do WhatsApp') : null),
@@ -1742,22 +1766,30 @@ function desenharHistorico() {
       busca),
     itens.length ? el('div', { style: 'display:grid;gap:8px' }, [...grupos.entries()].map(([mes, lista]) => [
       el('h3', { class: 'mes-tit', text: `${mes} · ${lista.length}` }),
-      ...lista.map(h => el('button', { class: 'linha-op', onclick: () => abrirRelatorioHist(h) },
+      ...lista.map(h => el('button', { class: `linha-op${S.histSel === h.id ? ' selecionado' : ''}`, 'data-id': h.id, onclick: () => abrirRelatorioHist(h) },
         el('span', { class: 'ic', text: h.turno === 'NOTURNO' ? '🌙' : '☀️' }),
         el('span', { style: 'min-width:0' }, el('div', { class: 'tit', text: `${h.turno || '?'} · ${h.data || 'sem data'}` }),
           el('div', { class: 'sub', text: `${h.autor || 'autor desconhecido'}${h.grupoNome ? ' · ' + h.grupoNome : ''}` })),
         el('span', { class: 'etiqueta-origem', text: ORIGENS[h.origem] || h.origem })))
-    ]).flat()) : el('div', { class: 'vazio' }, el('span', { class: 'ic', text: '🗂️' }), termo ? 'Nada encontrado.' : 'Nenhum relatório ainda. Importe a conversa do grupo para trazer os meses anteriores.'));
+    ]).flat()) : el('div', { class: 'vazio' }, el('span', { class: 'ic', text: '🗂️' }), termo ? 'Nada encontrado.' : 'Nenhum relatório ainda. Importe a conversa do grupo para trazer os meses anteriores.')
+  ];
+  if (ehDesktop()) {
+    const lado = el('aside', { id: 'hist-detalhe', class: 'cartao hist-detalhe' }, el('div', { class: 'vazio' }, el('span', { class: 'ic', text: '📑' }), 'Escolha um relatório na lista para ver aqui.'));
+    c.replaceChildren(el('div', { class: 'hist-desktop' }, el('div', { class: 'aba' }, ...partes), lado));
+    const sel = itens.find(h => h.id === S.histSel) || itens[0];
+    if (sel) abrirRelatorioHist(sel);
+  } else c.replaceChildren(...partes);
 }
 
 async function abrirRelatorioHist(h) {
   try {
     const { relatorio: r } = await api('GET', `/api/relatorios-hist/${encodeURIComponent(h.id)}`);
     const simples = r.texto.replace(/\*/g, '');
-    abrirModal(`${r.turno} · ${r.data}`, [
+    const corpo = [
       el('div', { class: 'mudo pequeno', text: `${r.autor || 'autor desconhecido'} · ${ORIGENS[r.origem] || r.origem}` }),
       el('div', { class: 'previa' }, textoWhats(r.texto))
-    ], [
+    ];
+    const botoes = [
       el('button', { class: 'btn', onclick: () => copiar(r.texto) }, '📋 Copiar'),
       el('button', { class: 'btn', onclick: () => imprimir(`CCOS — Relatório do Turno ${r.turno} · ${r.data}`, simples, null) }, '📄 PDF'),
       el('button', { class: 'btn', onclick: () => baixarArquivo(`/api/relatorios-hist/${encodeURIComponent(r.id)}/xlsx`, 'Relatorio.xlsx') }, '📊 Excel'),
@@ -1765,7 +1797,15 @@ async function abrirRelatorioHist(h) {
         if (!await confirmar('Começar o turno a partir deste relatório?', `O turno atual vai para os rascunhos arquivados e o novo herda KM, navios, avisos e equipes de ${r.turno} ${r.data}.`, 'Herdar')) return;
         try { await api('POST', `/api/relatorios-hist/${encodeURIComponent(r.id)}/herdar`); aviso('Turno preparado ✓'); await recarregarTudo(); trocarAba('central'); } catch (e) { aviso(e.message, true); }
       } }, '⤵ Herdar este') : null
-    ]);
+    ];
+    const lado = $('#hist-detalhe');
+    if (ehDesktop() && lado) {
+      S.histSel = r.id;
+      document.querySelectorAll('#aba-historico .linha-op').forEach(b => b.classList.toggle('selecionado', b.dataset.id === r.id));
+      lado.replaceChildren(el('div', { class: 'cartao-topo' }, el('h2', { text: `${r.turno} · ${r.data}` })), el('div', { class: 'linha' }, botoes), ...corpo);
+      return;
+    }
+    abrirModal(`${r.turno} · ${r.data}`, corpo, botoes);
   } catch (e) { aviso(e.message, true); }
 }
 
@@ -1782,7 +1822,7 @@ function mensagensDaConversa(texto) {
       msgs.push(atual);
     } else if (atual) atual.texto += '\n' + linha;
   }
-  return msgs.filter(x => /RELAT[OÓ]RIO\s+DO\s+TURNO/i.test(x.texto));
+  return msgs.filter(x => /RELAT[OÓ]RIO\s+(D[OE]\s+)?TURNO/i.test(x.texto));
 }
 
 function importarConversa() {
@@ -1799,14 +1839,25 @@ function importarConversa() {
     if (!arq) throw new Error('Escolha o arquivo .txt da conversa.');
     const msgs = mensagensDaConversa(await arq.text());
     if (!msgs.length) throw new Error('Nenhum "RELATÓRIO DO TURNO" encontrado nesse arquivo.');
-    let novos = 0, repetidos = 0;
+    let novos = 0, repetidos = 0, atualizados = 0, ignorados = 0, de = '', ate = '';
     for (let i = 0; i < msgs.length; i += 80) {
       info.textContent = `Importando ${Math.min(i + 80, msgs.length)} de ${msgs.length}…`;
       const r = await api('POST', '/api/relatorios-hist/importar', { mensagens: msgs.slice(i, i + 80) });
-      novos += r.novos; repetidos += r.repetidos;
+      novos += r.novos; repetidos += r.repetidos; atualizados += r.atualizados || 0; ignorados += r.ignorados || 0;
+      if (r.de && (!de || r.de < de)) de = r.de;
+      if (r.ate && r.ate > ate) ate = r.ate;
     }
+    const dataDe = k => k ? k.slice(0, 10).split('-').reverse().join('/') : '?';
     fecharModal();
-    aviso(`${novos} relatório(s) importado(s)${repetidos ? ` · ${repetidos} já estavam no histórico` : ''} ✓`);
+    abrirModal('Importação concluída', [
+      el('div', { class: 'contadores' },
+        el('div', { class: 'contador' }, el('strong', { text: String(msgs.length) }), el('span', { text: 'relatórios no arquivo' })),
+        el('div', { class: 'contador' }, el('strong', { text: String(novos) }), el('span', { text: 'novos' })),
+        el('div', { class: 'contador' }, el('strong', { text: String(repetidos + atualizados) }), el('span', { text: 'já existiam' }))),
+      de ? el('p', { style: 'margin:0', text: `Período encontrado: ${dataDe(de)} a ${dataDe(ate)}.` }) : null,
+      ignorados ? el('p', { class: 'mudo pequeno', style: 'margin:0', text: `${ignorados} mensagem(ns) mencionavam o relatório mas não estavam no formato completo.` }) : null,
+      el('p', { class: 'mudo pequeno', style: 'margin:0', text: 'Cada turno aparece uma vez só. Se faltarem meses, o celular que exportou pode não ter o histórico antigo do grupo: exporte de um aparelho que tenha.' })
+    ], [el('button', { class: 'btn primario', 'data-fechar': true }, 'Ok')]);
     S.historico = null;
     if (S.aba === 'historico') desenharHistorico();
   }, 'Importar'));

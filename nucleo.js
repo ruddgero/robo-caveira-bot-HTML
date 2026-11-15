@@ -70,6 +70,7 @@ async function carregar() {
     estado.auditoria = await store.get('auditoria', []) || [];
     estado.equipes = await store.get('equipes', []) || [];
     estado.historico = await store.listarRelatorios();
+    await deduplicarHistorico();
     estado.relatorios = await store.get('relatorios_us', null);
 
     let ficha = await store.get('ficha', null);
@@ -258,38 +259,80 @@ function hashTexto(t) {
     const { crc32 } = require('./xlsx');
     return crc32(Buffer.from(semAcento(t || '').replace(/\s+/g, ' ').trim(), 'utf-8')).toString(16).padStart(8, '0');
 }
+// Um registro por turno (data + turno). Repostagens e correções substituem o texto, sem duplicar.
+const PRIORIDADE_ORIGEM = { publicado: 4, grupo: 3, importado: 2, colado: 1 };
+function idHistorico(chave, texto) { return chave && !chave.startsWith('0000') ? chave : `sem-data_${hashTexto(texto)}`; }
+
 async function arquivarRelatorio({ texto, autor = '', origem = 'grupo', grupoNome = '', mensagemTs = Date.now(), silencioso = false }) {
     if (!texto || !R.ehRelatorioDeTurno(texto)) return { novo: false, rel: null };
     const d = R.lerRelatorio(texto).dados;
     const chave = chaveTurno(d.data, d.turno) || '0000-00-00-9';
-    const id = `${chave}_${hashTexto(texto)}`;
+    const id = idHistorico(chave, texto);
+    const hash = hashTexto(texto);
     const existente = estado.historico.find(h => h.id === id);
     if (existente) {
-        // um relatório publicado por nós tem prioridade de origem
-        if (origem === 'publicado' && existente.origem !== 'publicado') { existente.origem = 'publicado'; await store.salvarRelatorio(existente); }
+        const mesmoTexto = existente.hash === hash;
+        const maisNovo = (mensagemTs || 0) > (existente.mensagemTs || 0);
+        const melhorOrigem = (PRIORIDADE_ORIGEM[origem] || 0) > (PRIORIDADE_ORIGEM[existente.origem] || 0);
+        if (mesmoTexto && !melhorOrigem) return { novo: false, rel: existente };
+        // correção mais nova, ou a mesma versão vinda de uma fonte melhor (publicado > grupo > importado > colado)
+        if (maisNovo || melhorOrigem) {
+            Object.assign(existente, { texto, hash, autor: autor || existente.autor, origem: melhorOrigem ? origem : existente.origem, grupoNome: grupoNome || existente.grupoNome, mensagemTs: Math.max(mensagemTs || 0, existente.mensagemTs || 0) });
+            await store.salvarRelatorio(existente);
+            return { novo: false, atualizado: true, rel: existente };
+        }
         return { novo: false, rel: existente };
     }
     const rel = {
         id, chave, turno: d.turno || '', data: d.data || '', autor: autor || '', origem, grupoNome: grupoNome || '',
-        mensagemTs: mensagemTs || Date.now(), capturadoEm: agora().iso, texto
+        mensagemTs: mensagemTs || Date.now(), capturadoEm: agora().iso, texto, hash
     };
     estado.historico.push(rel);
     await store.salvarRelatorio(rel);
     if (!silencioso) console.log(`🗂️  [HISTÓRICO] ${origem} • ${rel.turno} ${rel.data}`);
     return { novo: true, rel };
 }
+
+// Limpa duplicados antigos (versões anteriores guardavam um registro por texto)
+async function deduplicarHistorico() {
+    const porId = new Map();
+    const remover = [];
+    for (const h of estado.historico) {
+        const d = R.lerRelatorio(h.texto || '').dados;
+        h.chave = chaveTurno(d.data, d.turno) || h.chave || '0000-00-00-9';
+        h.turno = d.turno || h.turno; h.data = d.data || h.data;
+        const id = idHistorico(h.chave, h.texto);
+        h.hash = h.hash || hashTexto(h.texto);
+        const atual = porId.get(id);
+        const melhor = !atual || (PRIORIDADE_ORIGEM[h.origem] || 0) > (PRIORIDADE_ORIGEM[atual.origem] || 0)
+            || ((PRIORIDADE_ORIGEM[h.origem] || 0) === (PRIORIDADE_ORIGEM[atual.origem] || 0) && (h.mensagemTs || 0) > (atual.mensagemTs || 0));
+        if (melhor) { if (atual) remover.push(atual); porId.set(id, h); } else remover.push(h);
+    }
+    const ficam = [];
+    for (const [id, h] of porId) {
+        if (h.id !== id) { remover.push({ ...h }); h.id = id; await store.salvarRelatorio(h); }
+        ficam.push(h);
+    }
+    for (const r of remover) if (!ficam.some(f => f.id === r.id)) await store.excluirRelatorio(r.id).catch(() => {});
+    if (remover.length) console.log(`🧹 [HISTÓRICO] ${remover.length} duplicado(s) removido(s).`);
+    estado.historico = ficam;
+}
+
 function historicoOrdenado() {
     return [...estado.historico].sort((a, b) => (b.chave || '').localeCompare(a.chave || '') || (b.mensagemTs || 0) - (a.mensagemTs || 0));
 }
 async function importarMensagens(mensagens, usuario) {
-    let novos = 0, repetidos = 0, ignorados = 0;
+    let novos = 0, atualizados = 0, repetidos = 0, ignorados = 0;
+    const datas = [];
     for (const m of (mensagens || []).slice(0, 5000)) {
         if (!m?.texto || !R.ehRelatorioDeTurno(m.texto)) { ignorados++; continue; }
         const r = await arquivarRelatorio({ texto: m.texto, autor: m.autor, origem: 'importado', mensagemTs: m.ts, silencioso: true });
-        if (r.novo) novos++; else repetidos++;
+        if (r.rel?.chave && !r.rel.chave.startsWith('0000')) datas.push(r.rel.chave);
+        if (r.novo) novos++; else if (r.atualizado) atualizados++; else repetidos++;
     }
-    auditar(usuario, 'Importou relatórios do WhatsApp', `${novos} novos, ${repetidos} repetidos`);
-    return { novos, repetidos, ignorados, total: estado.historico.length };
+    datas.sort();
+    auditar(usuario, 'Importou relatórios do WhatsApp', `${novos} novos, ${atualizados} atualizados, ${repetidos} repetidos`);
+    return { novos, atualizados, repetidos, ignorados, total: estado.historico.length, de: datas[0] || '', ate: datas[datas.length - 1] || '' };
 }
 async function herdarDoHistorico(id, usuario) {
     const h = estado.historico.find(x => x.id === id);

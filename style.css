@@ -290,3 +290,23 @@ input:-webkit-autofill, input:-webkit-autofill:hover, input:-webkit-autofill:foc
   -webkit-box-shadow: 0 0 0 40px var(--fundo) inset; -webkit-text-fill-color: var(--texto); caret-color: var(--texto);
   border: 1px solid var(--borda); transition: background-color 9999s ease-out;
 }
+
+/* ================= Computador (1024px ou mais) ================= */
+@media (min-width: 1024px) {
+  .abas { top: 61px; bottom: 0; left: 0; right: auto; transform: none; width: 220px; display: flex; flex-direction: column; gap: 4px; padding: 18px 12px; background: rgba(11, 17, 32, .92); border-right: 1px solid var(--borda); border-top: 0; backdrop-filter: blur(10px); }
+  .abas button { display: flex; align-items: center; gap: 12px; width: 100%; padding: 12px 14px; border-radius: 10px; font-size: 14.5px; text-align: left; }
+  .abas button.ativa { background: var(--superficie-2); }
+  .abas .ic { font-size: 18px; }
+  .abas .badge { position: static; margin-left: auto; }
+  main, main.largo { margin-left: 220px; max-width: none; padding: 22px 32px 48px; }
+  .subabas { top: 72px; max-width: 560px; }
+  #aba-emails .lista-pend, #aba-pendencias .lista-pend { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .rel-desktop { display: grid; grid-template-columns: minmax(0, 1fr) minmax(360px, 440px); gap: 22px; align-items: start; }
+  .previa-viva { position: sticky; top: 132px; max-height: calc(100vh - 150px); overflow: auto; }
+  .previa-viva .previa { max-height: none; }
+  .hist-desktop { display: grid; grid-template-columns: minmax(340px, 440px) minmax(0, 1fr); gap: 22px; align-items: start; }
+  .hist-detalhe { position: sticky; top: 90px; max-height: calc(100vh - 110px); overflow: auto; }
+  .linha-op.selecionado { border-color: var(--primario); background: rgba(79, 124, 255, .12); }
+  .barra-acoes { bottom: 16px; }
+  .modal-caixa { max-width: 720px; }
+}
