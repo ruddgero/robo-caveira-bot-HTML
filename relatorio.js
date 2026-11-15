@@ -8,7 +8,7 @@
 // Padrões de texto seguem o robô antigo do CCOS.
 // =====================================================================
 const {
-    agora, turnoPelaHora, dataDoTurno, diaSeguinte, novoId, semAcento, limparMarcador,
+    agora, turnoPelaHora, dataDoTurno, diaSeguinte, dataDeOntem, novoId, semAcento, limparMarcador,
     normalizarHora, normalizarPlaca, normalizarTerminal, normalizarTexto
 } = require('./util');
 
@@ -76,9 +76,83 @@ function formatarQtdTripulantes(q) {
 }
 
 // Linha da seção 6 para uma operação (padrão do robô antigo)
+// ---------------------------------------------------------------------
+// Nomes das equipes (seção 8)
+// ---------------------------------------------------------------------
+const PARTICULAS = new Set(['da', 'de', 'do', 'das', 'dos', 'e']);
+function nomeProprio(n) {
+    const orig = String(n || '').trim().replace(/\s+/g, ' ');
+    const misto = /[a-zà-ÿ]/.test(orig);   // "Equipe US": mantém siglas; "GUSTAVO RAMOS": vira "Gustavo Ramos"
+    return orig.split(' ').map((w, i) => {
+        if (misto && w.length <= 4 && w === w.toUpperCase() && /[A-Z]/.test(w)) return w;
+        const p = w.toLowerCase();
+        return (i && PARTICULAS.has(p)) ? p : p.charAt(0).toUpperCase() + p.slice(1);
+    }).join(' ');
+}
+function separarNomes(texto) {
+    const t = String(texto || '').replace(/[*_✓✔•]/g, ' ').trim();
+    if (!t || /conforme\s+escala/i.test(semAcento(t))) return [];
+    return t.split(/\s*(?:,|;|\/|\n|\s+e\s+|\s+&\s+)\s*/i).map(nomeProprio).filter(n => n.length >= 2);
+}
+function juntarNomes(lista) {
+    const l = (lista || []).filter(Boolean);
+    return l.length > 1 ? `${l.slice(0, -1).join(', ')} e ${l[l.length - 1]}` : (l[0] || '');
+}
+// Opção 3: "Saindo | Assumindo" — o pipe é obrigatório
+function lerEquipesComPipe(texto) {
+    const partes = String(texto || '').split('|');
+    if (partes.length !== 2) throw new Error('Use o separador "|" uma única vez: Equipe saindo | Equipe assumindo');
+    const [saindo, assumindo] = partes.map(x => x.trim());
+    if (!saindo || !assumindo) throw new Error('Preencha os dois lados do "|": Equipe saindo | Equipe assumindo');
+    return { saindo, assumindo, saindoLista: separarNomes(saindo), assumindoLista: separarNomes(assumindo) };
+}
+
+// Linha completa da operação dentro do navio (seção 6). É reescrita quando chega a saída ou há correção.
 function resumoNavio(op) {
-    if (op.tipo === 'TRIPULACAO') return `${op.movimento || 'Embarque'} de ${formatarQtdTripulantes(op.quantidade)}.`;
-    return (TIPOS_OPERACAO[op.tipo] || TIPOS_OPERACAO.OUTRA).resumo;
+    const hi = normalizarHora(op.horaInicial || '');
+    const desc = op.tipo === 'TRIPULACAO'
+        ? `${op.movimento || 'Embarque'} de ${formatarQtdTripulantes(op.quantidade)}`
+        : (TIPOS_OPERACAO[op.tipo] || TIPOS_OPERACAO.OUTRA).resumo.replace(/\.$/, '');
+    const det = [
+        op.empresa ? `empresa ${op.empresa}` : '',
+        op.responsavel ? `${op.tipo === 'TRIPULACAO' ? 'agente' : 'motorista'} ${op.responsavel}` : '',
+        op.ajudante ? `${/,| e /i.test(op.ajudante) ? 'ajudantes' : 'ajudante'} ${op.ajudante.replace(/,\s*([^,]+)$/, ' e $1')}` : '',
+        (op.veiculo || op.placa) ? `${(op.veiculo || 'veículo').toLowerCase()}${op.placa ? ' placa ' + op.placa : ''}` : ''
+    ].filter(Boolean).join(', ');
+    let linha = `${hi ? hi + 'h ' : ''}${desc}`;
+    if (det) linha += ` – ${det}`;
+    linha += op.horaFinal ? `. Saída às ${normalizarHora(op.horaFinal) || op.horaFinal}h.` : '. Em andamento.';
+    return linha;
+}
+
+const RE_PREFIXO_NAVIO = /^(?:M\s*\/\s*V|M\.\s*V\.?|MV|N\s*\/\s*M|NM|NAVIO)\b\s*[-–:.]?\s*/i;
+function nomeNavioLimpo(nome) {
+    return String(nome || '').trim().replace(RE_PREFIXO_NAVIO, '').replace(/\s+/g, ' ').trim().toUpperCase();
+}
+function chaveNavio(nome) {
+    return semAcento(nomeNavioLimpo(semAcento(nome))).toUpperCase().replace(/[^A-Z0-9]/g, '');
+}
+function distancia(a, b) {
+    if (Math.abs(a.length - b.length) > 2) return 99;
+    const d = Array.from({ length: a.length + 1 }, (_, i) => [i]);
+    for (let j = 1; j <= b.length; j++) d[0][j] = j;
+    for (let i = 1; i <= a.length; i++) for (let j = 1; j <= b.length; j++)
+        d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    return d[a.length][b.length];
+}
+// Acha o navio cadastrado a partir de um nome digitado (tolera prefixo MV, acento, espaço e 1–2 letras erradas)
+function acharNavio(nome, navios = NAVIOS_PADRAO) {
+    const k = chaveNavio(nome);
+    if (k.length < 3) return null;
+    const exato = navios.find(n => chaveNavio(n.nome) === k);
+    if (exato) return exato;
+    const tol = k.length >= 10 ? 2 : k.length >= 5 ? 1 : 0;
+    let melhor = null, menor = 99;
+    for (const n of navios) {
+        const dd = distancia(chaveNavio(n.nome), k);
+        if (dd < menor) { menor = dd; melhor = n; }
+    }
+    return menor <= tol ? melhor : null;
 }
 
 // ---------------------------------------------------------------------
@@ -97,7 +171,8 @@ function fichaVazia(config = {}) {
         atividades: (config.atividadesBase || []).map(texto => ({ id: novoId(), texto })),
         navios: { tore: [], toil: [] },
         ocorrencias: [],
-        equipes: { saindo: '', assumindo: '' },
+        equipes: { modo: 'ESCALA', saindo: 'Conforme escala', assumindo: 'Conforme escala', saindoLista: [], assumindoLista: [] },
+        anterior: null,   // { assumindo, kmFinal, turno, data } do turno anterior (opção Herança)
         herdadoDe: null,
         publicadoEm: null,
         criadoEm: t.iso,
@@ -134,10 +209,28 @@ function adicionarLinhaNavio(ficha, terminal, nomeNavio, linha) {
     const chave = terminal === 'T-OIL' ? 'toil' : 'tore';
     ficha.navios = ficha.navios || { tore: [], toil: [] };
     ficha.navios[chave] = ficha.navios[chave] || [];
-    const alvo = semAcento(nomeNavio).toUpperCase().replace(/^MV\s*-?\s*/, '').trim();
-    let n = ficha.navios[chave].find(x => semAcento(x.navio).toUpperCase().replace(/^MV\s*-?\s*/, '').trim() === alvo);
+    const alvo = chaveNavio(nomeNavio);
+    let n = ficha.navios[chave].find(x => chaveNavio(x.navio) === alvo);
     if (!n) { n = { id: novoId(), navio: nomeNavio.toUpperCase(), linhas: [] }; ficha.navios[chave].push(n); }
     if (!n.linhas.includes(linha)) n.linhas.push(linha);
+}
+
+// Troca a linha de uma operação no navio (mantém a posição); se mudou de navio, tira do antigo e põe no novo
+function trocarLinhaNavio(ficha, antes, depois) {
+    const chave = t => (t === 'T-OIL' ? 'toil' : 'tore');
+    if (antes?.linha) {
+        const lista = ficha.navios?.[chave(antes.terminal)] || [];
+        const n = lista.find(x => chaveNavio(x.navio) === chaveNavio(antes.navio));
+        const i = n ? n.linhas.indexOf(antes.linha) : -1;
+        if (i >= 0) {
+            if (depois && chave(depois.terminal) === chave(antes.terminal) && chaveNavio(depois.navio) === chaveNavio(antes.navio)) {
+                n.linhas[i] = depois.linha;
+                return;
+            }
+            n.linhas.splice(i, 1);
+        }
+    }
+    if (depois?.linha && depois.navio && depois.terminal) adicionarLinhaNavio(ficha, depois.terminal, depois.navio, depois.linha);
 }
 
 // ---------------------------------------------------------------------
@@ -339,7 +432,12 @@ function fichaHerdada(relatorio, fichaAtual, config = {}) {
         ? { tore: d.navios.tore, toil: d.navios.toil }
         : JSON.parse(JSON.stringify(anterior.navios || { tore: [], toil: [] }));
 
-    nova.equipes = { saindo: d.equipes.assumindo || '', assumindo: d.equipes.saindo || '' };
+    // Opção HERANÇA: quem assumiu o turno anterior é a equipe saindo agora; a equipe assumindo é escolhida nos botões
+    const saindoLista = separarNomes(d.equipes.assumindo || '');
+    nova.equipes = saindoLista.length
+        ? { modo: 'HERANCA', saindo: juntarNomes(saindoLista), assumindo: '', saindoLista, assumindoLista: [] }
+        : { modo: 'ESCALA', saindo: 'Conforme escala', assumindo: 'Conforme escala', saindoLista: [], assumindoLista: [] };
+    nova.anterior = { assumindo: d.equipes.assumindo || '', kmFinal: km, turno: d.turno || '', data: d.data || '' };
     nova.herdadoDe = {
         relatorioId: relatorio.id || null, autor: relatorio.autor || '', data: d.data, turno: d.turno,
         capturadoEm: relatorio.capturadoEm || t.iso, encontrados: relatorio.encontrados, faltando: relatorio.faltando
@@ -431,6 +529,7 @@ function formatarRelatorio(f, avisos = [], { negrito = true } = {}) {
         blocoLista(f.ocorrencias),
         '',
         b('8. PASSAGEM DE TURNO'),
+        '',
         b('EQUIPE SAINDO:'),
         (f.equipes?.saindo || '').trim() || 'Conforme escala',
         '',
@@ -492,8 +591,11 @@ const ROTULOS = [
     [/^(saida|saida na portaria|horario final|termino|hora de saida)$/, 'horaFinal'],
     [/^(quantidade|quantos|qtd|qtde|tripulantes|n de tripulantes)$/, 'quantidade'],
     [/^(movimento|embarque ou desembarque|movimentacao)$/, 'movimento'],
-    [/^(observacao|observacoes|obs)$/, 'observacoes']
+    [/^(observacao|observacoes|obs)$/, 'observacoes'],
+    [/^(autorizado por|autorizados por|autoridade|autoridades|autorizado por autoridades|autorizacao)$/, 'autoridades']
 ];
+// Linhas sem rótulo logo abaixo destes campos continuam o campo (ex.: 2º ajudante na linha de baixo)
+const CONTINUAVEIS = { ajudante: ', ', responsavel: ', ', observacoes: ' ', empresa: ' ' };
 
 function lerMensagemPadrao(textoOriginal) {
     const texto = normalizarTexto(textoOriginal);
@@ -501,19 +603,28 @@ function lerMensagemPadrao(textoOriginal) {
     const navios = [];
     let titulo = '';
     let reconhecidos = 0;
+    let ultimo = null;
     for (const bruta of texto.split('\n')) {
-        const linha = bruta.replace(/[*_~]/g, '').trim();
-        if (!linha) continue;
+        const linha = bruta.replace(/[*_~]/g, '').replace(/^[-•✓✔]\s*/, '').trim();
+        if (!linha) { ultimo = null; continue; }
         const m = linha.match(/^([A-Za-zÀ-ÿº°\/ .()]{2,40}?)\s*:\s*(.*)$/);
-        if (!m) { if (!titulo && !reconhecidos) titulo = linha; continue; }
+        if (!m) {
+            if (!titulo && !reconhecidos) titulo = linha;
+            else if (ultimo && CONTINUAVEIS[ultimo] && campos[ultimo] !== undefined) {
+                campos[ultimo] = campos[ultimo] ? campos[ultimo] + CONTINUAVEIS[ultimo] + linha : linha;
+            }
+            continue;
+        }
         const rot = semAcento(m[1]).toLowerCase().replace(/[().º°]/g, '').replace(/\s+/g, ' ').trim();
         const valor = m[2].trim();
         const achado = ROTULOS.find(([re]) => re.test(rot));
-        if (!achado) continue;
+        if (!achado) { ultimo = null; continue; }
         reconhecidos++;
         const chave = achado[1];
+        ultimo = chave;
         if (chave === 'navio') {
-            valor.split(/\s*(?:,|\/|;|\s+e\s+)\s*/i).map(v => v.trim().toUpperCase()).filter(Boolean).forEach(v => navios.push(v));
+            const limpo = valor.replace(RE_PREFIXO_NAVIO, '');
+            limpo.split(/\s*(?:,|;|\s+\/\s+|\s+e\s+)\s*/i).map(v => nomeNavioLimpo(v)).filter(Boolean).forEach(v => navios.push(v));
         } else if (!campos[chave]) campos[chave] = valor;
     }
     return { estruturada: reconhecidos >= 3, titulo, campos, navios };
@@ -534,7 +645,7 @@ const RE_SAIDA = /\b(saida|saiu|deixou o terminal|liberad[oa] na saida)\b/;
 function navioConhecido(texto, navios = NAVIOS_PADRAO) {
     const n = semAcento(texto).toUpperCase();
     for (const nav of navios) {
-        const nome = semAcento(nav.nome).toUpperCase().replace(/^MV\s*-?\s*/, '').trim();
+        const nome = semAcento(nomeNavioLimpo(nav.nome));
         if (nome && new RegExp(`\\b${nome.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+')}\\b`).test(n)) return nav;
     }
     return null;
@@ -546,7 +657,7 @@ function terminalDoNavio(nome, navios = NAVIOS_PADRAO) {
 
 function extrairCampos(textoOriginal, navios = NAVIOS_PADRAO) {
     const t = normalizarTexto(textoOriginal);
-    const navio = t.match(/\b(?:MV|M\/V|NAVIO)\s*[-:]?\s*([A-Z0-9][A-Z0-9 .]{2,30}?)(?=\s*[-:.,;(]|\s+T-|\s*$)/i);
+    const navio = t.match(/\b(?:NAVIO|M\/V|MV)\s*[-–:]?\s*(?:(?:M\/V|MV|NM)\s*[-–.]?\s*)?([A-Z0-9][A-Z0-9 .]{2,30}?)(?=\s*[-–:.,;(\n]|\s+T-|\s*$)/im);
     const qtd = t.match(/\b(\d{1,3})\s*tripulantes?\b/i);
     const conhecido = navioConhecido(t, navios);
     return {
@@ -570,10 +681,11 @@ function rascunhosOperacao(textoOriginal, horaMensagem, navios = NAVIOS_PADRAO) 
     const terminalGeral = normalizarTerminal(c.terminal || '') || livre.terminal;
     const qtd = c.quantidade || livre.quantidade;
     return listaNavios.map(nomeNavio => {
-        const conhecido = nomeNavio ? navioConhecido(nomeNavio, navios) : null;
+        const conhecido = nomeNavio ? acharNavio(nomeNavio, navios) : null;
         return {
             tipo,
-            navio: (conhecido && semAcento(conhecido.nome).replace(/^MV\s*-?\s*/i, '') === semAcento(nomeNavio).replace(/^MV\s*-?\s*/i, '') ? conhecido.nome : nomeNavio).toUpperCase(),
+            navio: (conhecido ? conhecido.nome : nomeNavioLimpo(nomeNavio)).toUpperCase(),
+            autoridades: c.autoridades || (TIPOS_OPERACAO[tipo] || TIPOS_OPERACAO.OUTRA).autoridade,
             terminal: terminalGeral || conhecido?.terminal || '',
             empresa: (c.empresa || '').toUpperCase(),
             responsavel: (c.responsavel || '').toUpperCase(),
@@ -600,7 +712,7 @@ function atividadeDasOperacoes(ops, horaMensagem) {
         : (TIPOS_OPERACAO[o.tipo] || TIPOS_OPERACAO.OUTRA).resumo.replace(/\.$/, '');
     const detalhes = [
         o.empresa ? `empresa ${o.empresa}` : '', o.responsavel ? `motorista ${o.responsavel}` : '',
-        o.ajudante ? `ajudante ${o.ajudante}` : '',
+        o.ajudante ? `${/,| e /i.test(o.ajudante) ? 'ajudantes' : 'ajudante'} ${o.ajudante.replace(/,\s*([^,]+)$/, ' e $1')}` : '',
         (o.veiculo || o.placa) ? `${(o.veiculo || 'veículo').toLowerCase()}${o.placa ? ' placa ' + o.placa : ''}` : ''
     ].filter(Boolean).join(', ');
     const hora = o.horaInicial || o.horaFinal || horaMensagem || '';
@@ -621,7 +733,10 @@ function classificarMensagem(textoOriginal, navios = NAVIOS_PADRAO, horaMensagem
     if (RE_URGENTE.test(n)) return { ...base, urgente: true, sugestao: 'OCORRENCIA' };
 
     const ehOperacao = RE_OPERACAO.test(n) || (padrao.estruturada && /provis|fornecimento|entrega/.test(semAcento(padrao.titulo).toLowerCase()));
-    if (ehOperacao) return { ...base, sugestao: 'OPERACAO', rascunhos: rascunhosOperacao(texto, horaMensagem, navios) };
+    if (ehOperacao) {
+        const rascunhos = rascunhosOperacao(texto, horaMensagem, navios);
+        return { ...base, sugestao: 'OPERACAO', rascunhos, atividade: atividadeDasOperacoes(rascunhos, horaMensagem) };
+    }
     if (RE_SAIDA.test(n) && campos.placa) return { ...base, sugestao: 'SAIDA' };
     if (RE_OCORRENCIA.test(n)) return { ...base, sugestao: 'OCORRENCIA' };
     if (RE_DIGITAL.test(n)) return { ...base, sugestao: 'DIGITAL' };
@@ -687,11 +802,39 @@ function ehMensagemDeSaida(texto) {
     return RE_SAIDA.test(semAcento(normalizarTexto(texto)).toLowerCase());
 }
 
+// Turno seguinte / anterior: DIURNO D → NOTURNO D → DIURNO D+1
+function proximoTurno(turno, data) {
+    return turno === 'DIURNO' ? { turno: 'NOTURNO', data } : { turno: 'DIURNO', data: diaSeguinte(data) };
+}
+function turnoAnterior(turno, data) {
+    return turno === 'NOTURNO' ? { turno: 'DIURNO', data } : { turno: 'NOTURNO', data: dataDeOntem(data) };
+}
+
+// Linhas para o Excel a partir do texto do relatório: [seção, conteúdo]
+function linhasExcel(texto) {
+    const linhas = [];
+    let secao = '', sub = '';
+    for (const bruta of String(texto || '').replace(/\*/g, '').split('\n')) {
+        const l = bruta.trim();
+        if (!l) continue;
+        if (/^RELAT[OÓ]RIO DO TURNO/i.test(l)) { linhas.push({ titulo: l, grande: true }); continue; }
+        if (/^Data:/i.test(l)) { linhas.push(['Data', l.replace(/^Data:\s*/i, '')]); continue; }
+        const sec = l.match(/^(\d)\.\s+(.+?):?$/);
+        if (sec && l === l.toUpperCase()) { secao = `${sec[1]}. ${sec[2]}`; sub = ''; linhas.push({ titulo: secao }); continue; }
+        if (l === l.toUpperCase() && /[A-Z]/.test(l) && l.length < 60 && !/^[✓✔•]/.test(l) && !/\d{2}:\d{2}/.test(l)) { sub = l.replace(/:$/, ''); continue; }
+        const kv = l.match(/^([A-Za-zÀ-ÿ ]{2,30}):\s*(.+)$/);
+        if (kv && !/^[✓✔•]/.test(l)) linhas.push([sub ? `${sub} · ${kv[1]}` : kv[1], kv[2]]);
+        else linhas.push([sub || secao.replace(/^\d\.\s*/, ''), l.replace(/^[✓✔•]\s*/, '')]);
+    }
+    return linhas;
+}
+
 module.exports = {
+    proximoTurno, turnoAnterior, linhasExcel,
     ehMensagemDeSaida, TIPOS_OPERACAO, MOVIMENTOS, NAVIOS_PADRAO,
     fichaVazia, naviosDeTexto, adicionarLinhaNavio, ehRelatorioDeTurno, lerRelatorio, fichaHerdada,
     formatarRelatorio, conferirFicha, formatarPassagemEscala, textoAviso,
     lerMensagemPadrao, classificarMensagem, extrairCampos, rascunhosOperacao, atividadeDasOperacoes,
     tipoOperacaoDoTexto, movimentoDoTexto, resumoNavio, minutaEmail, numeroKm, navioConhecido, terminalDoNavio,
-    formatarQtdTripulantes, ehSemAlteracao
+    formatarQtdTripulantes, ehSemAlteracao, separarNomes, juntarNomes, nomeProprio, lerEquipesComPipe, nomeNavioLimpo, chaveNavio, acharNavio, trocarLinhaNavio
 };

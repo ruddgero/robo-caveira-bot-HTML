@@ -1,6 +1,6 @@
 // =====================================================================
 // NÚCLEO: estado do sistema e regras de negócio
-//  plantão · ficha do turno · relatórios capturados (últimos 10)
+//  plantão · ficha do turno · relatórios (últimos 10 para herança + histórico completo)
 //  caixa de entrada · operações de bordo + e-mail · pendências · escala
 // =====================================================================
 const store = require('./store');
@@ -36,7 +36,7 @@ const CONFIG_PADRAO = {
 const estado = {
     config: null, ficha: null, versao: 0,
     entrada: [], relatorios: [], operacoes: [], pendencias: [],
-    escala: null, plantao: {}, auditoria: []
+    escala: null, plantao: {}, auditoria: [], equipes: [], historico: []
 };
 
 const handlers = { alerta: null, plantaoMudou: null, minutaWhatsapp: null };
@@ -68,6 +68,8 @@ async function carregar() {
     estado.escala = await store.get('escala', null);
     estado.plantao = await store.get('plantao', {}) || {};
     estado.auditoria = await store.get('auditoria', []) || [];
+    estado.equipes = await store.get('equipes', []) || [];
+    estado.historico = await store.listarRelatorios();
     estado.relatorios = await store.get('relatorios_us', null);
 
     let ficha = await store.get('ficha', null);
@@ -81,6 +83,14 @@ async function carregar() {
         if (antigo) migrou = true;
     }
     if (ficha) {
+        if (!ficha.anterior && ficha.herdadoDe?.relatorioId) {
+            const rel = estado.relatorios.find(r => r.id === ficha.herdadoDe.relatorioId);
+            if (rel) ficha.anterior = { assumindo: rel.dados?.equipes?.assumindo || '', kmFinal: rel.dados?.vtr?.kmFinal ?? null, turno: rel.dados?.turno || '', data: rel.dados?.data || '' };
+        }
+        if (ficha.equipes && !ficha.equipes.modo) {
+            const sai = (ficha.equipes.saindo || '').trim(), ass = (ficha.equipes.assumindo || '').trim();
+            ficha.equipes = { modo: /conforme/i.test(sai + ass) || (!sai && !ass) ? 'ESCALA' : 'NOMES', saindo: sai, assumindo: ass, saindoLista: R.separarNomes(sai), assumindoLista: R.separarNomes(ass) };
+        }
         if (Array.isArray(ficha.avisos)) {
             for (const av of ficha.avisos) {
                 if (!(av.titulo || av.texto)) continue;
@@ -110,6 +120,9 @@ async function carregar() {
     }
     estado.ficha = ficha || R.fichaVazia(estado.config);
     estado.versao = estado.ficha.versao || 0;
+    for (const r of [...(estado.relatorios || [])].reverse()) {
+        await arquivarRelatorio({ texto: r.texto, autor: r.autor, origem: r.manual ? 'colado' : 'grupo', grupoNome: r.grupoNome, mensagemTs: r.mensagemTs, silencioso: true });
+    }
 
     if (migrou || !cfg) {
         await Promise.all([
@@ -175,6 +188,13 @@ async function assumirPlantao(usuario) {
         await store.set('escala', estado.escala);
     }
     await store.set('plantao', estado.plantao);
+    const eq = equipeDoUsuario(usuario);
+    if (eq && estado.ficha.equipes?.modo !== 'MANUAL') {
+        await alterarFicha(f => {
+            f.equipes = { ...(f.equipes || {}), modo: 'EQUIPES', saindoEquipeId: eq.id, saindoLista: [...eq.membros], saindo: R.juntarNomes(eq.membros) };
+            if (/conforme/i.test(f.equipes.assumindo || '')) Object.assign(f.equipes, { assumindo: '', assumindoLista: [], assumindoEquipeId: null });
+        });
+    }
     auditar(usuario, 'Assumiu o plantão', `${estado.ficha.turno} ${estado.ficha.data}`);
     if (handlers.plantaoMudou) handlers.plantaoMudou(usuario.id);
     return estado.plantao;
@@ -198,6 +218,178 @@ async function salvarFicha(ficha, versaoCliente, { substituir = false } = {}) {
 }
 
 // Alteração feita pelo próprio sistema (robô)
+// =====================================================================
+// Equipes (cadastro) · equipe saindo = equipe do líder de plantão
+// =====================================================================
+function equipeDoUsuario(u) {
+    if (!u) return null;
+    const nome = semAcento(R.nomeProprio(u.nome || '')).toLowerCase();
+    return estado.equipes.find(e => (e.lideres || []).includes(u.id))
+        || estado.equipes.find(e => (e.membros || []).some(m => semAcento(m).toLowerCase() === nome)) || null;
+}
+async function salvarEquipe(dados, usuario) {
+    const nome = String(dados.nome || '').trim();
+    if (!nome) throw erro('Dê um nome para a equipe.');
+    const membros = [...new Set((dados.membros || []).map(R.nomeProprio).filter(n => n.length >= 2))];
+    if (!membros.length) throw erro('Inclua pelo menos um integrante.');
+    const lideres = (dados.lideres || []).filter(id => usuarios.porId(id));
+    let eq = dados.id ? estado.equipes.find(e => e.id === dados.id) : null;
+    if (dados.id && !eq) throw erro('Equipe não encontrada.', 404);
+    // um líder pertence a uma equipe só
+    for (const e of estado.equipes) if (e !== eq) e.lideres = (e.lideres || []).filter(id => !lideres.includes(id));
+    if (!eq) { eq = { id: novoId(), criadoEm: agora().iso }; estado.equipes.push(eq); }
+    Object.assign(eq, { nome, cor: dados.cor || eq.cor || 'azul', membros, lideres });
+    await store.set('equipes', estado.equipes);
+    auditar(usuario, 'Salvou equipe', `${nome}: ${membros.join(', ')}`);
+    return eq;
+}
+async function excluirEquipe(id, usuario) {
+    const eq = estado.equipes.find(e => e.id === id);
+    if (!eq) throw erro('Equipe não encontrada.', 404);
+    estado.equipes = estado.equipes.filter(e => e.id !== id);
+    await store.set('equipes', estado.equipes);
+    auditar(usuario, 'Excluiu equipe', eq.nome);
+}
+
+// =====================================================================
+// Histórico completo de relatórios (todos, por data e turno)
+// =====================================================================
+function hashTexto(t) {
+    const { crc32 } = require('./xlsx');
+    return crc32(Buffer.from(semAcento(t || '').replace(/\s+/g, ' ').trim(), 'utf-8')).toString(16).padStart(8, '0');
+}
+async function arquivarRelatorio({ texto, autor = '', origem = 'grupo', grupoNome = '', mensagemTs = Date.now(), silencioso = false }) {
+    if (!texto || !R.ehRelatorioDeTurno(texto)) return { novo: false, rel: null };
+    const d = R.lerRelatorio(texto).dados;
+    const chave = chaveTurno(d.data, d.turno) || '0000-00-00-9';
+    const id = `${chave}_${hashTexto(texto)}`;
+    const existente = estado.historico.find(h => h.id === id);
+    if (existente) {
+        // um relatório publicado por nós tem prioridade de origem
+        if (origem === 'publicado' && existente.origem !== 'publicado') { existente.origem = 'publicado'; await store.salvarRelatorio(existente); }
+        return { novo: false, rel: existente };
+    }
+    const rel = {
+        id, chave, turno: d.turno || '', data: d.data || '', autor: autor || '', origem, grupoNome: grupoNome || '',
+        mensagemTs: mensagemTs || Date.now(), capturadoEm: agora().iso, texto
+    };
+    estado.historico.push(rel);
+    await store.salvarRelatorio(rel);
+    if (!silencioso) console.log(`🗂️  [HISTÓRICO] ${origem} • ${rel.turno} ${rel.data}`);
+    return { novo: true, rel };
+}
+function historicoOrdenado() {
+    return [...estado.historico].sort((a, b) => (b.chave || '').localeCompare(a.chave || '') || (b.mensagemTs || 0) - (a.mensagemTs || 0));
+}
+async function importarMensagens(mensagens, usuario) {
+    let novos = 0, repetidos = 0, ignorados = 0;
+    for (const m of (mensagens || []).slice(0, 5000)) {
+        if (!m?.texto || !R.ehRelatorioDeTurno(m.texto)) { ignorados++; continue; }
+        const r = await arquivarRelatorio({ texto: m.texto, autor: m.autor, origem: 'importado', mensagemTs: m.ts, silencioso: true });
+        if (r.novo) novos++; else repetidos++;
+    }
+    auditar(usuario, 'Importou relatórios do WhatsApp', `${novos} novos, ${repetidos} repetidos`);
+    return { novos, repetidos, ignorados, total: estado.historico.length };
+}
+async function herdarDoHistorico(id, usuario) {
+    const h = estado.historico.find(x => x.id === id);
+    if (!h) throw erro('Relatório não encontrado.', 404);
+    const rel = await registrarRelatorio({ texto: h.texto, autor: h.autor, manual: true }, usuario);
+    return herdar(rel.id, usuario);
+}
+
+// =====================================================================
+// Publicação: guarda no histórico e prepara o próximo turno
+// =====================================================================
+async function aposPublicar(texto, usuario, { passarOps = [] } = {}) {
+    const { rel } = await arquivarRelatorio({ texto, autor: usuario.nome, origem: 'publicado' });
+    const f = estado.ficha;
+    const ops = operacoesDaFicha(f.id);
+    await arquivarFichaAtual();
+
+    const prox = R.proximoTurno(f.turno, f.data);
+    const nova = R.fichaVazia(estado.config);
+    nova.turno = prox.turno; nova.data = prox.data;
+    const km = f.vtr?.kmFinal ?? f.vtr?.kmInicial ?? null;
+    nova.vtr = { modelo: f.vtr?.modelo || nova.vtr.modelo, placa: f.vtr?.placa || nova.vtr.placa, kmInicial: km, kmFinal: km };
+    nova.sistemas = { ...nova.sistemas, cftv: f.sistemas?.cftv || '', ca: f.sistemas?.ca || '✓ S/A' };
+    // navios continuam; as linhas das operações deste turno não se repetem
+    const linhasOps = new Set(ops.map(o => o.linhaNavio?.linha).filter(Boolean));
+    const copiar = lista => (lista || []).map(n => ({ ...n, id: novoId(), linhas: (n.linhas || []).filter(l => !linhasOps.has(l)) })).filter(n => n.linhas.length);
+    nova.navios = { tore: copiar(f.navios?.tore), toil: copiar(f.navios?.toil) };
+    // quem assumiu agora sai no próximo
+    const lista = f.equipes?.assumindoLista?.length ? f.equipes.assumindoLista : R.separarNomes(f.equipes?.assumindo);
+    nova.equipes = lista.length
+        ? { modo: 'EQUIPES', saindo: R.juntarNomes(lista), saindoLista: [...lista], saindoEquipeId: f.equipes?.assumindoEquipeId || null, assumindo: '', assumindoLista: [], assumindoEquipeId: null }
+        : { modo: 'ESCALA', saindo: 'Conforme escala', assumindo: 'Conforme escala', saindoLista: [], assumindoLista: [] };
+    nova.anterior = { assumindo: f.equipes?.assumindo || '', kmFinal: km, turno: f.turno, data: f.data };
+    nova.herdadoDe = { publicado: true, relatorioId: rel?.id || null, autor: usuario.nome, data: f.data, turno: f.turno, capturadoEm: agora().iso, encontrados: [], faltando: [] };
+
+    // operações sem saída que o líder decidiu passar adiante
+    let passadas = 0;
+    for (const o of ops) {
+        if (o.horaFinal || !passarOps.includes(o.id)) continue;
+        o.fichaId = nova.id;
+        o.linhaNavio = null;
+        if (o.navio && o.terminal) {
+            o.linhaNavio = { terminal: o.terminal, navio: o.navio, linha: R.resumoNavio(o) };
+            R.trocarLinhaNavio(nova, null, o.linhaNavio);
+        }
+        passadas++;
+    }
+    await salvarOperacoes();
+    estado.plantao.relatorioPendenteId = null;
+    await store.set('plantao', estado.plantao);
+    auditar(usuario, 'Preparou o próximo turno', `${nova.turno} ${nova.data}${passadas ? ` · ${passadas} operação(ões) em andamento` : ''}`);
+    return salvarFicha(nova, undefined, { substituir: true });
+}
+
+// Navios conhecidos = cadastro + navios que já estão na seção 6 do turno
+function naviosConhecidos() {
+    const lista = [...(estado.config.navios || [])];
+    const f = estado.ficha || {};
+    for (const [k, term] of [['tore', 'T-ORE'], ['toil', 'T-OIL']]) {
+        for (const n of f.navios?.[k] || []) {
+            if (n.navio && !lista.some(x => R.chaveNavio(x.nome) === R.chaveNavio(n.navio))) lista.push({ nome: n.navio, terminal: term });
+        }
+    }
+    return lista;
+}
+
+// ---- Equipes (seção 8): lista de nomes para os botões
+function nomesDaEquipe() {
+    const cfg = estado.config;
+    const ocultos = new Set((cfg.equipeOcultos || []).map(n => semAcento(n).toLowerCase()));
+    const mapa = new Map();
+    const add = n => { const nome = R.nomeProprio(n); const k = semAcento(nome).toLowerCase(); if (nome.length >= 2 && !ocultos.has(k) && !mapa.has(k)) mapa.set(k, nome); };
+    (cfg.equipe || []).forEach(add);
+    for (const e of estado.equipes || []) (e.membros || []).forEach(add);
+    const f = estado.ficha || {};
+    [f.equipes?.saindo, f.equipes?.assumindo, f.anterior?.assumindo].forEach(t => R.separarNomes(t).forEach(add));
+    for (const r of estado.relatorios || []) [r.dados?.equipes?.saindo, r.dados?.equipes?.assumindo].forEach(t => R.separarNomes(t).forEach(add));
+    return [...mapa.values()].sort((a, b) => a.localeCompare(b, 'pt-BR'));
+}
+async function adicionarNomeEquipe(nome, usuario) {
+    const n = R.nomeProprio(nome);
+    if (n.length < 2) throw erro('Informe o nome.');
+    const k = semAcento(n).toLowerCase();
+    const cfg = estado.config;
+    cfg.equipe = [...(cfg.equipe || []).filter(x => semAcento(x).toLowerCase() !== k), n];
+    cfg.equipeOcultos = (cfg.equipeOcultos || []).filter(x => semAcento(x).toLowerCase() !== k);
+    await store.set('config', cfg);
+    auditar(usuario, 'Adicionou nome à equipe', n);
+    return nomesDaEquipe();
+}
+async function removerNomeEquipe(nome, usuario) {
+    const k = semAcento(R.nomeProprio(nome)).toLowerCase();
+    const cfg = estado.config;
+    cfg.equipe = (cfg.equipe || []).filter(x => semAcento(x).toLowerCase() !== k);
+    cfg.equipeOcultos = [...new Set([...(cfg.equipeOcultos || []), R.nomeProprio(nome)])];
+    await store.set('config', cfg);
+    auditar(usuario, 'Removeu nome da lista da equipe', nome);
+    return nomesDaEquipe();
+}
+
 async function alterarFicha(fn) {
     const copia = JSON.parse(JSON.stringify(estado.ficha));
     fn(copia);
@@ -253,6 +445,7 @@ async function novaFichaEmBranco(usuario) {
     const nova = R.fichaVazia(estado.config);
     nova.vtr.kmInicial = nova.vtr.kmFinal = estado.ficha?.vtr?.kmFinal ?? null;
     nova.navios = JSON.parse(JSON.stringify(estado.ficha?.navios || { tore: [], toil: [] }));
+    nova.anterior = { assumindo: estado.ficha?.equipes?.assumindo || '', kmFinal: estado.ficha?.vtr?.kmFinal ?? null, turno: estado.ficha?.turno || '', data: estado.ficha?.data || '' };
     auditar(usuario, 'Começou turno em branco');
     return salvarFicha(nova, undefined, { substituir: true });
 }
@@ -290,6 +483,7 @@ async function registrarRelatorio({ texto, autor, grupoNome, chatId, manual = fa
     };
     estado.relatorios.unshift(rel);
     estado.relatorios.sort((a, b) => (b.mensagemTs || 0) - (a.mensagemTs || 0));
+    await arquivarRelatorio({ texto, autor, origem: manual ? 'colado' : 'grupo', grupoNome, mensagemTs });
     estado.relatorios = estado.relatorios.slice(0, LIMITE_RELATORIOS);
     await store.set('relatorios_us', estado.relatorios);
     console.log(`📑 [RELATÓRIO] ${manual ? 'Colado' : 'Capturado de ' + autor} • ${lido.dados.turno || '?'} ${lido.dados.data || '?'} • faltando: ${lido.faltando.join(', ') || 'nada'}`);
@@ -305,6 +499,9 @@ async function decidirHeranca(rel) {
     const kFicha = chaveTurno(f.data, f.turno);
     // Só troca sozinho se o turno atual está intocado ou se o relatório é de um turno MAIS NOVO que o atual.
     // Correções/repostagens do relatório já herdado nunca apagam o turno em andamento: o robô pergunta.
+    const ant = R.turnoAnterior(f.turno, f.data);
+    const kAnterior = chaveTurno(ant.data, ant.turno);
+    if (kRel && kAnterior && kRel < kAnterior) return; // relatório antigo: só fica no histórico
     const seguro = !fichaTocada(f) || (kRel && kFicha && kRel > kFicha);
     if (seguro) {
         await herdar(rel.id, null);
@@ -506,20 +703,37 @@ async function registrarOperacoes(rascunhos, { atividadeTexto = '', entradaId = 
     const ficha = estado.ficha;
     const novas = rascunhos.map(r => {
         const o = limparOperacao({ autoridades: '', autorizadoTerminal: '', observacoes: '', status: 'Sem alteração', ...r });
-        if (!o.terminal && o.navio) o.terminal = R.terminalDoNavio(o.navio, estado.config.navios);
+        if (o.navio) {
+            const conhecido = R.acharNavio(o.navio, naviosConhecidos());
+            o.navio = conhecido ? conhecido.nome : R.nomeNavioLimpo(o.navio);
+            if (!o.terminal && conhecido) o.terminal = conhecido.terminal;
+        }
+        if (!o.autoridades) o.autoridades = (R.TIPOS_OPERACAO[o.tipo] || R.TIPOS_OPERACAO.OUTRA).autoridade;
         return { id: novoId(), ...o, data: ficha.data, fichaId: ficha.id, criadoEm: t.iso, criadoPor: quem(usuario), origem: { entradaId, autor }, email: {} };
     });
     estado.operacoes.push(...novas);
     const atividadeId = atividadeTexto ? novoId() : null;
     await alterarFicha(f => {
         if (atividadeTexto) f.atividades.push({ id: atividadeId, texto: atividadeTexto, opIds: novas.map(o => o.id) });
-        for (const o of novas) if (o.navio && o.terminal) R.adicionarLinhaNavio(f, o.terminal, o.navio, R.resumoNavio(o));
+        for (const o of novas) {
+            if (!o.navio || !o.terminal) continue;
+            o.linhaNavio = { terminal: o.terminal, navio: o.navio, linha: R.resumoNavio(o) };
+            R.trocarLinhaNavio(f, null, o.linhaNavio);
+        }
     });
     for (const o of novas) o.atividadeId = atividadeId;
     await salvarOperacoes();
     auditar(usuario, usuario ? 'Registrou operação de bordo' : 'Registrou operação automaticamente', novas.map(o => `${R.TIPOS_OPERACAO[o.tipo]?.rotulo} · ${o.navio}`).join(' | '));
     for (const o of novas) if (o.horaFinal) enviarEmailOperacao(o, { usuario }).catch(() => {});
     return novas;
+}
+
+// Atualiza (no lugar) a linha da operação dentro do navio, na seção 6 do turno em que ela foi registrada
+function linhaDoNavio(f, o, remover = false) {
+    if (o.fichaId && f.id && o.fichaId !== f.id) return;
+    const depois = remover || !o.navio || !o.terminal ? null : { terminal: o.terminal, navio: o.navio, linha: R.resumoNavio(o) };
+    R.trocarLinhaNavio(f, o.linhaNavio, depois);
+    o.linhaNavio = depois;
 }
 
 async function registrarSaida(id, hora, usuario = null) {
@@ -530,6 +744,7 @@ async function registrarSaida(id, hora, usuario = null) {
         const a = f.atividades.find(x => (x.opIds || []).includes(o.id)) ||
             [...f.atividades].reverse().find(x => placa && x.texto.toUpperCase().replace(/-/g, '').includes(placa));
         if (a && !/sa[ií]da [àa]s/i.test(a.texto)) a.texto = `${a.texto.trim()} Saída às ${o.horaFinal}h.`;
+        linhaDoNavio(f, o);
     });
     await salvarOperacoes();
     auditar(usuario, usuario ? 'Registrou saída de veículo' : 'Registrou saída automaticamente', `${o.navio} · ${o.placa || ''} · ${o.horaFinal}`);
@@ -541,6 +756,11 @@ async function atualizarOperacao(id, dados, usuario) {
     const o = operacao(id);
     const tinhaSaida = !!o.horaFinal;
     Object.assign(o, limparOperacao(dados));
+    if (o.navio) {
+        const conhecido = R.acharNavio(o.navio, naviosConhecidos());
+        o.navio = conhecido ? conhecido.nome : R.nomeNavioLimpo(o.navio);
+    }
+    await alterarFicha(f => linhaDoNavio(f, o));
     await salvarOperacoes();
     auditar(usuario, 'Editou operação de bordo', `${o.navio} · ${R.TIPOS_OPERACAO[o.tipo]?.rotulo}`);
     if (!tinhaSaida && o.horaFinal) enviarEmailOperacao(o, { usuario }).catch(() => {});
@@ -550,6 +770,7 @@ async function atualizarOperacao(id, dados, usuario) {
 async function excluirOperacao(id, usuario) {
     const o = operacao(id);
     estado.operacoes = estado.operacoes.filter(x => x.id !== id);
+    if (o.linhaNavio) await alterarFicha(f => linhaDoNavio(f, o, true));
     await salvarOperacoes();
     auditar(usuario, 'Excluiu operação de bordo', `${o.navio} · ${R.TIPOS_OPERACAO[o.tipo]?.rotulo}`);
 }
@@ -574,17 +795,20 @@ async function receberMensagem(msg) {
 
     if (R.ehRelatorioDeTurno(msg.texto)) {
         const lido = R.lerRelatorio(msg.texto);
-        if (ehNossoRelatorio(msg.texto, lido, msg)) return;
+        if (ehNossoRelatorio(msg.texto, lido, msg)) {
+            await arquivarRelatorio({ texto: msg.texto, autor: msg.autor, origem: 'publicado', grupoNome: msg.grupoNome, mensagemTs: msg.timestamp });
+            return;
+        }
         return registrarRelatorio({ texto: msg.texto, autor: msg.autor, grupoNome: msg.grupoNome, chatId: msg.chatId, mensagemTs: msg.timestamp });
     }
 
     const t = agora(new Date(msg.timestamp || Date.now()));
-    const c = R.classificarMensagem(msg.texto, estado.config.navios, t.hora);
+    const c = R.classificarMensagem(msg.texto, naviosConhecidos(), t.hora);
 
     if (msg.editaId) {
         const original = estado.entrada.find(e => e.id === msg.editaId);
         if (original) {
-            Object.assign(original, { texto: msg.texto.trim(), editado: true, campos: c.campos, urgente: c.urgente, rascunhos: c.rascunhos });
+            Object.assign(original, { texto: msg.texto.trim(), editado: true, campos: c.campos, urgente: c.urgente, rascunhos: c.rascunhos, atividade: c.atividade || '' });
             if (original.status !== 'usado') { original.sugestao = c.sugestao; original.status = c.ruido ? 'ignorado' : 'pendente'; }
             salvarEntradaDepois();
             return;
@@ -595,7 +819,7 @@ async function receberMensagem(msg) {
         id: msg.id, chatId: msg.chatId, grupoNome: msg.grupoNome || '', autor: msg.autor || '',
         texto: msg.texto.trim(), ts: msg.timestamp || Date.now(), data: t.data, hora: t.hora,
         fromMe: !!msg.fromMe, sugestao: c.sugestao, urgente: c.urgente, campos: c.campos,
-        rascunhos: c.rascunhos, estruturada: c.estruturada,
+        rascunhos: c.rascunhos, estruturada: c.estruturada, atividade: c.atividade || '',
         status: c.ruido ? 'ignorado' : 'pendente', destino: null
     };
     estado.entrada.push(item);
@@ -643,7 +867,8 @@ async function processarAutomatico(item) {
             }
         }
         if (criar.length) {
-            await registrarOperacoes(criar, { atividadeTexto: R.atividadeDasOperacoes(criar, item.hora), entradaId: item.id, autor: item.autor });
+            const novas = await registrarOperacoes(criar, { atividadeTexto: R.atividadeDasOperacoes(criar, item.hora), entradaId: item.id, autor: item.autor });
+            item.opIds = [...(item.opIds || []), ...novas.map(o => o.id)];
         }
         if (criar.length || saidas) {
             item.status = 'usado';
@@ -772,9 +997,10 @@ function textoPassagem({ negrito = true } = {}) {
 
 module.exports = {
     estado, carregar, aoAlerta, aoMudarPlantao, aoPrecisarMinutaWhatsapp, auditar, minutasPendentes,
-    salvarConfig, liderDePlantao, assumirPlantao,
+    salvarConfig, liderDePlantao, assumirPlantao, nomesDaEquipe, adicionarNomeEquipe, removerNomeEquipe,
     salvarFicha, herdar, novaFichaEmBranco, marcarPublicado, textoRelatorio, conferencia, avisosAbertos, operacoesDaFicha,
-    registrarRelatorio, dispensarRelatorioPendente,
+    registrarRelatorio, dispensarRelatorioPendente, aposPublicar, equipeDoUsuario, salvarEquipe, excluirEquipe,
+    arquivarRelatorio, historicoOrdenado, importarMensagens, herdarDoHistorico,
     criarPendencia, atualizarPendencia, editarPendencia, concluirPendencia, reabrirPendencia, excluirPendencia,
     registrarOperacoes, registrarSaida, atualizarOperacao, excluirOperacao, enviarEmailOperacao, marcarEmailOperacao, destinatarioEmail,
     receberMensagem, atualizarItemEntrada,

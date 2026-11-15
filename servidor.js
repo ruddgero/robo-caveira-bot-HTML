@@ -14,6 +14,7 @@ const email = require('./email');
 const store = require('./store');
 const R = require('./relatorio');
 const { agora } = require('./util');
+const { gerarXlsx } = require('./xlsx');
 
 // Arquivos da tela: SÓ estes podem ser entregues ao navegador
 const PASTA_PUBLICA = __dirname;
@@ -128,6 +129,7 @@ function marcas() {
         pendencias: `${e.pendencias.length}:${e.pendencias.reduce((s, p) => s + (p.historico?.length || 0), 0)}:${e.pendencias.filter(p => p.status === 'ABERTA').length}`,
         operacoes: `${e.operacoes.length}:${e.operacoes.filter(o => o.horaFinal).length}:${e.operacoes.filter(o => o.email?.enviadoEm || o.email?.erro).length}`,
         relatorios: `${e.relatorios[0]?.id || ''}:${e.relatorios[0]?.herdadoEm || ''}:${e.plantao.relatorioPendenteId || ''}`,
+        historico: e.historico.length,
         plantao: `${e.plantao.liderId || ''}:${e.plantao.sugerirNovaEscala ? 1 : 0}:${e.escala?.id || ''}`
     };
 }
@@ -182,7 +184,7 @@ rota('GET', '/api/meta', async () => ({
     tipos: Object.fromEntries(Object.entries(R.TIPOS_OPERACAO).map(([k, v]) => [k, { rotulo: v.rotulo, autoridade: v.autoridade }])),
     movimentos: R.MOVIMENTOS, perfis: usuarios.ROTULO_PERFIL,
     email: { ativo: email.configurado(), motivo: email.motivoIndisponivel() },
-    whatsappMax: whatsapp.MAX_ATIVAS, armazenamento: store.modo
+    whatsappMax: whatsapp.MAX_ATIVAS, armazenamento: store.modo, versao: require('./package.json').version
 }));
 
 // --- Estado geral (consultado a cada poucos segundos)
@@ -264,8 +266,59 @@ rota('POST', '/api/ficha/publicar', async (req, res, { corpo, u }) => {
         await whatsapp.enviarDocumento(u.id, cfg.grupoPublicacao, nucleo.textoRelatorio({ negrito: false }), `Relatorio_Turno_${f.turno}_${f.data.replace(/\//g, '-')}.txt`, '📄 Arquivo do relatório');
     }
     await nucleo.marcarPublicado(texto, u);
-    return { ok: true, publicadoEm: nucleo.estado.ficha.publicadoEm };
+    const publicadoEm = nucleo.estado.ficha.publicadoEm;
+    const passarOps = Array.isArray(corpo.passarOps) ? corpo.passarOps.map(String) : [];
+    const nova = await nucleo.aposPublicar(texto, u, { passarOps });
+    return { ok: true, publicadoEm, proximo: { turno: nova.ficha?.turno || nucleo.estado.ficha.turno, data: nucleo.estado.ficha.data } };
 }, { perfis: LIDERES });
+
+// --- Exportação em Excel
+const XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+const nomeArquivo = (pre, turno, data) => `${pre}_${turno || 'TURNO'}_${(data || '').replace(/\//g, '-')}.xlsx`;
+function abaOperacoes(ops) {
+    return {
+        nome: 'Operações de bordo', cabecalho: true, larguras: [22, 24, 10, 22, 22, 22, 12, 10, 10, 18],
+        linhas: [['Tipo', 'Navio', 'Terminal', 'Empresa', 'Motorista/Agente', 'Ajudante(s)', 'Placa', 'Entrada', 'Saída', 'E-mail'],
+            ...ops.map(o => [R.TIPOS_OPERACAO[o.tipo]?.rotulo || o.tipo, o.navio, o.terminal, o.empresa, o.responsavel, o.ajudante, o.placa,
+                o.horaInicial || '', o.horaFinal || 'sem saída', o.email?.encaminhadoEm ? 'Encaminhado' : o.email?.status === 'ENVIADO' ? 'Enviado ao líder' : 'Pendente'])]
+    };
+}
+rota('GET', '/api/ficha/xlsx', async () => {
+    const f = nucleo.estado.ficha;
+    const abas = [{ nome: 'Relatório', larguras: [36, 100], linhas: R.linhasExcel(nucleo.textoRelatorio({ negrito: false })) }];
+    const ops = nucleo.operacoesDaFicha(f.id);
+    if (ops.length) abas.push(abaOperacoes(ops));
+    return { __arquivo: true, tipo: XLSX, nome: nomeArquivo('Relatorio', f.turno, f.data), dados: gerarXlsx(abas) };
+});
+
+// --- Histórico completo de relatórios
+const metaHist = h => ({ id: h.id, chave: h.chave, turno: h.turno, data: h.data, autor: h.autor, origem: h.origem, grupoNome: h.grupoNome, mensagemTs: h.mensagemTs });
+rota('GET', '/api/relatorios-hist', async () => ({ relatorios: nucleo.historicoOrdenado().map(metaHist) }));
+rota('GET', '/api/relatorios-hist/:id', async (req, res, { params }) => {
+    const h = nucleo.estado.historico.find(x => x.id === params.id);
+    if (!h) throw erro('Relatório não encontrado.', 404);
+    return { relatorio: { ...metaHist(h), texto: h.texto } };
+});
+rota('GET', '/api/relatorios-hist/:id/xlsx', async (req, res, { params }) => {
+    const h = nucleo.estado.historico.find(x => x.id === params.id);
+    if (!h) throw erro('Relatório não encontrado.', 404);
+    return { __arquivo: true, tipo: XLSX, nome: nomeArquivo('Relatorio', h.turno, h.data), dados: gerarXlsx([{ nome: 'Relatório', larguras: [36, 100], linhas: R.linhasExcel(h.texto) }]) };
+});
+rota('POST', '/api/relatorios-hist/:id/herdar', async (req, res, { params, u }) => ({ ficha: await nucleo.herdarDoHistorico(params.id, u) }), { perfis: LIDERES });
+rota('POST', '/api/relatorios-hist/importar', async (req, res, { corpo, u }) => nucleo.importarMensagens(corpo.mensagens, u), { perfis: LIDERES });
+
+// --- Equipes
+rota('GET', '/api/equipes', async () => ({
+    equipes: nucleo.estado.equipes,
+    lideres: usuarios.todos().filter(x => x.ativo && usuarios.podeLiderar(x)).map(x => ({ id: x.id, nome: x.nome }))
+}));
+rota('POST', '/api/equipes', async (req, res, { corpo, u }) => ({ equipe: await nucleo.salvarEquipe(corpo, u) }), { perfis: LIDERES });
+rota('POST', '/api/equipes/:id/excluir', async (req, res, { params, u }) => { await nucleo.excluirEquipe(params.id, u); return { ok: true }; }, { perfis: LIDERES });
+
+// --- Nomes da equipe (botões da seção 8)
+rota('GET', '/api/equipe', async () => ({ nomes: nucleo.nomesDaEquipe() }));
+rota('POST', '/api/equipe', async (req, res, { corpo, u }) => ({ nomes: await nucleo.adicionarNomeEquipe(corpo.nome, u) }));
+rota('POST', '/api/equipe/remover', async (req, res, { corpo, u }) => ({ nomes: await nucleo.removerNomeEquipe(corpo.nome, u) }), { perfis: LIDERES });
 
 // --- Relatórios da equipe anterior
 rota('GET', '/api/relatorios', async () => ({ relatorios: nucleo.estado.relatorios.map(resumoRelatorio) }));
@@ -298,6 +351,12 @@ rota('POST', '/api/operacoes', async (req, res, { corpo, u }) => {
     const ops = await nucleo.registrarOperacoes(corpo.operacoes, { atividadeTexto: corpo.atividadeTexto || '', entradaId: corpo.entradaId || null, autor: corpo.autor || '', usuario: u });
     if (corpo.entradaId) await nucleo.atualizarItemEntrada(corpo.entradaId, { status: 'usado', destino: ops.length > 1 ? `${ops.length} operações de bordo` : 'Operação de bordo' }).catch(() => {});
     return { operacoes: ops.map(operacaoParaTela) };
+});
+// Minuta a partir dos dados do formulário (para copiar antes mesmo de registrar)
+rota('POST', '/api/operacoes/minuta', async (req, res, { corpo }) => {
+    const o = { ...(corpo || {}) };
+    if (o.navio) o.navio = String(o.navio).split('\n')[0].trim().toUpperCase();
+    return R.minutaEmail(o);
 });
 rota('PUT', '/api/operacoes/:id', async (req, res, { corpo, params, u }) => ({ operacao: operacaoParaTela(await nucleo.atualizarOperacao(params.id, corpo, u)) }));
 rota('POST', '/api/operacoes/:id/saida', async (req, res, { corpo, params, u }) => {
@@ -433,6 +492,13 @@ async function tratar(req, res) {
         const corpo = req.method === 'GET' ? {} : await lerCorpo(req);
         const saida = await r.fn(req, res, { corpo, params, u });
         if (Array.isArray(saida)) return enviarJson(res, saida[0], saida[1]);
+        if (saida && saida.__arquivo) {
+            res.writeHead(200, {
+                'Content-Type': saida.tipo, 'Content-Length': saida.dados.length, 'Cache-Control': 'no-store',
+                'Content-Disposition': `attachment; filename="${saida.nome.replace(/[^\w.\-]/g, '_')}"`
+            });
+            return res.end(saida.dados);
+        }
         return enviarJson(res, 200, saida);
     } catch (e) {
         const st = e.status || 500;

@@ -78,8 +78,41 @@ async function listarHistorico(limite = 30) {
         .map(({ n }) => ({ id: n.replace('.json', ''), ficha: JSON.parse(fs.readFileSync(path.join(pasta, n), 'utf-8')) }));
 }
 
+// Histórico completo de relatórios (um documento por relatório, sem limite)
+const COLECAO_REL = 'caveira_relatorios';
+async function salvarRelatorio(rel) {
+    if (db) {
+        await db.collection(COLECAO_REL).doc(rel.id).set({ json: JSON.stringify(rel), chave: rel.chave || '', criadoEm: rel.capturadoEm || new Date().toISOString() });
+        return;
+    }
+    const pasta = path.join(PASTA_DADOS, 'relatorios');
+    if (!fs.existsSync(pasta)) fs.mkdirSync(pasta, { recursive: true });
+    fs.writeFileSync(path.join(pasta, rel.id.replace(/[^a-z0-9_\-]/gi, '_') + '.json'), JSON.stringify(rel), 'utf-8');
+}
+
+async function listarRelatorios() {
+    try {
+        if (db) {
+            const snap = await db.collection(COLECAO_REL).get();
+            return snap.docs.map(d => JSON.parse(d.data().json));
+        }
+        const pasta = path.join(PASTA_DADOS, 'relatorios');
+        if (!fs.existsSync(pasta)) return [];
+        return fs.readdirSync(pasta).filter(n => n.endsWith('.json')).map(n => JSON.parse(fs.readFileSync(path.join(pasta, n), 'utf-8')));
+    } catch (e) {
+        console.error('⚠️  [DADOS] Erro ao listar relatórios:', e.message);
+        return [];
+    }
+}
+
+async function excluirRelatorio(id) {
+    if (db) return db.collection(COLECAO_REL).doc(id).delete();
+    const f = path.join(PASTA_DADOS, 'relatorios', id.replace(/[^a-z0-9_\-]/gi, '_') + '.json');
+    if (fs.existsSync(f)) fs.unlinkSync(f);
+}
+
 module.exports = {
-    iniciar, get, set, arquivarTurno, listarHistorico,
+    iniciar, get, set, arquivarTurno, listarHistorico, salvarRelatorio, listarRelatorios, excluirRelatorio,
     get db() { return db; },
     get modo() { return modo; },
     PASTA_DADOS

@@ -88,7 +88,22 @@ assert.strictEqual(o1.horaFinal, '19:01');
 const ativ = R.atividadeDasOperacoes(c.rascunhos, '19:02');
 console.log('Atividade gerada:', ativ);
 assert.ok(ativ.includes('BARCELONA SPIRIT e NISSOS NIKOURIA') && ativ.includes('Saída às 19:01h.'));
-assert.strictEqual(R.resumoNavio(o1), 'Fornecimento de Rancho.');
+assert.ok(R.resumoNavio(o1).includes('placa RJG-9D19') && R.resumoNavio(o1).endsWith('Saída às 19:01h.'));
+
+// Mensagem do print: prefixo MV, 2º ajudante na linha de baixo, autoridade preenchida
+const prov = R.classificarMensagem('*ENTREGA DE PROVISÃO*\nTipo: Rancho\nTerminal: T-ore\nNavio: MV - Lila Psara\nEmpresa: Boa praça\nMotorista: Fernando Maforte\nAjudante: Valmir Felipe\nMarcos Bruno\nVeículo: Caminhão\nPlaca: GXM8B67\nEntrada: 10:48 horas', R.NAVIOS_PADRAO, '10:50');
+const p0 = prov.rascunhos[0];
+assert.strictEqual(prov.sugestao, 'OPERACAO');
+assert.strictEqual(p0.navio, 'MV - LILA PSARA');
+assert.strictEqual(p0.ajudante, 'VALMIR FELIPE, MARCOS BRUNO');
+assert.strictEqual(p0.responsavel, 'FERNANDO MAFORTE');
+assert.strictEqual(p0.veiculo, 'CAMINHÃO');
+assert.strictEqual(p0.autoridades, 'Receita Federal');
+assert.strictEqual(p0.horaInicial, '10:48');
+assert.ok(prov.atividade.includes('ajudantes VALMIR FELIPE e MARCOS BRUNO'));
+assert.strictEqual(R.acharNavio('NISSOS NIKURIA')?.nome, 'NISSOS NIKOURIA');
+assert.strictEqual(R.acharNavio('M/V Barcelona spirit')?.nome, 'BARCELONA SPIRIT');
+assert.strictEqual(R.acharNavio('NAVIO QUALQUER'), null);
 
 const email = R.minutaEmail({ ...o1, data: '14/11/2026' });
 console.log('\n--- E-MAIL ---\nAssunto:', email.assunto, '\n' + email.corpo + '\n--------------');
@@ -106,7 +121,7 @@ assert.strictEqual(t1.tipo, 'TRIPULACAO');
 assert.strictEqual(t1.movimento, 'Desembarque');
 assert.strictEqual(t1.quantidade, '02');
 assert.strictEqual(t1.terminal, 'T-ORE');
-assert.strictEqual(R.resumoNavio(t1), 'Desembarque de 02 tripulantes.');
+assert.ok(R.resumoNavio(t1).startsWith('14:20h Desembarque de 02 tripulantes'));
 const et = R.minutaEmail({ ...t1, horaFinal: '15:00' });
 assert.ok(et.corpo.includes('Autorizado por (Autoridades): Polícia Federal'));
 assert.ok(et.assunto.startsWith('MOVIMENTAÇÃO DE TRIPULAÇÃO - MV - LILA PSARA - T-ORE'));
@@ -151,4 +166,10 @@ const pe = R.formatarPassagemEscala('11/11/2026 a 14/11/2026', { digital: [{ tex
 assert.ok(pe.includes('*1. PENDÊNCIAS DA DIGITAL (CFTV E INFRAESTRUTURA)*\n✓ Câmeras ausentes: Poste 38.'));
 assert.ok(pe.includes('*2. AVISOS E AÇÕES DE ACOMPANHAMENTO*\n✓ S/A'));
 
+// Seção 8: nomes e pipe
+assert.deepStrictEqual(R.separarNomes('Wallace Ferroport e Equipe US'), ['Wallace Ferroport', 'Equipe US']);
+assert.strictEqual(R.juntarNomes(['Gustavo Ramos', 'Ítalo']), 'Gustavo Ramos e Ítalo');
+assert.throws(() => R.lerEquipesComPipe('Gustavo e Ítalo'));
+assert.strictEqual(R.lerEquipesComPipe('Gustavo Ramos e Ítalo | Renan Neves e Ewerton').assumindo, 'Renan Neves e Ewerton');
+assert.ok(R.formatarRelatorio(R.fichaVazia(), []).includes('*8. PASSAGEM DE TURNO*\n\n*EQUIPE SAINDO:*\nConforme escala\n\n*EQUIPE ASSUMINDO:*\nConforme escala'));
 console.log('\n✅ Todos os testes passaram.');
