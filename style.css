@@ -76,7 +76,7 @@ main { max-width: 760px; margin: 0 auto; padding: 16px 16px calc(96px + env(safe
 
 /* ---------- Formulários ---------- */
 .campo { display: grid; gap: 5px; font-size: 13px; color: var(--mudo); }
-input[type=text], input[type=password], input[type=number], input[type=tel], input[type=search], select, textarea {
+input[type=text], input[type=email], input[type=password], input[type=number], input[type=tel], input[type=search], select, textarea {
   width: 100%; background: var(--fundo); border: 1px solid var(--borda); border-radius: 10px; padding: 10px 12px; color: var(--texto); outline: none; transition: border-color .15s;
 }
 textarea { resize: vertical; min-height: 44px; line-height: 1.4; }
@@ -285,3 +285,8 @@ main.largo { max-width: 1240px; }
 .equipe-btn.ativo { border-color: var(--primario); background: rgba(79, 124, 255, .15); }
 .equipe-btn small { color: var(--mudo); font-size: 12px; }
 .ponto-cor { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
+/* Preenchimento automático do navegador com as mesmas cores do campo */
+input:-webkit-autofill, input:-webkit-autofill:hover, input:-webkit-autofill:focus {
+  -webkit-box-shadow: 0 0 0 40px var(--fundo) inset; -webkit-text-fill-color: var(--texto); caret-color: var(--texto);
+  border: 1px solid var(--borda); transition: background-color 9999s ease-out;
+}
