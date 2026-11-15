@@ -259,6 +259,27 @@ function secaoDaLinha(linha) {
     return s ? s.chave : null;
 }
 
+// Versão tolerante para relatórios antigos (sem numeração das seções, títulos diferentes)
+const MARCAS_RELATORIO = [/EFETIVO/, /VIATURA|\bVTR\b|\bKM\b/, /SISTEMAS|CFTV|\bOCR\b/, /ATIVIDADES/, /AVISOS/, /NAVIO|MOVIMENTACAO/, /OCORRENCIA/, /PASSAGEM|EQUIPE (SAINDO|ASSUMINDO)/];
+function ehRelatorioFlexivel(texto) {
+    if (ehRelatorioDeTurno(texto)) return true;
+    if (!texto || texto.length < 200) return false;
+    const n = normalizar(texto);
+    const topo = String(texto).split('\n').slice(0, 6).map(normalizar).join(' ');
+    if (!/RELATORIO (DO |DE )?(TURNO|PLANTAO|SERVICO)|RELATORIO (DIURNO|NOTURNO)/.test(topo)) return false;
+    return MARCAS_RELATORIO.filter(re => re.test(n)).length >= 3;
+}
+function turnoDoTexto(texto) {
+    const topo = String(texto || '').split('\n').slice(0, 6).map(normalizar).join(' ');
+    return /NOTURNO/.test(topo) ? 'NOTURNO' : /DIURNO/.test(topo) ? 'DIURNO' : '';
+}
+function dataDoTexto(texto) {
+    const m = String(texto || '').split('\n').slice(0, 8).join(' ').match(/(\d{1,2})\/(\d{1,2})\/(\d{2,4})/);
+    if (!m) return '';
+    const a = m[3].length === 2 ? '20' + m[3] : m[3];
+    return `${m[1].padStart(2, '0')}/${m[2].padStart(2, '0')}/${a}`;
+}
+
 function ehRelatorioDeTurno(texto) {
     if (!texto || typeof texto !== 'string' || texto.length < 80) return false;
     const linhas = texto.split('\n').map(l => l.trim()).filter(Boolean);
@@ -830,6 +851,7 @@ function linhasExcel(texto) {
 }
 
 module.exports = {
+    ehRelatorioFlexivel, turnoDoTexto, dataDoTexto,
     proximoTurno, turnoAnterior, linhasExcel,
     ehMensagemDeSaida, TIPOS_OPERACAO, MOVIMENTOS, NAVIOS_PADRAO,
     fichaVazia, naviosDeTexto, adicionarLinhaNavio, ehRelatorioDeTurno, lerRelatorio, fichaHerdada,

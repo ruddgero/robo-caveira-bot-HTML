@@ -263,9 +263,25 @@ function hashTexto(t) {
 const PRIORIDADE_ORIGEM = { publicado: 4, grupo: 3, importado: 2, colado: 1 };
 function idHistorico(chave, texto) { return chave && !chave.startsWith('0000') ? chave : `sem-data_${hashTexto(texto)}`; }
 
-async function arquivarRelatorio({ texto, autor = '', origem = 'grupo', grupoNome = '', mensagemTs = Date.now(), silencioso = false }) {
-    if (!texto || !R.ehRelatorioDeTurno(texto)) return { novo: false, rel: null };
+// Data e turno de um relatório; se o texto não trouxer, deduz pelo horário em que foi postado
+// (postado antes do meio-dia = NOTURNO do dia anterior; depois = DIURNO do dia)
+function turnoDoRelatorio(texto, mensagemTs) {
     const d = R.lerRelatorio(texto).dados;
+    let data = d.data || R.dataDoTexto(texto);
+    let turno = d.turno || R.turnoDoTexto(texto);
+    if ((!data || !turno) && mensagemTs) {
+        const postado = agora(new Date(mensagemTs));
+        const cedo = postado.horaNum < 12;
+        if (!turno) turno = cedo ? 'NOTURNO' : 'DIURNO';
+        if (!data) data = cedo && turno === 'NOTURNO' ? dataDeOntemBR(postado.data) : postado.data;
+    }
+    return { data, turno };
+}
+function dataDeOntemBR(dataBR) { return R.turnoAnterior('DIURNO', dataBR).data; }
+
+async function arquivarRelatorio({ texto, autor = '', origem = 'grupo', grupoNome = '', mensagemTs = Date.now(), silencioso = false, flexivel = false }) {
+    if (!texto || !(flexivel ? R.ehRelatorioFlexivel(texto) : R.ehRelatorioDeTurno(texto))) return { novo: false, rel: null };
+    const d = turnoDoRelatorio(texto, flexivel ? mensagemTs : null);
     const chave = chaveTurno(d.data, d.turno) || '0000-00-00-9';
     const id = idHistorico(chave, texto);
     const hash = hashTexto(texto);
@@ -298,7 +314,7 @@ async function deduplicarHistorico() {
     const porId = new Map();
     const remover = [];
     for (const h of estado.historico) {
-        const d = R.lerRelatorio(h.texto || '').dados;
+        const d = turnoDoRelatorio(h.texto || '', h.origem === 'importado' ? h.mensagemTs : null);
         h.chave = chaveTurno(d.data, d.turno) || h.chave || '0000-00-00-9';
         h.turno = d.turno || h.turno; h.data = d.data || h.data;
         const id = idHistorico(h.chave, h.texto);
@@ -323,16 +339,20 @@ function historicoOrdenado() {
 }
 async function importarMensagens(mensagens, usuario) {
     let novos = 0, atualizados = 0, repetidos = 0, ignorados = 0;
-    const datas = [];
+    const datas = [], exemplos = [];
     for (const m of (mensagens || []).slice(0, 5000)) {
-        if (!m?.texto || !R.ehRelatorioDeTurno(m.texto)) { ignorados++; continue; }
-        const r = await arquivarRelatorio({ texto: m.texto, autor: m.autor, origem: 'importado', mensagemTs: m.ts, silencioso: true });
+        if (!m?.texto || !R.ehRelatorioFlexivel(m.texto)) {
+            ignorados++;
+            if (exemplos.length < 3 && m?.texto) exemplos.push(m.texto.replace(/\s+/g, ' ').slice(0, 90));
+            continue;
+        }
+        const r = await arquivarRelatorio({ texto: m.texto, autor: m.autor, origem: 'importado', mensagemTs: m.ts, silencioso: true, flexivel: true });
         if (r.rel?.chave && !r.rel.chave.startsWith('0000')) datas.push(r.rel.chave);
         if (r.novo) novos++; else if (r.atualizado) atualizados++; else repetidos++;
     }
     datas.sort();
     auditar(usuario, 'Importou relatórios do WhatsApp', `${novos} novos, ${atualizados} atualizados, ${repetidos} repetidos`);
-    return { novos, atualizados, repetidos, ignorados, total: estado.historico.length, de: datas[0] || '', ate: datas[datas.length - 1] || '' };
+    return { novos, atualizados, repetidos, ignorados, exemplos, total: estado.historico.length, de: datas[0] || '', ate: datas[datas.length - 1] || '' };
 }
 async function herdarDoHistorico(id, usuario) {
     const h = estado.historico.find(x => x.id === id);

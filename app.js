@@ -1840,10 +1840,12 @@ function importarConversa() {
     const msgs = mensagensDaConversa(await arq.text());
     if (!msgs.length) throw new Error('Nenhum "RELATÓRIO DO TURNO" encontrado nesse arquivo.');
     let novos = 0, repetidos = 0, atualizados = 0, ignorados = 0, de = '', ate = '';
+    const exemplos = [];
     for (let i = 0; i < msgs.length; i += 80) {
       info.textContent = `Importando ${Math.min(i + 80, msgs.length)} de ${msgs.length}…`;
       const r = await api('POST', '/api/relatorios-hist/importar', { mensagens: msgs.slice(i, i + 80) });
       novos += r.novos; repetidos += r.repetidos; atualizados += r.atualizados || 0; ignorados += r.ignorados || 0;
+      for (const x of r.exemplos || []) if (exemplos.length < 3) exemplos.push(x);
       if (r.de && (!de || r.de < de)) de = r.de;
       if (r.ate && r.ate > ate) ate = r.ate;
     }
@@ -1855,7 +1857,8 @@ function importarConversa() {
         el('div', { class: 'contador' }, el('strong', { text: String(novos) }), el('span', { text: 'novos' })),
         el('div', { class: 'contador' }, el('strong', { text: String(repetidos + atualizados) }), el('span', { text: 'já existiam' }))),
       de ? el('p', { style: 'margin:0', text: `Período encontrado: ${dataDe(de)} a ${dataDe(ate)}.` }) : null,
-      ignorados ? el('p', { class: 'mudo pequeno', style: 'margin:0', text: `${ignorados} mensagem(ns) mencionavam o relatório mas não estavam no formato completo.` }) : null,
+      ignorados ? el('details', {}, el('summary', { class: 'mudo pequeno', style: 'cursor:pointer', text: `${ignorados} mensagem(ns) citavam "relatório do turno" mas não pareciam um relatório (ver exemplos)` }),
+        el('div', { class: 'texto-bruto', style: 'margin-top:6px', text: exemplos.map(x => '• ' + x).join('\n') })) : null,
       el('p', { class: 'mudo pequeno', style: 'margin:0', text: 'Cada turno aparece uma vez só. Se faltarem meses, o celular que exportou pode não ter o histórico antigo do grupo: exporte de um aparelho que tenha.' })
     ], [el('button', { class: 'btn primario', 'data-fechar': true }, 'Ok')]);
     S.historico = null;
