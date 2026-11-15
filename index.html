@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0b1120">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>Caveira Bot · CCOS</title>
+  <link rel="manifest" href="/manifest.json">
+  <link rel="icon" href="/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/icon.svg">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+  <!-- LOGIN -->
+  <section id="tela-login" class="login" hidden>
+    <form id="form-login" class="login-caixa">
+      <img src="/icon.svg" alt="" class="login-logo">
+      <h1>Caveira Bot</h1>
+      <p class="mudo">CCOS · Porto do Açu</p>
+      <input type="password" id="login-senha" placeholder="Senha" autocomplete="current-password" required>
+      <button class="btn primario largo" type="submit">Entrar</button>
+      <p id="login-erro" class="erro" hidden></p>
+    </form>
+  </section>
+
+  <!-- APLICATIVO -->
+  <div id="app" hidden>
+    <header class="topo">
+      <div class="marca">
+        <img src="/icon.svg" alt="" class="topo-logo">
+        <div>
+          <strong>Caveira Bot</strong>
+          <span id="topo-turno" class="mudo pequeno"></span>
+        </div>
+      </div>
+      <div class="topo-acoes">
+        <button id="pilula-whats" class="pilula" title="Status do WhatsApp"><span class="ponto"></span><span class="txt">…</span></button>
+        <button id="btn-config" class="btn-icone" aria-label="Configurações" title="Configurações">⚙️</button>
+      </div>
+    </header>
+
+    <main id="conteudo">
+      <section id="aba-turno" class="aba"></section>
+      <section id="aba-entrada" class="aba" hidden></section>
+      <section id="aba-relatorio" class="aba" hidden></section>
+    </main>
+
+    <nav class="abas">
+      <button data-aba="turno" class="ativa"><span class="ic">🧭</span>Turno</button>
+      <button data-aba="entrada"><span class="ic">📥</span>Entrada<span id="badge-entrada" class="badge" hidden></span></button>
+      <button data-aba="relatorio"><span class="ic">📑</span>Relatório</button>
+    </nav>
+  </div>
+
+  <!-- Janelas -->
+  <div id="modal" class="modal" hidden>
+    <div class="modal-caixa" role="dialog" aria-modal="true">
+      <div class="modal-topo">
+        <h2 id="modal-titulo"></h2>
+        <button class="btn-icone" data-fechar aria-label="Fechar">✕</button>
+      </div>
+      <div id="modal-corpo" class="modal-corpo"></div>
+      <div id="modal-rodape" class="modal-rodape"></div>
+    </div>
+  </div>
+
+  <div id="painel-config" class="painel" hidden></div>
+  <div id="aviso" class="aviso" hidden></div>
+  <div id="impressao"></div>
+
+  <script src="/app.js"></script>
+</body>
+</html>
