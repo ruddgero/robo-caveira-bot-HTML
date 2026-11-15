@@ -139,7 +139,7 @@
           <div class="flex items-center gap-2.5">
             <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse-slow"></span>
             <div>
-              <div class="font-bold text-slate-200 text-xs">1. Grupo Operações T-ORE / T-OIL</div>
+              <div class="font-bold text-slate-200 text-xs" id="banner-nome-grupo-1">1. Grupo Operações T-ORE / T-OIL</div>
               <div class="text-[10px] text-slate-400">Escutando: Rancho, Tripulantes, Resíduos e Navios</div>
             </div>
           </div>
@@ -151,7 +151,7 @@
           <div class="flex items-center gap-2.5">
             <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse-slow"></span>
             <div>
-              <div class="font-bold text-slate-200 text-xs">2. Grupo CCOS & Segurança Portuária</div>
+              <div class="font-bold text-slate-200 text-xs" id="banner-nome-grupo-2">2. Grupo CCOS & Segurança Portuária</div>
               <div class="text-[10px] text-slate-400">Escutando: Viaturas, Ocorrências, CFTV e Portaria</div>
             </div>
           </div>
@@ -291,31 +291,58 @@
           <!-- Bloco 2: Gestão de Grupos e Disparos Oficiais -->
           <div class="bg-slate-950 p-4 rounded-2xl border border-slate-800/90 space-y-3 shadow-inner">
             <div class="flex justify-between items-center">
-              <span class="text-xs font-bold text-slate-300 uppercase tracking-wide flex items-center gap-1.5">
+              <span class="text-xs font-bold text-indigo-400 uppercase tracking-wide flex items-center gap-1.5">
                 <span>📡</span> Grupos Conectados ao Robô
               </span>
-              <span class="text-[10px] text-amber-400 bg-amber-950/60 px-2 py-0.5 rounded border border-amber-500/30 font-bold">100% Silencioso</span>
+              <span id="badge-grupos-modo" class="text-[10px] text-emerald-400 bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-500/30 font-bold">100% Silencioso</span>
             </div>
 
-            <div class="space-y-2">
-              <div class="p-2.5 bg-slate-900 border border-slate-800 rounded-xl flex items-center justify-between">
-                <div>
-                  <div class="text-xs font-bold text-white">1. Operações T-ORE & T-OIL</div>
-                  <div class="text-[10px] text-slate-400">Escuta Rancho, Tripulantes, Resíduos e Navios</div>
+            <p class="text-[11px] text-slate-400 leading-relaxed">
+              Direcione quais grupos do seu WhatsApp o robô deve monitorar e receber os relatórios:
+            </p>
+
+            <div class="space-y-2.5">
+              <!-- Seletor Grupo 1: Operações -->
+              <div class="p-2.5 bg-slate-900 border border-slate-800 rounded-xl space-y-1">
+                <div class="flex justify-between items-center">
+                  <label class="text-xs font-bold text-white flex items-center gap-1">
+                    <span class="text-indigo-400 font-black">1.</span> Grupo Operações T-ORE & T-OIL
+                  </label>
+                  <span class="text-[9px] text-emerald-400 font-mono bg-emerald-950/60 px-1.5 py-0.5 rounded">Rancho/Tripulantes</span>
                 </div>
-                <span class="text-[10px] text-emerald-400 font-bold bg-emerald-950/80 px-2 py-0.5 rounded border border-emerald-500/30">MONITORANDO</span>
+                <select id="select-grupo-1" onchange="alterarSelecaoGrupo(1)" class="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-xs text-white focus:border-indigo-500 focus:outline-none">
+                  <option value="">Aguardando conexão do WhatsApp...</option>
+                </select>
+                <div id="info-grupo-1" class="text-[10px] text-slate-400 truncate">Grupo padrão ativo</div>
               </div>
-              <div class="p-2.5 bg-slate-900 border border-slate-800 rounded-xl flex items-center justify-between">
-                <div>
-                  <div class="text-xs font-bold text-white">2. Segurança & CCOS Portuário</div>
-                  <div class="text-[10px] text-slate-400">Escuta Viaturas, CFTV, Portaria e Ocorrências</div>
+
+              <!-- Seletor Grupo 2: Segurança & CCOS -->
+              <div class="p-2.5 bg-slate-900 border border-slate-800 rounded-xl space-y-1">
+                <div class="flex justify-between items-center">
+                  <label class="text-xs font-bold text-white flex items-center gap-1">
+                    <span class="text-indigo-400 font-black">2.</span> Grupo Segurança & CCOS Portuário
+                  </label>
+                  <span class="text-[9px] text-emerald-400 font-mono bg-emerald-950/60 px-1.5 py-0.5 rounded">Viaturas/CFTV</span>
                 </div>
-                <span class="text-[10px] text-emerald-400 font-bold bg-emerald-950/80 px-2 py-0.5 rounded border border-emerald-500/30">MONITORANDO</span>
+                <select id="select-grupo-2" onchange="alterarSelecaoGrupo(2)" class="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-xs text-white focus:border-indigo-500 focus:outline-none">
+                  <option value="">Aguardando conexão do WhatsApp...</option>
+                </select>
+                <div id="info-grupo-2" class="text-[10px] text-slate-400 truncate">Grupo padrão ativo</div>
+              </div>
+
+              <!-- Botões de Ação para Grupos -->
+              <div class="flex gap-2 pt-1">
+                <button onclick="carregarGruposDoWhatsApp()" id="btn-carregar-grupos" class="flex-1 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold border border-slate-700 flex items-center justify-center gap-1.5 transition shadow">
+                  <span>🔄</span> Listar Grupos do Zap
+                </button>
+                <button onclick="confirmarGruposSelecionados()" id="btn-confirmar-grupos" class="flex-1 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 shadow">
+                  <span>✓</span> Confirmar Grupos
+                </button>
               </div>
             </div>
 
             <!-- Botões Operacionais de Disparo -->
-            <div class="pt-2 space-y-2">
+            <div class="pt-2 space-y-2 border-t border-slate-800/80">
               <button onclick="dispararRelatorioNosGrupos()" class="w-full py-3 bg-gradient-to-r from-indigo-600 via-blue-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/30">
                 <span>🚀</span> Disparar Relatório Oficial nos 2 Grupos
               </button>
@@ -330,6 +357,135 @@
             </div>
           </div>
 
+        </div>
+
+        <!-- ======================================================== -->
+        <!-- CARD: PASSAGEM DE BASTÃO AUTOMÁTICA (GRUPO US FERROPORT) -->
+        <!-- ======================================================== -->
+        <div class="bg-slate-950 p-4 rounded-2xl border border-indigo-500/30 space-y-3 shadow-inner">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800 pb-2.5">
+            <div class="flex items-center gap-2">
+              <span class="text-xl">🔄</span>
+              <div>
+                <h3 class="text-xs font-black text-white uppercase tracking-wide flex items-center gap-2">
+                  Passagem de Bastão Automática
+                  <span id="badge-status-relatorio-us" class="px-2 py-0.5 text-[9px] font-bold bg-amber-500/10 text-amber-300 border border-amber-500/20 rounded-md">
+                    Verificando Grupo US...
+                  </span>
+                </h3>
+                <p class="text-[10px] text-slate-400">
+                  Busca automática do último "RELATÓRIO DO TURNO" postado no grupo da US para herdar dados com 1 clique.
+                </p>
+              </div>
+            </div>
+            <div class="flex gap-2">
+              <button onclick="buscarEVerificarRelatorioUS()" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded-xl text-xs font-bold transition flex items-center gap-1 shadow">
+                <span>🔍</span> Verificar US
+              </button>
+              <button onclick="herdarDadosTurnoAnterior()" id="btn-herdar-turno" class="px-3.5 py-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl text-xs font-black transition flex items-center gap-1.5 shadow-lg shadow-emerald-600/20">
+                <span>📥</span> Puxar Dados do Turno Anterior
+              </button>
+            </div>
+          </div>
+
+          <div id="box-detalhes-relatorio-us" class="p-3 bg-slate-900/80 border border-slate-800 rounded-xl text-[11px] text-slate-300 space-y-1.5">
+            <div class="flex items-center justify-between text-slate-400 text-[10px]">
+              <span>Último relatório identificado no WhatsApp:</span>
+              <span id="us-relatorio-datahora" class="font-mono text-indigo-400 font-bold">Nenhum ainda</span>
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1 text-slate-300">
+              <div class="p-2 bg-slate-950 rounded-lg border border-slate-800/80">
+                <span class="text-slate-500 block text-[9px]">🚗 VTR L200 (TDG-8C89)</span>
+                <span>KM Inicial Herdado: <strong id="us-km-herdado" class="font-mono text-emerald-400">19.235</strong></span>
+              </div>
+              <div class="p-2 bg-slate-950 rounded-lg border border-slate-800/80">
+                <span class="text-slate-500 block text-[9px]">👥 Passagem de Equipes</span>
+                <span>Equipe Saindo: <strong id="us-equipe-saindo" class="text-slate-200">Renan Neves...</strong></span>
+              </div>
+              <div class="p-2 bg-slate-950 rounded-lg border border-slate-800/80">
+                <span class="text-slate-500 block text-[9px]">📹 Sistemas & Navios</span>
+                <span id="us-sistemas-status" class="text-slate-300">CFTV, OCR e Navios sincronizados</span>
+              </div>
+            </div>
+            <div class="text-[10px] text-indigo-300 pt-1 flex items-center gap-1">
+              <span>💡</span> Ao puxar os dados, a Seção 4 (Atividades) mantém a base permanente CCOS e é limpa para você preencher as suas atividades do dia!
+            </div>
+          </div>
+        </div>
+
+        <!-- ======================================================== -->
+        <!-- CONTAINER DE ESPELHAMENTO DO CHAT DO WHATSAPP (ESTILO ZAP WEB) -->
+        <!-- ======================================================== -->
+        <div id="container-espelhamento-chat" class="bg-slate-950 p-4 rounded-2xl border border-slate-800 space-y-3 shadow-inner transition-all duration-300">
+          
+          <!-- Topo da Janela de Chat com Busca e Botão de Expandir -->
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-2 border-b border-slate-800">
+            <div class="flex items-center gap-2">
+              <span class="text-lg">💬</span>
+              <div>
+                <h3 class="text-xs font-black text-white uppercase tracking-wide flex items-center gap-2">
+                  Espelhamento de Mensagens em Tempo Real
+                  <span class="px-2 py-0.5 text-[9px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-full flex items-center gap-1">
+                    <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> AO VIVO
+                  </span>
+                </h3>
+                <p class="text-[10px] text-slate-400">
+                  Veja as mensagens recebidas ao longo do dia e selecione com 1 clique quais vão para o seu relatório.
+                </p>
+              </div>
+            </div>
+
+            <!-- Botões de Controle e Expandir Tela -->
+            <div class="flex items-center gap-2 self-start sm:self-auto">
+              <button onclick="carregarMensagensChatAoVivo()" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded-xl text-xs font-bold transition flex items-center gap-1 shadow">
+                <span>🔄</span> Atualizar Mensagens
+              </button>
+              <button onclick="alternarTelaCheiaChat()" id="btn-tela-cheia-chat" class="px-3.5 py-1.5 bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-300 border border-indigo-500/40 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow">
+                <span id="icone-tela-cheia">⛶</span> <span id="texto-tela-cheia">Expandir Tela</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Barra de Filtros e Busca de Mensagens -->
+          <div class="grid grid-cols-1 sm:grid-cols-12 gap-2">
+            <!-- Seletor de Grupo -->
+            <div class="sm:col-span-4">
+              <select id="chat-filtro-grupo" onchange="filtrarMensagensChat()" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2 text-xs text-white focus:outline-none">
+                <option value="">Todos os Grupos Monitorados</option>
+                <option value="US">EQUIPE AZUL - US FERROPORT (Operações)</option>
+                <option value="SEGURANCA">Segurança & CCOS Portuário</option>
+              </select>
+            </div>
+
+            <!-- Campo de Busca por Palavra-chave -->
+            <div class="sm:col-span-8 flex gap-2">
+              <div class="relative flex-1">
+                <input type="text" id="chat-busca-input" oninput="filtrarMensagensChat()" placeholder="Buscar por rancho, placa, navio, L200, tripulante, ocorrência..." class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2 pl-8 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500">
+                <span class="absolute left-2.5 top-2.5 text-slate-500 text-xs">🔍</span>
+              </div>
+              <button onclick="limparBuscaChat()" class="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white rounded-xl text-xs font-bold border border-slate-700">
+                Limpar
+              </button>
+            </div>
+          </div>
+
+          <!-- Stream de Mensagens Estilo WhatsApp Web -->
+          <div id="chat-mensagens-stream" class="space-y-2.5 max-h-[460px] overflow-y-auto custom-scrollbar p-2 bg-slate-900/60 rounded-xl border border-slate-800/90">
+            <!-- Mensagens renderizadas dinamicamente via JS -->
+            <div class="text-center py-8 text-xs text-slate-500">
+              Aguardando mensagens dos grupos monitorados...
+            </div>
+          </div>
+
+          <!-- Rodapé do Espelhamento -->
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between text-[10px] text-slate-400 pt-1 px-1 gap-1">
+            <span id="chat-contador-mensagens">Mostrando mensagens do dia</span>
+            <div class="flex items-center gap-3">
+              <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-indigo-500"></span> [+ Atividade]: Seção 4</span>
+              <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-red-500"></span> [+ Ocorrência]: Seção 7</span>
+              <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-emerald-500"></span> [+ Operação]: Minuta E-mail</span>
+            </div>
+          </div>
         </div>
 
       </div>
@@ -402,6 +558,9 @@
       <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-1">
         <span class="text-xs font-bold text-slate-300 uppercase tracking-wide">Relatório Oficial Consolidado (8 Seções)</span>
         <div class="flex flex-wrap gap-1.5 botoes-topo-relatorio">
+          <button onclick="abrirModalEditarRelatorio()" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 shadow transition">
+            <span>✏️</span> Editar Seções
+          </button>
           <button onclick="imprimirPdfOficial()" class="px-3 py-1.5 bg-red-700 hover:bg-red-600 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 shadow transition">
             <span>📄</span> Exportar PDF
           </button>
@@ -690,6 +849,113 @@
       <div class="flex justify-end gap-2 text-xs">
         <button onclick="fecharModalNovaAtividade()" class="px-3 py-1.5 text-slate-400">Cancelar</button>
         <button onclick="salvarNovaAtividade()" class="px-4 py-2 bg-indigo-600 text-white rounded-xl font-bold">Salvar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ======================================================== -->
+  <!-- MODAL: EDITAR TODAS AS SEÇÕES DO RELATÓRIO DO TURNO -->
+  <!-- ======================================================== -->
+  <div id="modal-editar-relatorio" class="fixed inset-0 bg-slate-950/85 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+    <div class="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-2xl shadow-2xl p-5 space-y-4 max-h-[90vh] flex flex-col">
+      <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+        <div class="flex items-center gap-2">
+          <span class="text-xl">✏️</span>
+          <div>
+            <h2 class="text-sm font-bold text-white">Editar Relatório Oficial do Turno (8 Seções)</h2>
+            <p class="text-[10px] text-slate-400">Revise e ajuste qualquer campo antes de disparar nos grupos ou exportar</p>
+          </div>
+        </div>
+        <button onclick="fecharModalEditarRelatorio()" class="text-slate-400 hover:text-white text-lg">✕</button>
+      </div>
+
+      <div class="space-y-3 text-xs overflow-y-auto custom-scrollbar pr-2 flex-1">
+        <!-- Turno & Data -->
+        <div class="grid grid-cols-2 gap-2">
+          <div>
+            <label class="block text-slate-400 text-[10px] font-bold">Turno:</label>
+            <select id="edit-rel-turno" class="w-full bg-slate-950 border border-slate-800 rounded-xl p-2 text-white">
+              <option value="NOTURNO">NOTURNO (19h às 07h)</option>
+              <option value="DIURNO">DIURNO (07h às 19h)</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-slate-400 text-[10px] font-bold">Data:</label>
+            <input type="text" id="edit-rel-data" class="w-full bg-slate-950 border border-slate-800 rounded-xl p-2 text-white font-mono">
+          </div>
+        </div>
+
+        <!-- 1. Efetivo -->
+        <div>
+          <label class="block text-slate-400 text-[10px] font-bold">1. Efetivo CCOS:</label>
+          <input type="text" id="edit-rel-efetivo" class="w-full bg-slate-950 border border-slate-800 rounded-xl p-2 text-white">
+        </div>
+
+        <!-- 2. Viatura L200 -->
+        <div class="grid grid-cols-2 gap-2">
+          <div>
+            <label class="block text-slate-400 text-[10px] font-bold">2. KM Inicial L200:</label>
+            <input type="number" id="edit-rel-kmini" class="w-full bg-slate-950 border border-slate-800 rounded-xl p-2 text-white font-mono">
+          </div>
+          <div>
+            <label class="block text-slate-400 text-[10px] font-bold">2. KM Final L200:</label>
+            <input type="number" id="edit-rel-kmfim" class="w-full bg-slate-950 border border-slate-800 rounded-xl p-2 text-white font-mono">
+          </div>
+        </div>
+
+        <!-- 3. Sistemas -->
+        <div>
+          <label class="block text-slate-400 text-[10px] font-bold">3. CFTV:</label>
+          <textarea id="edit-rel-cftv" rows="2" class="w-full bg-slate-950 border border-slate-800 rounded-xl p-2 text-white font-mono text-[11px]"></textarea>
+        </div>
+        <div class="grid grid-cols-2 gap-2">
+          <div>
+            <label class="block text-slate-400 text-[10px] font-bold">3. CA (Controle de Acesso):</label>
+            <input type="text" id="edit-rel-ca" class="w-full bg-slate-950 border border-slate-800 rounded-xl p-2 text-white">
+          </div>
+          <div>
+            <label class="block text-slate-400 text-[10px] font-bold">3. OCR (Assertividade / Leituras):</label>
+            <div class="flex gap-1">
+              <input type="text" id="edit-rel-ocr-assert" placeholder="83,72%" class="w-1/2 bg-slate-950 border border-slate-800 rounded-xl p-2 text-white font-mono">
+              <input type="number" id="edit-rel-ocr-leituras" placeholder="43" class="w-1/2 bg-slate-950 border border-slate-800 rounded-xl p-2 text-white font-mono">
+            </div>
+          </div>
+        </div>
+
+        <!-- 6. Navios -->
+        <div class="grid grid-cols-2 gap-2">
+          <div>
+            <label class="block text-slate-400 text-[10px] font-bold">6. Navios T-ORE:</label>
+            <textarea id="edit-rel-navios-tore" rows="2" class="w-full bg-slate-950 border border-slate-800 rounded-xl p-2 text-white font-mono text-[11px]"></textarea>
+          </div>
+          <div>
+            <label class="block text-slate-400 text-[10px] font-bold">6. Navios T-OIL:</label>
+            <textarea id="edit-rel-navios-toil" rows="2" class="w-full bg-slate-950 border border-slate-800 rounded-xl p-2 text-white font-mono text-[11px]"></textarea>
+          </div>
+        </div>
+
+        <!-- 7. Ocorrências -->
+        <div>
+          <label class="block text-slate-400 text-[10px] font-bold">7. Ocorrências:</label>
+          <textarea id="edit-rel-ocorrencias" rows="2" class="w-full bg-slate-950 border border-slate-800 rounded-xl p-2 text-white font-mono text-[11px]"></textarea>
+        </div>
+
+        <!-- 8. Passagem de Equipes -->
+        <div class="grid grid-cols-2 gap-2">
+          <div>
+            <label class="block text-slate-400 text-[10px] font-bold">8. Equipe Saindo:</label>
+            <input type="text" id="edit-rel-eq-saindo" class="w-full bg-slate-950 border border-slate-800 rounded-xl p-2 text-white">
+          </div>
+          <div>
+            <label class="block text-slate-400 text-[10px] font-bold">8. Equipe Assumindo:</label>
+            <input type="text" id="edit-rel-eq-assumindo" class="w-full bg-slate-950 border border-slate-800 rounded-xl p-2 text-white">
+          </div>
+        </div>
+      </div>
+
+      <div class="flex justify-end gap-2 pt-2 border-t border-slate-800">
+        <button onclick="fecharModalEditarRelatorio()" class="px-4 py-2 text-slate-400 hover:text-white">Cancelar</button>
+        <button onclick="salvarEdicaoRelatorio()" class="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-bold shadow">Salvar Alterações</button>
       </div>
     </div>
   </div>
@@ -1539,6 +1805,13 @@ ${estadoCCOS.equipes.assumindo}`;
               <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
               WHATSAPP ESPELHADO
             `;
+            if (listaGruposWhatsAppCache.length === 0) {
+              carregarGruposDoWhatsApp();
+            }
+          }
+          if (d.configuracaoGrupos) {
+            gruposConfiguradosAtuais = d.configuracaoGrupos;
+            atualizarLabelsGruposNaTela(d.configuracaoGrupos);
           }
         }
 
@@ -1659,6 +1932,166 @@ ${estadoCCOS.equipes.assumindo}`;
       }
     }
 
+    // ==========================================
+    // GESTÃO DINÂMICA DE GRUPOS DO WHATSAPP (SELEÇÃO DIRETA NA TELA)
+    // ==========================================
+    let listaGruposWhatsAppCache = [];
+    let gruposConfiguradosAtuais = {
+      grupo1: { id: '', nome: '1. Grupo Operações T-ORE / T-OIL' },
+      grupo2: { id: '', nome: '2. Grupo CCOS & Segurança Portuária' }
+    };
+
+    async function carregarGruposDoWhatsApp() {
+      const btn = document.getElementById('btn-carregar-grupos');
+      const s1 = document.getElementById('select-grupo-1');
+      const s2 = document.getElementById('select-grupo-2');
+      const apiUrl = obterUrlServidorSegura();
+
+      if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<span class="animate-spin">⏳</span> Puxando Grupos...';
+      }
+
+      try {
+        const r = await fetch(`${apiUrl}/api/grupos-whatsapp`);
+        const d = await r.json();
+
+        if (d.configurados) {
+          gruposConfiguradosAtuais = d.configurados;
+          atualizarLabelsGruposNaTela(d.configurados);
+        }
+
+        if (d.conectado && d.grupos && d.grupos.length > 0) {
+          listaGruposWhatsAppCache = d.grupos;
+          if (s1) popularSelectGrupos(s1, d.grupos, gruposConfiguradosAtuais.grupo1?.id);
+          if (s2) popularSelectGrupos(s2, d.grupos, gruposConfiguradosAtuais.grupo2?.id);
+          if (btn) {
+            btn.innerHTML = `✓ ${d.grupos.length} Grupos Encontrados`;
+            btn.className = 'flex-1 py-2 bg-emerald-950/60 text-emerald-400 border border-emerald-500/30 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition shadow';
+            setTimeout(() => {
+              btn.innerHTML = '🔄 Listar Grupos do Zap';
+              btn.disabled = false;
+            }, 4000);
+          }
+        } else {
+          const msg = d.mensagem || "WhatsApp não conectado no servidor.";
+          if (s1) s1.innerHTML = `<option value="">⚠️ ${msg}</option>`;
+          if (s2) s2.innerHTML = `<option value="">⚠️ ${msg}</option>`;
+          if (btn) {
+            btn.innerHTML = '🔄 Listar Grupos do Zap';
+            btn.disabled = false;
+          }
+          alert("⚠️ Aviso:\n" + msg + "\n\n👉 Conecte o seu WhatsApp no bloco de pareamento primeiro para listar seus grupos!");
+        }
+      } catch (err) {
+        if (btn) {
+          btn.innerHTML = '🔄 Tentar Novamente';
+          btn.disabled = false;
+        }
+        alert("⚠️ O servidor no Render pode estar acordando (~40s de espera). Aguarde alguns instantes e tente novamente.");
+      }
+    }
+
+    function popularSelectGrupos(selectElem, grupos, idSelecionado) {
+      let html = '<option value="">-- Selecione o Grupo do seu WhatsApp --</option>';
+      grupos.forEach(g => {
+        const sel = (g.id === idSelecionado) ? 'selected' : '';
+        html += `<option value="${g.id}" ${sel}>${escapeHtml(g.nome)} (${g.participantesQtd} membros)</option>`;
+      });
+      selectElem.innerHTML = html;
+    }
+
+    function alterarSelecaoGrupo(num) {
+      const s = document.getElementById(`select-grupo-${num}`);
+      const info = document.getElementById(`info-grupo-${num}`);
+      const nome = s.options[s.selectedIndex]?.text || '';
+      if (s.value) {
+        info.innerText = `Selecionado: ${nome}`;
+        info.className = 'text-[10px] text-emerald-400 truncate font-semibold';
+      } else {
+        info.innerText = 'Nenhum grupo selecionado';
+        info.className = 'text-[10px] text-slate-400 truncate';
+      }
+    }
+
+    async function confirmarGruposSelecionados() {
+      const s1 = document.getElementById('select-grupo-1');
+      const s2 = document.getElementById('select-grupo-2');
+      const btn = document.getElementById('btn-confirmar-grupos');
+      const apiUrl = obterUrlServidorSegura();
+      const apiToken = localStorage.getItem('CAVEIRA_API_TOKEN') || '';
+
+      const g1Id = s1 ? s1.value : '';
+      const g1Nome = s1 ? s1.options[s1.selectedIndex]?.text.replace(/\s\(\d+\smembros\)$/, '') : '';
+      const g2Id = s2 ? s2.value : '';
+      const g2Nome = s2 ? s2.options[s2.selectedIndex]?.text.replace(/\s\(\d+\smembros\)$/, '') : '';
+
+      if (!g1Id && !g2Id) {
+        alert("⚠️ Por favor, selecione pelo menos um grupo do seu WhatsApp nos menus acima antes de confirmar.");
+        return;
+      }
+
+      if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<span class="animate-spin">⏳</span> Salvando...';
+      }
+
+      try {
+        const headers = { 'Content-Type': 'application/json' };
+        if (apiToken) headers['x-api-key'] = apiToken;
+
+        const r = await fetch(`${apiUrl}/api/configurar-grupos`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            grupo1Id: g1Id,
+            grupo1Nome: g1Nome,
+            grupo2Id: g2Id,
+            grupo2Nome: g2Nome
+          })
+        });
+
+        const d = await r.json();
+        if (d.sucesso) {
+          gruposConfiguradosAtuais = d.configurados;
+          atualizarLabelsGruposNaTela(d.configurados);
+          if (btn) {
+            btn.innerHTML = '✓ Grupos Salvos!';
+            btn.className = 'flex-1 py-2 bg-emerald-600 text-white rounded-xl text-xs font-bold transition shadow';
+            setTimeout(() => {
+              btn.innerHTML = '✓ Confirmar Grupos';
+              btn.disabled = false;
+            }, 3000);
+          }
+          alert(`🎉 GRUPOS DIRECIONADOS COM SUCESSO!\n\n1. Operações: ${g1Nome || 'Não alterado'}\n2. Segurança: ${g2Nome || 'Não alterado'}\n\nO CAVEIRA BOT já está monitorando silenciosamente estes grupos!`);
+        } else {
+          throw new Error(d.erro || "Falha ao salvar grupos.");
+        }
+      } catch (err) {
+        if (btn) {
+          btn.disabled = false;
+          btn.innerHTML = '✓ Confirmar Grupos';
+        }
+        alert("Erro ao salvar configuração: " + err.message);
+      }
+    }
+
+    function atualizarLabelsGruposNaTela(config) {
+      const cfg = config || gruposConfiguradosAtuais;
+      if (cfg.grupo1?.nome) {
+        const b1 = document.getElementById('banner-nome-grupo-1');
+        if (b1) b1.innerText = `1. ${cfg.grupo1.nome}`;
+        const i1 = document.getElementById('info-grupo-1');
+        if (i1) i1.innerText = `Ativo: ${cfg.grupo1.nome}`;
+      }
+      if (cfg.grupo2?.nome) {
+        const b2 = document.getElementById('banner-nome-grupo-2');
+        if (b2) b2.innerText = `2. ${cfg.grupo2.nome}`;
+        const i2 = document.getElementById('info-grupo-2');
+        if (i2) i2.innerText = `Ativo: ${cfg.grupo2.nome}`;
+      }
+    }
+
     async function testarMensagemLider() {
       const apiUrl = obterUrlServidorSegura();
       const apiToken = localStorage.getItem('CAVEIRA_API_TOKEN') || '';
@@ -1671,10 +2104,10 @@ ${estadoCCOS.equipes.assumindo}`;
         if (d.sucesso) {
           alert("📩 Mensagem de teste enviada com sucesso para o WhatsApp do Líder Ruddgero!");
         } else {
-          alert("Aviso: " + (d.erro || "WhatsApp não conectado no servidor."));
+          alert("⚠️ Aviso do Servidor:\n" + (d.erro || "WhatsApp ainda não conectado no robô.\n\n👉 Gere o código de 8 dígitos no bloco acima e conecte seu WhatsApp primeiro!"));
         }
       } catch (e) {
-        alert("⚠️ Não foi possível comunicar com o servidor Render.");
+        alert("⚠️ O servidor no Render pode estar iniciando ou dormindo (~40s de espera no plano gratuito).\n\n1. Conecte primeiro o seu celular usando o código de 8 dígitos no bloco acima.\n2. Aguarde 30 segundos e tente novamente.");
       }
     }
 
@@ -1694,6 +2127,400 @@ ${estadoCCOS.equipes.assumindo}`;
         alert("Erro ao comunicar com o servidor.");
       }
     }
+
+    // ========================================================
+    // PASSAGEM DE BASTÃO AUTOMÁTICA & DETECÇÃO DE RELATÓRIO DO TURNO
+    // ========================================================
+    let ultimoRelatorioUSCache = null;
+
+    async function buscarEVerificarRelatorioUS() {
+      const badge = document.getElementById('badge-status-relatorio-us');
+      const dataHoraDisp = document.getElementById('us-relatorio-datahora');
+      const kmDisp = document.getElementById('us-km-herdado');
+      const equipeDisp = document.getElementById('us-equipe-saindo');
+      const sisDisp = document.getElementById('us-sistemas-status');
+      const apiUrl = obterUrlServidorSegura();
+
+      if (badge) badge.innerText = 'Consultando...';
+
+      try {
+        const r = await fetch(`${apiUrl}/api/ultimo-relatorio-us`);
+        const d = await r.json();
+
+        if (d.encontrado && d.dados) {
+          ultimoRelatorioUSCache = d.dados;
+          if (badge) {
+            badge.innerText = 'RELATÓRIO ENCONTRADO ✓';
+            badge.className = 'px-2 py-0.5 text-[9px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-md';
+          }
+          if (dataHoraDisp) dataHoraDisp.innerText = `${d.dados.data || 'Hoje'} às ${d.dados.hora || 'Plantão US'}`;
+          if (kmDisp) kmDisp.innerText = d.dados.kmFinal ? `${d.dados.kmFinal.toLocaleString('pt-BR')} km` : '19.235';
+          if (equipeDisp) equipeDisp.innerText = d.dados.equipeAssumindo ? d.dados.equipeAssumindo.slice(0, 35) + '...' : 'Equipe US';
+          if (sisDisp) sisDisp.innerText = 'Sistemas e Navios prontos para importação';
+        } else {
+          if (badge) {
+            badge.innerText = 'Aguardando no Grupo US';
+            badge.className = 'px-2 py-0.5 text-[9px] font-bold bg-amber-500/10 text-amber-300 border border-amber-500/20 rounded-md';
+          }
+          if (dataHoraDisp) dataHoraDisp.innerText = 'Nenhum relatório recente detectado';
+        }
+      } catch (e) {
+        if (badge) badge.innerText = 'Modo Local';
+      }
+    }
+
+    async function herdarDadosTurnoAnterior() {
+      const btn = document.getElementById('btn-herdar-turno');
+      const apiUrl = obterUrlServidorSegura();
+
+      if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<span class="animate-spin">⏳</span> Puxando Dados...';
+      }
+
+      try {
+        let dadosHerdados = null;
+
+        try {
+          const r = await fetch(`${apiUrl}/api/herdar-relatorio`, { method: 'POST' });
+          const d = await r.json();
+          if (d.sucesso && d.dados) dadosHerdados = d.dados;
+        } catch (e) {}
+
+        if (!dadosHerdados && ultimoRelatorioUSCache) {
+          dadosHerdados = ultimoRelatorioUSCache;
+        }
+
+        if (dadosHerdados) {
+          if (dadosHerdados.kmFinal) {
+            estadoCCOS.vtr.kmInicial = dadosHerdados.kmFinal;
+            estadoCCOS.vtr.kmFinal = dadosHerdados.kmFinal;
+            const elKmIni = document.getElementById('disp-km-ini');
+            const elKmAtual = document.getElementById('disp-km-atual');
+            const elKmRodados = document.getElementById('disp-km-rodados');
+            if (elKmIni) elKmIni.innerText = dadosHerdados.kmFinal;
+            if (elKmAtual) elKmAtual.innerText = dadosHerdados.kmFinal;
+            if (elKmRodados) elKmRodados.innerText = '+0 km';
+          }
+
+          if (dadosHerdados.equipeAssumindo) {
+            estadoCCOS.equipes.saindo = dadosHerdados.equipeAssumindo;
+          }
+
+          if (dadosHerdados.sistemas) {
+            if (dadosHerdados.sistemas.cftv) estadoCCOS.sistemas.cftv = dadosHerdados.sistemas.cftv;
+            if (dadosHerdados.sistemas.ca) estadoCCOS.sistemas.ca = dadosHerdados.sistemas.ca;
+            if (dadosHerdados.sistemas.ocr) estadoCCOS.sistemas.ocr = dadosHerdados.sistemas.ocr;
+          }
+
+          if (dadosHerdados.navios) {
+            if (dadosHerdados.navios.tore) estadoCCOS.navios.tore = dadosHerdados.navios.tore;
+            if (dadosHerdados.navios.toil) estadoCCOS.navios.toil = dadosHerdados.navios.toil;
+          }
+
+          if (dadosHerdados.avisos && Array.isArray(dadosHerdados.avisos) && dadosHerdados.avisos.length > 0) {
+            estadoCCOS.avisos = dadosHerdados.avisos;
+          }
+
+          // Atividades do novo turno são limpas para novas inserções (mantendo a base fixa)
+          estadoCCOS.atividadesExtras = [];
+
+          // Turno inverte ou ajusta conforme horário
+          const horaAtual = new Date().getHours();
+          estadoCCOS.turno = (horaAtual >= 7 && horaAtual < 19) ? 'DIURNO' : 'NOTURNO';
+          estadoCCOS.data = new Date().toLocaleDateString('pt-BR');
+
+          salvarEstado();
+          renderizarAtividades();
+          renderizarRelatorioTexto();
+
+          alert(`🎉 PASSAGEM DE TURNO CONCLUÍDA COM SUCESSO!\n\nDados herdados do relatório anterior:\n• VTR L200: KM Inicial definido em ${estadoCCOS.vtr.kmInicial}\n• Equipe Saindo atualizada para: "${estadoCCOS.equipes.saindo}"\n• CFTV, OCR e Navios sincronizados\n• Seção 4 (Atividades) limpa e pronta para o seu plantão!\n\nVocê pode revisar ou editar tudo na aba "Relatório (8)"!`);
+        } else {
+          alert("⚠️ Nenhum 'RELATÓRIO DO TURNO' foi encontrado no grupo ainda.\n\nVocê também pode preencher ou editar as informações manualmente na aba 'Relatório'!");
+        }
+      } catch (err) {
+        alert("Erro ao herdar relatório: " + err.message);
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.innerHTML = '<span>📥</span> Puxar Dados do Turno Anterior';
+        }
+      }
+    }
+
+    // ========================================================
+    // ESPELHAMENTO DO CHAT WHATSAPP AO VIVO & EXPANSÃO DE TELA
+    // ========================================================
+    let telaCheiaChatAtiva = false;
+    let mensagensChatCache = [];
+
+    function alternarTelaCheiaChat() {
+      const container = document.getElementById('container-espelhamento-chat');
+      const icone = document.getElementById('icone-tela-cheia');
+      const texto = document.getElementById('texto-tela-cheia');
+      const stream = document.getElementById('chat-mensagens-stream');
+
+      telaCheiaChatAtiva = !telaCheiaChatAtiva;
+
+      if (telaCheiaChatAtiva) {
+        container.classList.add('fixed', 'inset-0', 'z-50', 'bg-slate-950', 'p-6', 'rounded-none', 'overflow-y-auto');
+        container.classList.remove('rounded-2xl');
+        if (stream) stream.style.maxHeight = 'calc(100vh - 220px)';
+        if (icone) icone.innerText = '✕';
+        if (texto) texto.innerText = 'Reduzir Tela';
+      } else {
+        container.classList.remove('fixed', 'inset-0', 'z-50', 'bg-slate-950', 'p-6', 'rounded-none', 'overflow-y-auto');
+        container.classList.add('rounded-2xl');
+        if (stream) stream.style.maxHeight = '460px';
+        if (icone) icone.innerText = '⛶';
+        if (texto) texto.innerText = 'Expandir Tela';
+      }
+    }
+
+    async function carregarMensagensChatAoVivo() {
+      const apiUrl = obterUrlServidorSegura();
+      const filtroGrupo = document.getElementById('chat-filtro-grupo')?.value || '';
+      const termoBusca = document.getElementById('chat-busca-input')?.value || '';
+
+      try {
+        let url = `${apiUrl}/api/mensagens-chat?`;
+        if (filtroGrupo) url += `grupo=${encodeURIComponent(filtroGrupo)}&`;
+        if (termoBusca) url += `busca=${encodeURIComponent(termoBusca)}&`;
+
+        const r = await fetch(url);
+        if (r.ok) {
+          const d = await r.json();
+          if (d.mensagens && Array.isArray(d.mensagens)) {
+            mensagensChatCache = d.mensagens;
+            renderizarMensagensStream(d.mensagens);
+            return;
+          }
+        }
+      } catch (e) {}
+
+      // Fallback para mensagens do estado local
+      const msgsLocais = (estadoCCOS.feedCaptado || []).map(f => ({
+        id: f.id,
+        hora: f.hora,
+        grupoNome: f.grupo,
+        autor: f.autor,
+        texto: f.texto,
+        tipo: f.tipo
+      }));
+      renderizarMensagensStream(msgsLocais);
+    }
+
+    function filtrarMensagensChat() {
+      const filtroGrupo = (document.getElementById('chat-filtro-grupo')?.value || '').toLowerCase();
+      const termoBusca = (document.getElementById('chat-busca-input')?.value || '').toLowerCase().trim();
+
+      const filtradas = mensagensChatCache.filter(m => {
+        const bateuGrupo = !filtroGrupo || (m.grupoNome || '').toLowerCase().includes(filtroGrupo);
+        const bateuBusca = !termoBusca || (m.texto || '').toLowerCase().includes(termoBusca) || (m.autor || '').toLowerCase().includes(termoBusca);
+        return bateuGrupo && bateuBusca;
+      });
+
+      renderizarMensagensStream(filtradas);
+    }
+
+    function limparBuscaChat() {
+      const input = document.getElementById('chat-busca-input');
+      const select = document.getElementById('chat-filtro-grupo');
+      if (input) input.value = '';
+      if (select) select.value = '';
+      filtrarMensagensChat();
+    }
+
+    function renderizarMensagensStream(mensagens) {
+      const cont = document.getElementById('chat-mensagens-stream');
+      const contador = document.getElementById('chat-contador-mensagens');
+      if (!cont) return;
+
+      cont.innerHTML = '';
+      if (contador) contador.innerText = `${mensagens.length} mensagem(ns) exibida(s)`;
+
+      if (!mensagens || mensagens.length === 0) {
+        cont.innerHTML = `
+          <div class="text-center py-10 text-xs text-slate-500 space-y-1">
+            <span class="text-2xl block">💬</span>
+            <div>Nenhuma mensagem correspondente encontrada nos grupos.</div>
+            <div class="text-[10px] text-slate-600">As mensagens recebidas ao vivo no WhatsApp aparecerão aqui automaticamente.</div>
+          </div>
+        `;
+        return;
+      }
+
+      mensagens.slice().reverse().forEach(m => {
+        const item = document.createElement('div');
+        item.className = 'p-3 bg-slate-950/90 border border-slate-800/90 rounded-2xl text-xs space-y-2 hover:border-slate-700 transition shadow-sm';
+
+        let badgeCor = 'bg-slate-800 text-slate-400';
+        if ((m.grupoNome || '').includes('US') || (m.grupoNome || '').includes('Operações')) {
+          badgeCor = 'bg-blue-950/80 text-blue-300 border border-blue-500/30';
+        } else if ((m.grupoNome || '').includes('Segurança') || (m.grupoNome || '').includes('CCOS')) {
+          badgeCor = 'bg-indigo-950/80 text-indigo-300 border border-indigo-500/30';
+        }
+
+        const textoLimpoEscapado = escapeHtml(m.texto);
+        const textoParam = encodeURIComponent(m.texto);
+        const autorParam = encodeURIComponent(m.autor || 'Plantão');
+        const horaParam = encodeURIComponent(m.hora || '');
+
+        item.innerHTML = `
+          <div class="flex items-center justify-between text-[11px]">
+            <div class="flex items-center gap-2">
+              <span class="font-bold text-white">${escapeHtml(m.autor || 'Desconhecido')}</span>
+              <span class="px-2 py-0.5 text-[9px] rounded-full font-bold ${badgeCor}">${escapeHtml(m.grupoNome || 'Grupo')}</span>
+            </div>
+            <span class="text-[10px] text-slate-400 font-mono">${escapeHtml(m.hora || '')}</span>
+          </div>
+
+          <div class="text-slate-200 text-xs font-sans leading-relaxed bg-slate-900/70 p-2.5 rounded-xl border border-slate-800/50 whitespace-pre-wrap select-text">
+            ${textoLimpoEscapado}
+          </div>
+
+          <!-- Ações Rápidas de Curadoria Operacional -->
+          <div class="flex flex-wrap items-center justify-end gap-1.5 pt-1 text-[11px]">
+            <button onclick="adicionarMensagemAoRelatorio(decodeURIComponent('${textoParam}'), decodeURIComponent('${horaParam}'), decodeURIComponent('${autorParam}'), 'ATIVIDADE')" class="px-2.5 py-1 bg-indigo-600/30 hover:bg-indigo-600/60 text-indigo-200 border border-indigo-500/30 rounded-lg font-bold transition flex items-center gap-1 shadow-sm">
+              <span>+</span> Atividade (Seção 4)
+            </button>
+            <button onclick="adicionarMensagemAoRelatorio(decodeURIComponent('${textoParam}'), decodeURIComponent('${horaParam}'), decodeURIComponent('${autorParam}'), 'OCORRENCIA')" class="px-2.5 py-1 bg-red-950/60 hover:bg-red-900/80 text-red-300 border border-red-800/40 rounded-lg font-bold transition flex items-center gap-1 shadow-sm">
+              <span>+</span> Ocorrência (Seção 7)
+            </button>
+            <button onclick="abrirModalOperacaoComTexto(decodeURIComponent('${textoParam}'))" class="px-2.5 py-1 bg-emerald-950/60 hover:bg-emerald-900/80 text-emerald-300 border border-emerald-500/40 rounded-lg font-bold transition flex items-center gap-1 shadow-sm">
+              <span>+</span> Operação (E-mail)
+            </button>
+            <button onclick="this.closest('.p-3').style.opacity = '0.35';" class="px-2 py-1 text-slate-500 hover:text-slate-300 text-[10px]">
+              Ignorar
+            </button>
+          </div>
+        `;
+        cont.appendChild(item);
+      });
+    }
+
+    function adicionarMensagemAoRelatorio(texto, hora, autor, tipo) {
+      if (tipo === 'ATIVIDADE') {
+        const itemAtiv = `${texto} [${hora} - ${autor}]`;
+        estadoCCOS.atividadesExtras.push(itemAtiv);
+        salvarEstado();
+        renderizarAtividades();
+        renderizarRelatorioTexto();
+        alert(`✓ Mensagem adicionada com sucesso à Seção 4 (Atividades Realizadas):\n\n"${itemAtiv}"`);
+      } else if (tipo === 'OCORRENCIA') {
+        const itemOc = `• ${hora}: ${texto} (${autor})`;
+        if (estadoCCOS.ocorrencias === '✓ S/A' || !estadoCCOS.ocorrencias) {
+          estadoCCOS.ocorrencias = itemOc;
+        } else {
+          estadoCCOS.ocorrencias += '\n' + itemOc;
+        }
+        salvarEstado();
+        renderizarRelatorioTexto();
+        alert(`🚨 Mensagem adicionada com sucesso à Seção 7 (Ocorrências):\n\n"${itemOc}"`);
+      }
+    }
+
+    function abrirModalOperacaoComTexto(texto) {
+      abrirModalNovaOperacao();
+      const txtUpper = texto.toUpperCase();
+
+      // Detecção de tipo de operação
+      const selectTipo = document.getElementById('op-novo-tipo');
+      if (selectTipo) {
+        if (txtUpper.includes('RANCHO') || txtUpper.includes('ALIMENT')) selectTipo.value = 'FORNECIMENTO DE RANCHO';
+        else if (txtUpper.includes('DESEMBARQUE')) selectTipo.value = 'DESEMBARQUE DE TRIPULANTES';
+        else if (txtUpper.includes('EMBARQUE') || txtUpper.includes('TRIPULANTE')) selectTipo.value = 'EMBARQUE DE TRIPULANTES';
+        else if (txtUpper.includes('RESÍDUO') || txtUpper.includes('RESIDUO') || txtUpper.includes('LIXO')) selectTipo.value = 'RETIRADA DE RESÍDUOS';
+        else if (txtUpper.includes('ÁGUA') || txtUpper.includes('AGUA')) selectTipo.value = 'ABASTECIMENTO DE ÁGUA POTÁVEL';
+        else if (txtUpper.includes('BUNKER') || txtUpper.includes('COMBUST')) selectTipo.value = 'BUNKER (COMBUSTÍVEL)';
+      }
+
+      // Detecção de navio
+      const naviosConhecidos = ['MARAN COURAGE', 'MARLENE OLDENDORFF', 'YUAN DONG HAI', 'EAGLE PAULINIA', 'SEAWAYS CAPE HENRY'];
+      for (const n of naviosConhecidos) {
+        if (txtUpper.includes(n)) {
+          const inputNavio = document.getElementById('op-novo-navio');
+          if (inputNavio) inputNavio.value = n;
+          break;
+        }
+      }
+
+      // Detecção de placa (padrão Mercosul ou antigo)
+      const matchPlaca = texto.match(/([A-Z]{3}[- ]?[0-9][A-Z0-9][0-9]{2})/i);
+      if (matchPlaca) {
+        const inputVeic = document.getElementById('op-novo-veiculo');
+        if (inputVeic) inputVeic.value = matchPlaca[1].toUpperCase();
+      }
+
+      // Horário atual
+      const inputHoraIni = document.getElementById('op-novo-horaini');
+      if (inputHoraIni) inputHoraIni.value = new Date().toLocaleTimeString('pt-BR', {hour:'2-digit', minute:'2-digit'}) + 'h';
+    }
+
+    // ========================================================
+    // MODAL DE EDIÇÃO COMPLETA DO RELATÓRIO DO TURNO (8 SEÇÕES)
+    // ========================================================
+    function abrirModalEditarRelatorio() {
+      document.getElementById('edit-rel-turno').value = estadoCCOS.turno || 'NOTURNO';
+      document.getElementById('edit-rel-data').value = estadoCCOS.data || new Date().toLocaleDateString('pt-BR');
+      document.getElementById('edit-rel-efetivo').value = estadoCCOS.efetivo || '✓ S/A';
+      document.getElementById('edit-rel-kmini').value = estadoCCOS.vtr.kmInicial || 19228;
+      document.getElementById('edit-rel-kmfim').value = estadoCCOS.vtr.kmFinal || 19235;
+      document.getElementById('edit-rel-cftv').value = estadoCCOS.sistemas.cftv || '';
+      document.getElementById('edit-rel-ca').value = estadoCCOS.sistemas.ca || '✓ S/A';
+      document.getElementById('edit-rel-ocr-assert').value = estadoCCOS.sistemas.ocr?.assertividade || '83,72%';
+      document.getElementById('edit-rel-ocr-leituras').value = estadoCCOS.sistemas.ocr?.leituras || 43;
+      document.getElementById('edit-rel-navios-tore').value = estadoCCOS.navios?.tore || '';
+      document.getElementById('edit-rel-navios-toil').value = estadoCCOS.navios?.toil || '';
+      document.getElementById('edit-rel-ocorrencias').value = estadoCCOS.ocorrencias || '✓ S/A';
+      document.getElementById('edit-rel-eq-saindo').value = estadoCCOS.equipes?.saindo || '';
+      document.getElementById('edit-rel-eq-assumindo').value = estadoCCOS.equipes?.assumindo || '';
+
+      document.getElementById('modal-editar-relatorio').classList.remove('hidden');
+    }
+
+    function fecharModalEditarRelatorio() {
+      document.getElementById('modal-editar-relatorio').classList.add('hidden');
+    }
+
+    function salvarEdicaoRelatorio() {
+      estadoCCOS.turno = document.getElementById('edit-rel-turno').value;
+      estadoCCOS.data = document.getElementById('edit-rel-data').value;
+      estadoCCOS.efetivo = document.getElementById('edit-rel-efetivo').value;
+      estadoCCOS.vtr.kmInicial = parseInt(document.getElementById('edit-rel-kmini').value, 10) || estadoCCOS.vtr.kmInicial;
+      estadoCCOS.vtr.kmFinal = parseInt(document.getElementById('edit-rel-kmfim').value, 10) || estadoCCOS.vtr.kmFinal;
+      estadoCCOS.sistemas.cftv = document.getElementById('edit-rel-cftv').value;
+      estadoCCOS.sistemas.ca = document.getElementById('edit-rel-ca').value;
+      estadoCCOS.sistemas.ocr = {
+        assertividade: document.getElementById('edit-rel-ocr-assert').value,
+        leituras: parseInt(document.getElementById('edit-rel-ocr-leituras').value, 10) || 0
+      };
+      estadoCCOS.navios.tore = document.getElementById('edit-rel-navios-tore').value;
+      estadoCCOS.navios.toil = document.getElementById('edit-rel-navios-toil').value;
+      estadoCCOS.ocorrencias = document.getElementById('edit-rel-ocorrencias').value;
+      estadoCCOS.equipes.saindo = document.getElementById('edit-rel-eq-saindo').value;
+      estadoCCOS.equipes.assumindo = document.getElementById('edit-rel-eq-assumindo').value;
+
+      salvarEstado();
+
+      // Atualiza os cards de topo
+      const elKmIni = document.getElementById('disp-km-ini');
+      const elKmAtual = document.getElementById('disp-km-atual');
+      const elKmRodados = document.getElementById('disp-km-rodados');
+      if (elKmIni) elKmIni.innerText = estadoCCOS.vtr.kmInicial;
+      if (elKmAtual) elKmAtual.innerText = estadoCCOS.vtr.kmFinal;
+      if (elKmRodados) elKmRodados.innerText = `+${estadoCCOS.vtr.kmFinal - estadoCCOS.vtr.kmInicial} km`;
+
+      fecharModalEditarRelatorio();
+      renderizarRelatorioTexto();
+      alert("✓ Relatório atualizado com sucesso!");
+    }
+
+    // Monitoramento contínuo em segundo plano
+    setInterval(() => {
+      carregarMensagensChatAoVivo();
+      buscarEVerificarRelatorioUS();
+    }, 5000);
 
     // REGISTRO DO SERVICE WORKER (PWA - FUNCIONAMENTO OFFLINE)
     if ('serviceWorker' in navigator) {
