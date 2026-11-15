@@ -9,7 +9,6 @@
     "telegram": "node bot_ccos.js"
   },
   "dependencies": {
-    "@google/genai": "^0.1.1",
     "@whiskeysockets/baileys": "^6.7.12",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
