@@ -3,7 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const PASTA_DADOS = path.join(__dirname, '..', 'dados');
+const PASTA_DADOS = path.join(__dirname, 'dados');
 let db = null;
 let modo = 'disco';
 
