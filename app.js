@@ -408,6 +408,9 @@ function desenharCentral() {
         contador(E.pendentesEntrada, 'Na entrada', () => { S.filtroEntrada = 'pendente'; trocarAba('entrada'); }))));
   }
 
+  // --- Botão do resumo (tudo o que importa numa tela só)
+  c.append(el('button', { class: 'btn primario largo', style: 'padding:14px;font-size:15px', onclick: abrirResumo }, '📋 Resumo do plantão — tudo o que importa'));
+
   // --- Sugestão de nova escala (só para o líder de plantão)
   if (p.sugerirNovaEscala && deplantao()) {
     c.append(el('div', { class: 'faixa info' },
@@ -442,6 +445,7 @@ async function assumir() {
     await api('POST', '/api/plantao/assumir');
     aviso('Plantão assumido ✓');
     await recarregarTudo();
+    abrirResumo();
   } catch (e) { aviso(e.message, true); }
 }
 
@@ -1127,11 +1131,89 @@ function abrirMenu() {
     el('p', { class: 'mudo pequeno', style: 'margin:0', text: `${u.email} · ${u.rotuloPerfil}` }),
     el('div', { class: 'menu-lista' },
       item('👤', 'Meu perfil e WhatsApp', abrirPerfil),
+      item('📋', 'Resumo do plantão', abrirResumo),
       item('📦', 'Passagem da escala', abrirEscala),
       item('🗂️', 'Turnos anteriores', abrirHistorico),
       ehAdmin() ? item('👥', 'Usuários', abrirUsuarios) : null,
       ehAdmin() ? item('⚙️', 'Configurações', abrirConfig) : null,
       item('🚪', 'Sair', async () => { await api('POST', '/api/logout'); mostrarLogin(); }))
+  ]);
+}
+
+// ----------------------------- Resumo do plantão ---------------------
+async function abrirResumo() {
+  try { await Promise.all([carregarCentral(), carregarFicha(), carregarEntrada()]); } catch (e) { return aviso(e.message, true); }
+  const C = S.central, F = S.ficha, E = S.estado;
+  const abertas = C.pendencias.filter(p => p.status === 'ABERTA');
+  const avisos = abertas.filter(p => p.tipo === 'AVISO');
+  const digital = abertas.filter(p => p.tipo === 'DIGITAL');
+  const opsAndamento = C.operacoes.filter(o => !o.horaFinal);
+  const emails = emailsPendentes();
+  const urgentes = S.entrada.filter(i => i.status === 'pendente' && i.urgente);
+  const naEntrada = S.entrada.filter(i => i.status === 'pendente' && !i.urgente).length;
+  const ultimaAtualizacao = p => (p.historico || []).filter(h => h.tipo === 'ATUALIZACAO').slice(-1)[0];
+  const linhasNavio = lista => (lista || []).filter(n => n.navio || (n.linhas || []).some(Boolean));
+
+  const linhaItem = (ic, tit, sub, abrir, extra) => el('button', { class: `pend${extra || ''}`, onclick: () => { fecharPainel(); abrir(); } },
+    el('span', { class: 'ic', text: ic }), el('span', { style: 'min-width:0;white-space:normal' }, el('div', { class: 'tit', style: 'white-space:normal', text: tit }), sub ? el('div', { class: 'sub', style: 'white-space:pre-line', text: sub }) : null), el('span', { class: 'seta', text: '›' }));
+  const bloco = (titulo, qtd, itens, vazio) => el('section', { class: 'cartao' },
+    el('h2', {}, titulo, qtd !== null ? el('span', { class: `etiqueta ${qtd ? 'atencao' : 'ok'}`, style: 'margin-left:8px', text: String(qtd) }) : null),
+    itens.length ? el('div', { class: 'lista-pend' }, itens) : el('p', { class: 'mudo pequeno', style: 'margin:0', text: vazio }));
+
+  // texto para copiar / imprimir
+  const t = [];
+  t.push(`RESUMO DO PLANTÃO — ${F.turno} ${F.data}`, `Líder: ${E.plantao.liderNome || 'ninguém assumiu'}`, '');
+  if (urgentes.length) { t.push('🚨 URGENTE'); urgentes.forEach(i => t.push(`• ${i.hora} ${i.autor}: ${i.texto.replace(/\n+/g, ' ')}`)); t.push(''); }
+  t.push(`📌 AVISOS EM ABERTO (${avisos.length})`); avisos.forEach(p => { const u = ultimaAtualizacao(p); t.push(`• ${p.titulo}${p.texto ? ': ' + p.texto.replace(/\n+/g, ' ') : ''}${u ? ` (Atualização ${u.data} ${u.hora}h: ${u.texto})` : ''}`); }); if (!avisos.length) t.push('• S/A'); t.push('');
+  t.push(`🛠️ PENDÊNCIAS DA DIGITAL (${digital.length})`); digital.forEach(p => t.push(`• ${p.titulo}${p.texto ? ': ' + p.texto.replace(/\n+/g, ' ') : ''}`)); if (!digital.length) t.push('• S/A'); t.push('');
+  t.push(`🚢 OPERAÇÕES EM ANDAMENTO (${opsAndamento.length})`); opsAndamento.forEach(o => t.push(`• ${o.rotuloTipo} · ${o.navio || '?'} · desde ${o.horaInicial || '?'}${o.placa ? ' · ' + o.placa : ''}`)); if (!opsAndamento.length) t.push('• S/A'); t.push('');
+  t.push(`✉️ E-MAILS A ENCAMINHAR (${emails.length})`); emails.forEach(o => t.push(`• ${o.rotuloTipo} · ${o.navio || ''}`)); if (!emails.length) t.push('• S/A'); t.push('');
+  t.push('🏁 SITUAÇÃO DO TERMINAL');
+  t.push(`• VTR ${F.vtr?.modelo || ''} ${F.vtr?.placa || ''}: KM ${F.vtr?.kmInicial ?? '—'}`);
+  t.push(`• CFTV: ${(F.sistemas?.cftv || 'S/A').replace(/\n+/g, ' ')}`);
+  t.push(`• Controle de acesso: ${(F.sistemas?.ca || 'S/A').replace(/\n+/g, ' ')}`);
+  t.push(`• OCR: ${F.sistemas?.ocrAssertividade || '—'} · ${F.sistemas?.ocrLeituras || '—'} leituras`);
+  for (const [nome, chave] of [['T-ORE', 'tore'], ['T-OIL', 'toil']]) {
+    const ns = linhasNavio(F.navios?.[chave]);
+    t.push(`• ${nome}: ${ns.length ? ns.map(n => `${n.navio}${(n.linhas || []).filter(Boolean).length ? ' (' + n.linhas.filter(Boolean).map(l => l.replace(/[.;]\s*$/, '')).join(' · ') + ')' : ''}`).join(' | ') : 'S/A'}`);
+  }
+  const textoResumo = t.join('\n');
+
+  const navioCartao = (nome, chave) => {
+    const ns = linhasNavio(F.navios?.[chave]);
+    return el('div', {}, el('div', { class: 'terminal-tit', text: nome }),
+      ns.length ? ns.map(n => el('div', { class: 'pequeno', style: 'margin:4px 0' }, el('strong', { text: n.navio || '(sem nome)' }), (n.linhas || []).filter(Boolean).length ? ` — ${n.linhas.filter(Boolean).map(l => l.replace(/[.;]\s*$/, '')).join(' · ')}` : ''))
+        : el('div', { class: 'mudo pequeno', text: 'S/A' }));
+  };
+  const info = (k, v) => el('div', {}, el('div', { class: 'mudo pequeno', text: k }), el('div', { style: 'white-space:pre-wrap', text: v || '—' }));
+  const h = F.herdadoDe;
+
+  abrirPainel('📋 Resumo do plantão', [
+    el('section', { class: 'faixa' },
+      el('h2', { text: `${F.turno} · ${F.data}` }),
+      el('div', { class: 'mudo pequeno', text: `Líder de plantão: ${E.plantao.liderNome || 'ninguém assumiu ainda'}${h ? ` · herdado de ${h.autor || 'equipe anterior'} (${h.turno || ''} ${h.data || ''})` : ''}` }),
+      el('div', { class: 'contadores' },
+        contador(urgentes.length, 'Urgentes', () => {}, urgentes.length > 0),
+        contador(avisos.length + digital.length, 'Pendências', () => {}),
+        contador(opsAndamento.length + emails.length, 'Operações/e-mails', () => {})),
+      el('div', { class: 'linha' },
+        el('button', { class: 'btn pequeno', onclick: () => copiar(textoResumo) }, '📋 Copiar resumo'),
+        el('button', { class: 'btn pequeno', onclick: () => imprimir(`CCOS — Resumo do plantão ${F.turno} · ${F.data}`, textoResumo) }, '📄 Imprimir / PDF'))),
+    urgentes.length ? bloco('🚨 Urgente', urgentes.length, urgentes.map(i => linhaItem('🚨', `${i.hora} · ${i.autor}`, i.texto, () => { S.filtroEntrada = 'pendente'; trocarAba('entrada'); }, ' erro')), '') : null,
+    bloco('📌 Avisos em aberto', avisos.length, avisos.map(p => { const u = ultimaAtualizacao(p); return linhaItem('📌', p.titulo, `${p.texto || ''}${u ? `\nÚltima atualização (${u.data} ${u.hora}h, ${u.por}): ${u.texto}` : ''}\nAberto há ${p.turnosAberto} turno(s)`, () => abrirPendencia(p)); }), 'Nenhum aviso em aberto.'),
+    bloco('🛠️ Pendências da Digital', digital.length, digital.map(p => linhaItem('🛠️', p.titulo, `${p.texto || ''}\nAberta há ${p.turnosAberto} turno(s)`, () => abrirPendencia(p))), 'Nenhuma pendência da Digital.'),
+    bloco('🚢 Operações em andamento', opsAndamento.length, opsAndamento.map(o => linhaItem('🚢', `${o.rotuloTipo} · ${o.navio || '?'}`, `Desde ${o.horaInicial || '?'}${o.placa ? ' · placa ' + o.placa : ''}${o.empresa ? ' · ' + o.empresa : ''}`, () => abrirOperacao(o))), 'Nenhuma operação aguardando saída.'),
+    bloco('✉️ E-mails a encaminhar', emails.length, emails.map(o => linhaItem('✉️', `${o.rotuloTipo} · ${o.navio || ''}`, o.email?.status === 'ENVIADO' ? `No e-mail do líder desde ${quando(o.email.enviadoEm)}` : (o.email?.erro || 'Aguardando envio'), () => abrirEmail(o), o.email?.status === 'ERRO' ? ' erro' : '')), 'Tudo encaminhado.'),
+    el('section', { class: 'cartao' }, el('h2', { text: '🏁 Situação do terminal' }),
+      el('div', { class: 'grade-2' },
+        info('VTR', `${F.vtr?.modelo || ''} ${F.vtr?.placa || ''}\nKM inicial ${F.vtr?.kmInicial != null ? Number(F.vtr.kmInicial).toLocaleString('pt-BR') : '—'}`),
+        info('OCR', `${F.sistemas?.ocrAssertividade || '—'} · ${F.sistemas?.ocrLeituras || '—'} leituras`),
+        info('CFTV', F.sistemas?.cftv || 'S/A'),
+        info('Controle de acesso', F.sistemas?.ca || 'S/A')),
+      navioCartao('T-ORE', 'tore'), navioCartao('T-OIL', 'toil')),
+    naEntrada ? el('section', { class: 'faixa info' },
+      el('strong', { text: `📥 ${naEntrada} mensagem(ns) do grupo aguardando destino` }),
+      el('div', {}, el('button', { class: 'btn pequeno', onclick: () => { fecharPainel(); S.filtroEntrada = 'pendente'; trocarAba('entrada'); } }, 'Abrir Entrada'))) : null
   ]);
 }
 
