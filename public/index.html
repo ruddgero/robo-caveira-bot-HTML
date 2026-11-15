@@ -139,7 +139,7 @@
           <div class="flex items-center gap-2.5">
             <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse-slow"></span>
             <div>
-              <div class="font-bold text-slate-200 text-xs">1. Grupo Operações T-ORE / T-OIL</div>
+              <div class="font-bold text-slate-200 text-xs" id="banner-nome-grupo-1">1. Grupo Operações T-ORE / T-OIL</div>
               <div class="text-[10px] text-slate-400">Escutando: Rancho, Tripulantes, Resíduos e Navios</div>
             </div>
           </div>
@@ -151,7 +151,7 @@
           <div class="flex items-center gap-2.5">
             <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse-slow"></span>
             <div>
-              <div class="font-bold text-slate-200 text-xs">2. Grupo CCOS & Segurança Portuária</div>
+              <div class="font-bold text-slate-200 text-xs" id="banner-nome-grupo-2">2. Grupo CCOS & Segurança Portuária</div>
               <div class="text-[10px] text-slate-400">Escutando: Viaturas, Ocorrências, CFTV e Portaria</div>
             </div>
           </div>
@@ -291,31 +291,58 @@
           <!-- Bloco 2: Gestão de Grupos e Disparos Oficiais -->
           <div class="bg-slate-950 p-4 rounded-2xl border border-slate-800/90 space-y-3 shadow-inner">
             <div class="flex justify-between items-center">
-              <span class="text-xs font-bold text-slate-300 uppercase tracking-wide flex items-center gap-1.5">
+              <span class="text-xs font-bold text-indigo-400 uppercase tracking-wide flex items-center gap-1.5">
                 <span>📡</span> Grupos Conectados ao Robô
               </span>
-              <span class="text-[10px] text-amber-400 bg-amber-950/60 px-2 py-0.5 rounded border border-amber-500/30 font-bold">100% Silencioso</span>
+              <span id="badge-grupos-modo" class="text-[10px] text-emerald-400 bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-500/30 font-bold">100% Silencioso</span>
             </div>
 
-            <div class="space-y-2">
-              <div class="p-2.5 bg-slate-900 border border-slate-800 rounded-xl flex items-center justify-between">
-                <div>
-                  <div class="text-xs font-bold text-white">1. Operações T-ORE & T-OIL</div>
-                  <div class="text-[10px] text-slate-400">Escuta Rancho, Tripulantes, Resíduos e Navios</div>
+            <p class="text-[11px] text-slate-400 leading-relaxed">
+              Direcione quais grupos do seu WhatsApp o robô deve monitorar e receber os relatórios:
+            </p>
+
+            <div class="space-y-2.5">
+              <!-- Seletor Grupo 1: Operações -->
+              <div class="p-2.5 bg-slate-900 border border-slate-800 rounded-xl space-y-1">
+                <div class="flex justify-between items-center">
+                  <label class="text-xs font-bold text-white flex items-center gap-1">
+                    <span class="text-indigo-400 font-black">1.</span> Grupo Operações T-ORE & T-OIL
+                  </label>
+                  <span class="text-[9px] text-emerald-400 font-mono bg-emerald-950/60 px-1.5 py-0.5 rounded">Rancho/Tripulantes</span>
                 </div>
-                <span class="text-[10px] text-emerald-400 font-bold bg-emerald-950/80 px-2 py-0.5 rounded border border-emerald-500/30">MONITORANDO</span>
+                <select id="select-grupo-1" onchange="alterarSelecaoGrupo(1)" class="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-xs text-white focus:border-indigo-500 focus:outline-none">
+                  <option value="">Aguardando conexão do WhatsApp...</option>
+                </select>
+                <div id="info-grupo-1" class="text-[10px] text-slate-400 truncate">Grupo padrão ativo</div>
               </div>
-              <div class="p-2.5 bg-slate-900 border border-slate-800 rounded-xl flex items-center justify-between">
-                <div>
-                  <div class="text-xs font-bold text-white">2. Segurança & CCOS Portuário</div>
-                  <div class="text-[10px] text-slate-400">Escuta Viaturas, CFTV, Portaria e Ocorrências</div>
+
+              <!-- Seletor Grupo 2: Segurança & CCOS -->
+              <div class="p-2.5 bg-slate-900 border border-slate-800 rounded-xl space-y-1">
+                <div class="flex justify-between items-center">
+                  <label class="text-xs font-bold text-white flex items-center gap-1">
+                    <span class="text-indigo-400 font-black">2.</span> Grupo Segurança & CCOS Portuário
+                  </label>
+                  <span class="text-[9px] text-emerald-400 font-mono bg-emerald-950/60 px-1.5 py-0.5 rounded">Viaturas/CFTV</span>
                 </div>
-                <span class="text-[10px] text-emerald-400 font-bold bg-emerald-950/80 px-2 py-0.5 rounded border border-emerald-500/30">MONITORANDO</span>
+                <select id="select-grupo-2" onchange="alterarSelecaoGrupo(2)" class="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-xs text-white focus:border-indigo-500 focus:outline-none">
+                  <option value="">Aguardando conexão do WhatsApp...</option>
+                </select>
+                <div id="info-grupo-2" class="text-[10px] text-slate-400 truncate">Grupo padrão ativo</div>
+              </div>
+
+              <!-- Botões de Ação para Grupos -->
+              <div class="flex gap-2 pt-1">
+                <button onclick="carregarGruposDoWhatsApp()" id="btn-carregar-grupos" class="flex-1 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold border border-slate-700 flex items-center justify-center gap-1.5 transition shadow">
+                  <span>🔄</span> Listar Grupos do Zap
+                </button>
+                <button onclick="confirmarGruposSelecionados()" id="btn-confirmar-grupos" class="flex-1 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 shadow">
+                  <span>✓</span> Confirmar Grupos
+                </button>
               </div>
             </div>
 
             <!-- Botões Operacionais de Disparo -->
-            <div class="pt-2 space-y-2">
+            <div class="pt-2 space-y-2 border-t border-slate-800/80">
               <button onclick="dispararRelatorioNosGrupos()" class="w-full py-3 bg-gradient-to-r from-indigo-600 via-blue-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/30">
                 <span>🚀</span> Disparar Relatório Oficial nos 2 Grupos
               </button>
@@ -1539,6 +1566,13 @@ ${estadoCCOS.equipes.assumindo}`;
               <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
               WHATSAPP ESPELHADO
             `;
+            if (listaGruposWhatsAppCache.length === 0) {
+              carregarGruposDoWhatsApp();
+            }
+          }
+          if (d.configuracaoGrupos) {
+            gruposConfiguradosAtuais = d.configuracaoGrupos;
+            atualizarLabelsGruposNaTela(d.configuracaoGrupos);
           }
         }
 
@@ -1659,6 +1693,166 @@ ${estadoCCOS.equipes.assumindo}`;
       }
     }
 
+    // ==========================================
+    // GESTÃO DINÂMICA DE GRUPOS DO WHATSAPP (SELEÇÃO DIRETA NA TELA)
+    // ==========================================
+    let listaGruposWhatsAppCache = [];
+    let gruposConfiguradosAtuais = {
+      grupo1: { id: '', nome: '1. Grupo Operações T-ORE / T-OIL' },
+      grupo2: { id: '', nome: '2. Grupo CCOS & Segurança Portuária' }
+    };
+
+    async function carregarGruposDoWhatsApp() {
+      const btn = document.getElementById('btn-carregar-grupos');
+      const s1 = document.getElementById('select-grupo-1');
+      const s2 = document.getElementById('select-grupo-2');
+      const apiUrl = obterUrlServidorSegura();
+
+      if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<span class="animate-spin">⏳</span> Puxando Grupos...';
+      }
+
+      try {
+        const r = await fetch(`${apiUrl}/api/grupos-whatsapp`);
+        const d = await r.json();
+
+        if (d.configurados) {
+          gruposConfiguradosAtuais = d.configurados;
+          atualizarLabelsGruposNaTela(d.configurados);
+        }
+
+        if (d.conectado && d.grupos && d.grupos.length > 0) {
+          listaGruposWhatsAppCache = d.grupos;
+          if (s1) popularSelectGrupos(s1, d.grupos, gruposConfiguradosAtuais.grupo1?.id);
+          if (s2) popularSelectGrupos(s2, d.grupos, gruposConfiguradosAtuais.grupo2?.id);
+          if (btn) {
+            btn.innerHTML = `✓ ${d.grupos.length} Grupos Encontrados`;
+            btn.className = 'flex-1 py-2 bg-emerald-950/60 text-emerald-400 border border-emerald-500/30 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition shadow';
+            setTimeout(() => {
+              btn.innerHTML = '🔄 Listar Grupos do Zap';
+              btn.disabled = false;
+            }, 4000);
+          }
+        } else {
+          const msg = d.mensagem || "WhatsApp não conectado no servidor.";
+          if (s1) s1.innerHTML = `<option value="">⚠️ ${msg}</option>`;
+          if (s2) s2.innerHTML = `<option value="">⚠️ ${msg}</option>`;
+          if (btn) {
+            btn.innerHTML = '🔄 Listar Grupos do Zap';
+            btn.disabled = false;
+          }
+          alert("⚠️ Aviso:\n" + msg + "\n\n👉 Conecte o seu WhatsApp no bloco de pareamento primeiro para listar seus grupos!");
+        }
+      } catch (err) {
+        if (btn) {
+          btn.innerHTML = '🔄 Tentar Novamente';
+          btn.disabled = false;
+        }
+        alert("⚠️ O servidor no Render pode estar acordando (~40s de espera). Aguarde alguns instantes e tente novamente.");
+      }
+    }
+
+    function popularSelectGrupos(selectElem, grupos, idSelecionado) {
+      let html = '<option value="">-- Selecione o Grupo do seu WhatsApp --</option>';
+      grupos.forEach(g => {
+        const sel = (g.id === idSelecionado) ? 'selected' : '';
+        html += `<option value="${g.id}" ${sel}>${escapeHtml(g.nome)} (${g.participantesQtd} membros)</option>`;
+      });
+      selectElem.innerHTML = html;
+    }
+
+    function alterarSelecaoGrupo(num) {
+      const s = document.getElementById(`select-grupo-${num}`);
+      const info = document.getElementById(`info-grupo-${num}`);
+      const nome = s.options[s.selectedIndex]?.text || '';
+      if (s.value) {
+        info.innerText = `Selecionado: ${nome}`;
+        info.className = 'text-[10px] text-emerald-400 truncate font-semibold';
+      } else {
+        info.innerText = 'Nenhum grupo selecionado';
+        info.className = 'text-[10px] text-slate-400 truncate';
+      }
+    }
+
+    async function confirmarGruposSelecionados() {
+      const s1 = document.getElementById('select-grupo-1');
+      const s2 = document.getElementById('select-grupo-2');
+      const btn = document.getElementById('btn-confirmar-grupos');
+      const apiUrl = obterUrlServidorSegura();
+      const apiToken = localStorage.getItem('CAVEIRA_API_TOKEN') || '';
+
+      const g1Id = s1 ? s1.value : '';
+      const g1Nome = s1 ? s1.options[s1.selectedIndex]?.text.replace(/\s\(\d+\smembros\)$/, '') : '';
+      const g2Id = s2 ? s2.value : '';
+      const g2Nome = s2 ? s2.options[s2.selectedIndex]?.text.replace(/\s\(\d+\smembros\)$/, '') : '';
+
+      if (!g1Id && !g2Id) {
+        alert("⚠️ Por favor, selecione pelo menos um grupo do seu WhatsApp nos menus acima antes de confirmar.");
+        return;
+      }
+
+      if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<span class="animate-spin">⏳</span> Salvando...';
+      }
+
+      try {
+        const headers = { 'Content-Type': 'application/json' };
+        if (apiToken) headers['x-api-key'] = apiToken;
+
+        const r = await fetch(`${apiUrl}/api/configurar-grupos`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            grupo1Id: g1Id,
+            grupo1Nome: g1Nome,
+            grupo2Id: g2Id,
+            grupo2Nome: g2Nome
+          })
+        });
+
+        const d = await r.json();
+        if (d.sucesso) {
+          gruposConfiguradosAtuais = d.configurados;
+          atualizarLabelsGruposNaTela(d.configurados);
+          if (btn) {
+            btn.innerHTML = '✓ Grupos Salvos!';
+            btn.className = 'flex-1 py-2 bg-emerald-600 text-white rounded-xl text-xs font-bold transition shadow';
+            setTimeout(() => {
+              btn.innerHTML = '✓ Confirmar Grupos';
+              btn.disabled = false;
+            }, 3000);
+          }
+          alert(`🎉 GRUPOS DIRECIONADOS COM SUCESSO!\n\n1. Operações: ${g1Nome || 'Não alterado'}\n2. Segurança: ${g2Nome || 'Não alterado'}\n\nO CAVEIRA BOT já está monitorando silenciosamente estes grupos!`);
+        } else {
+          throw new Error(d.erro || "Falha ao salvar grupos.");
+        }
+      } catch (err) {
+        if (btn) {
+          btn.disabled = false;
+          btn.innerHTML = '✓ Confirmar Grupos';
+        }
+        alert("Erro ao salvar configuração: " + err.message);
+      }
+    }
+
+    function atualizarLabelsGruposNaTela(config) {
+      const cfg = config || gruposConfiguradosAtuais;
+      if (cfg.grupo1?.nome) {
+        const b1 = document.getElementById('banner-nome-grupo-1');
+        if (b1) b1.innerText = `1. ${cfg.grupo1.nome}`;
+        const i1 = document.getElementById('info-grupo-1');
+        if (i1) i1.innerText = `Ativo: ${cfg.grupo1.nome}`;
+      }
+      if (cfg.grupo2?.nome) {
+        const b2 = document.getElementById('banner-nome-grupo-2');
+        if (b2) b2.innerText = `2. ${cfg.grupo2.nome}`;
+        const i2 = document.getElementById('info-grupo-2');
+        if (i2) i2.innerText = `Ativo: ${cfg.grupo2.nome}`;
+      }
+    }
+
     async function testarMensagemLider() {
       const apiUrl = obterUrlServidorSegura();
       const apiToken = localStorage.getItem('CAVEIRA_API_TOKEN') || '';
@@ -1671,10 +1865,10 @@ ${estadoCCOS.equipes.assumindo}`;
         if (d.sucesso) {
           alert("📩 Mensagem de teste enviada com sucesso para o WhatsApp do Líder Ruddgero!");
         } else {
-          alert("Aviso: " + (d.erro || "WhatsApp não conectado no servidor."));
+          alert("⚠️ Aviso do Servidor:\n" + (d.erro || "WhatsApp ainda não conectado no robô.\n\n👉 Gere o código de 8 dígitos no bloco acima e conecte seu WhatsApp primeiro!"));
         }
       } catch (e) {
-        alert("⚠️ Não foi possível comunicar com o servidor Render.");
+        alert("⚠️ O servidor no Render pode estar iniciando ou dormindo (~40s de espera no plano gratuito).\n\n1. Conecte primeiro o seu celular usando o código de 8 dígitos no bloco acima.\n2. Aguarde 30 segundos e tente novamente.");
       }
     }
 
