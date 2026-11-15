@@ -563,7 +563,7 @@ async function iniciarBotWhatsApp() {
 // ==========================================
 const app = express();
 
-// Configuração segura de CORS (GitHub Pages + Localhost)
+// Configuração segura de CORS (GitHub Pages + Render + Localhost)
 const origensPermitidas = [
     'https://ruddgero.github.io',
     process.env.CORS_ORIGIN || ''
@@ -572,7 +572,14 @@ const origensPermitidas = [
 app.use(cors({
     origin: function (origem, callback) {
         if (!origem) return callback(null, true);
-        const permitida = origensPermitidas.some(o => o === '*' || origem === o || origem.startsWith('https://ruddgero.github.io') || origem.includes('localhost') || origem.includes('127.0.0.1'));
+        const permitida = origensPermitidas.some(o => 
+            o === '*' || 
+            origem === o || 
+            origem.includes('github.io') || 
+            origem.includes('onrender.com') || 
+            origem.includes('localhost') || 
+            origem.includes('127.0.0.1')
+        );
         if (permitida) {
             callback(null, true);
         } else {
