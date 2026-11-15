@@ -85,6 +85,8 @@ const NUMERO_LIDER_RUDDGERO = process.env.WHATSAPP_NUMERO_LIDER || '552299999999
 // Sessões privadas e memória volátil de feed
 const sessoesPrivadas = new Map();
 let feedInterceptado = [];
+let historicoMensagensWhatsApp = [];
+let ultimoRelatorioCaptado = null;
 let sockWhatsApp = null;
 let statusConexaoWhatsApp = 'DESCONECTADO';
 let qrCodeAtual = null;
@@ -213,6 +215,58 @@ function ehOcorrenciaCritica(texto) {
     if (!texto) return false;
     const tLower = texto.toLowerCase();
     return PALAVRAS_CHAVE_EMERGENCIA.some(kw => tLower.includes(kw));
+}
+
+function ehOperacaoBordo(texto) {
+    if (!texto) return false;
+    const t = texto.toLowerCase();
+    return t.includes('rancho') || t.includes('tripulante') || t.includes('resíduo') || t.includes('residuo') || t.includes('bunker') || t.includes('água potável') || t.includes('agua potavel');
+}
+
+function ehRelatorioDoTurno(texto) {
+    if (!texto || typeof texto !== 'string') return false;
+    const t = texto.toUpperCase();
+    return (t.includes('RELATÓRIO DO TURNO') || t.includes('RELATORIO DO TURNO') || t.includes('RELATÓRIO OFICIAL') || t.includes('PASSAGEM DE TURNO')) &&
+           (t.includes('VTR') || t.includes('VIATURA') || t.includes('CFTV') || t.includes('SISTEMAS') || t.includes('ATIVIDADES') || t.includes('EQUIPE'));
+}
+
+function extrairDadosRelatorioAnterior(texto) {
+    if (!texto) return null;
+    const dados = {
+        dataRelatorio: '',
+        turno: '',
+        vtrKmInicial: null,
+        vtrKmFinal: null,
+        equipeSaindo: '',
+        equipeAssumindo: '',
+        sistemas: '',
+        avisos: [],
+        naviosTore: '',
+        naviosToil: ''
+    };
+
+    const mData = texto.match(/Data:\s*(\d{2}\/\d{2}\/\d{4})/i);
+    if (mData) dados.dataRelatorio = mData[1];
+
+    const mTurno = texto.match(/RELAT[ÓO]RIO DO TURNO\s*[-–]?\s*(DIURNO|NOTURNO)/i);
+    if (mTurno) dados.turno = mTurno[1].toUpperCase();
+
+    const mKmFinal = texto.match(/KM\s*Final:\s*(\d{5})/i) || texto.match(/Final:\s*(\d{5})/i);
+    if (mKmFinal) dados.vtrKmFinal = parseInt(mKmFinal[1], 10);
+
+    const mAssumindo = texto.match(/EQUIPE ASSUMINDO:\s*\n?([^\n\r]+)/i);
+    if (mAssumindo) dados.equipeAssumindo = mAssumindo[1].trim();
+
+    const mSaindo = texto.match(/EQUIPE SAINDO:\s*\n?([^\n\r]+)/i);
+    if (mSaindo) dados.equipeSaindo = mSaindo[1].trim();
+
+    const mTore = texto.match(/T-ORE\s*\n([\s\S]*?)(?=T-OIL|7\.\s*OCORR)/i);
+    if (mTore) dados.naviosTore = mTore[1].trim();
+
+    const mToil = texto.match(/T-OIL\s*\n([\s\S]*?)(?=7\.\s*OCORR|8\.\s*PASSAGEM)/i);
+    if (mToil) dados.naviosToil = mToil[1].trim();
+
+    return dados;
 }
 
 // Baixa automática de veículos por placa e disparo de e-mail de bordo
@@ -479,13 +533,50 @@ async function iniciarBotWhatsApp() {
                 // CASO A: MENSAGEM NO GRUPO MONITORADO (100% SILENCIOSO)
                 // ==========================================
                 if (ehGrupo && ehGrupoMonitorado) {
+                    const hora = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) + 'h';
+                    const nomeDoGrupo = (chatId === configuracaoGrupos.grupo1?.id)
+                        ? configuracaoGrupos.grupo1.nome
+                        : ((chatId === configuracaoGrupos.grupo2?.id) ? configuracaoGrupos.grupo2.nome : 'Grupo Operacional');
+
+                    // Armazena no Histórico de Espelhamento do Chat estilo WhatsApp Web
+                    const registroChat = {
+                        id: m.key.id || Date.now().toString(),
+                        chatId: chatId,
+                        nomeGrupo: nomeDoGrupo,
+                        autor: nomeAutor,
+                        texto: texto,
+                        hora: hora,
+                        timestamp: m.messageTimestamp ? Number(m.messageTimestamp) * 1000 : Date.now(),
+                        fromMe: ehFromMe,
+                        tipo: ehRelatorioDoTurno(texto) ? 'RELATORIO_TURNO' : (ehOcorrenciaCritica(texto) ? 'SOS' : (ehOperacaoBordo(texto) ? 'OPERACAO' : (ehMensagemRuido(texto) ? 'RUIDO' : 'ATIVIDADE')))
+                    };
+
+                    historicoMensagensWhatsApp.push(registroChat);
+                    if (historicoMensagensWhatsApp.length > 250) {
+                        historicoMensagensWhatsApp.shift();
+                    }
+
+                    // Se for um Relatório do Turno enviado no grupo, captura e extrai para herança!
+                    if (ehRelatorioDoTurno(texto)) {
+                        console.log(`📑 [RELATÓRIO DETECTADO] Captado relatório de turno enviado por ${nomeAutor} no grupo ${nomeDoGrupo}!`);
+                        ultimoRelatorioCaptado = {
+                            textoBruto: texto,
+                            autor: nomeAutor,
+                            grupo: nomeDoGrupo,
+                            chatId: chatId,
+                            hora: hora,
+                            data: new Date().toLocaleDateString('pt-BR'),
+                            dados: extrairDadosRelatorioAnterior(texto)
+                        };
+                    }
+
                     if (ehFromMe) continue; // Não reprocessa mensagens próprias no grupo
 
                     if (ehMensagemRuido(texto)) {
                         feedInterceptado.push({
                             id: Date.now(),
-                            hora: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) + 'h',
-                            grupo: 'Grupo Operacional',
+                            hora: hora,
+                            grupo: nomeDoGrupo,
                             autor: nomeAutor,
                             texto: texto,
                             tipo: 'RUIDO'
@@ -495,13 +586,12 @@ async function iniciarBotWhatsApp() {
 
                     console.log(`📡 [GRUPO MONITORADO] Captado de ${nomeAutor}: "${texto}"`);
                     const plantao = await carregarPlantaoAtivo();
-                    const hora = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) + 'h';
 
                     // Registra no feed para a interface Web
                     feedInterceptado.push({
                         id: Date.now(),
                         hora: hora,
-                        grupo: 'Grupo Operacional',
+                        grupo: nomeDoGrupo,
                         autor: nomeAutor,
                         texto: texto,
                         tipo: ehOcorrenciaCritica(texto) ? 'SOS' : 'ATIVIDADE'
@@ -730,6 +820,93 @@ app.post('/api/configurar-grupos', async (req, res) => {
         });
     } catch (err) {
         return res.status(500).json({ sucesso: false, erro: err.message });
+    }
+});
+
+// Endpoint 1.4: Mensagens do chat para espelhamento estilo WhatsApp Web
+app.get('/api/mensagens-chat', (req, res) => {
+    const { grupo, busca } = req.query;
+    let msgs = [...historicoMensagensWhatsApp];
+
+    if (grupo) {
+        msgs = msgs.filter(m => m.chatId === grupo);
+    }
+    if (busca) {
+        const termo = busca.toLowerCase();
+        msgs = msgs.filter(m => m.texto.toLowerCase().includes(termo) || m.autor.toLowerCase().includes(termo));
+    }
+
+    res.json({
+        total: msgs.length,
+        mensagens: msgs.slice(-100),
+        ultimoRelatorio: ultimoRelatorioCaptado
+    });
+});
+
+// Endpoint 1.5: Último relatório captado no grupo para herança de turno
+app.get('/api/ultimo-relatorio-us', (req, res) => {
+    res.json({
+        encontrado: !!ultimoRelatorioCaptado,
+        relatorio: ultimoRelatorioCaptado
+    });
+});
+
+// Endpoint 1.6: Aplicar herança do relatório anterior no plantão ativo
+app.post('/api/herdar-relatorio', async (req, res) => {
+    try {
+        if (!ultimoRelatorioCaptado || !ultimoRelatorioCaptado.dados) {
+            return res.status(404).json({ sucesso: false, erro: 'Nenhum relatório de turno anterior foi captado ainda nos grupos monitorados.' });
+        }
+
+        const plantao = await carregarPlantaoAtivo();
+        const d = ultimoRelatorioCaptado.dados;
+
+        // 1. KM da VTR: KM Final do turno anterior vira KM Inicial do atual
+        if (d.vtrKmFinal) {
+            const kmAnt = parseInt(d.vtrKmFinal, 10);
+            if (!isNaN(kmAnt)) {
+                plantao.vtr = plantao.vtr || {};
+                plantao.vtr.kmInicial = kmAnt;
+                if (!plantao.vtr.kmFinal || parseInt(plantao.vtr.kmFinal, 10) < kmAnt) {
+                    plantao.vtr.kmFinal = kmAnt;
+                }
+            }
+        }
+
+        // 2. Troca de Equipe: Quem assumiu vira a equipe que agora está saindo
+        if (d.equipeAssumindo) {
+            plantao.passagemTurno = plantao.passagemTurno || {};
+            plantao.passagemTurno.equipeSaindo = d.equipeAssumindo;
+        }
+
+        // 3. Navios: Mantém status dos navios até nova atualização
+        if (d.naviosTore || d.naviosToil) {
+            plantao.movimentacaoNavios = plantao.movimentacaoNavios || {};
+            if (d.naviosTore) plantao.movimentacaoNavios.tore = { relato: d.naviosTore };
+            if (d.naviosToil) plantao.movimentacaoNavios.toil = { relato: d.naviosToil };
+        }
+
+        // 4. Limpeza das atividades anteriores mantendo a base CCOS
+        plantao.atividades = [
+            '✓ Realizadas atividades administrativas.',
+            '✓ Executada ronda em todo o terminal, com apoio do Supervisor Sunset.'
+        ];
+
+        // 5. Ocorrências reiniciam com S/A
+        plantao.ocorrencias = ['✓ S/A'];
+
+        await salvarPlantaoAtivo(plantao);
+
+        console.log(`✅ [HERANÇA APLICADA COM SUCESSO] KM Inicial: ${plantao.vtr?.kmInicial} | Equipe Saindo: ${plantao.passagemTurno?.equipeSaindo}`);
+
+        res.json({
+            sucesso: true,
+            mensagem: 'Dados herdados com sucesso do relatório anterior do grupo!',
+            plantaoAtualizado: plantao,
+            dadosHerdados: d
+        });
+    } catch (err) {
+        res.status(500).json({ sucesso: false, erro: err.message });
     }
 });
 
