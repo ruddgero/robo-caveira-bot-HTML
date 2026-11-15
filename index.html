@@ -258,7 +258,7 @@
               Digite o número do seu celular com DDD para gerar o código de pareamento:
             </p>
             <div class="flex gap-2">
-              <input type="tel" id="aba-whats-telefone" placeholder="5522998765432" value="552292444571" class="flex-1 bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-xs text-white font-mono focus:border-indigo-500 focus:outline-none">
+              <input type="tel" id="aba-whats-telefone" placeholder="Ex: 5522998765432" class="flex-1 bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-xs text-white font-mono focus:border-indigo-500 focus:outline-none">
               <button onclick="gerarCodigoNaAbaWhatsApp()" id="btn-gerar-codigo-aba" class="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold transition shadow flex items-center gap-1.5">
                 <span>⚡</span> Gerar Código
               </button>
@@ -266,24 +266,24 @@
 
             <!-- Caixa de Exibição do Código de 8 Dígitos -->
             <div id="aba-whats-display-box" class="p-3.5 bg-slate-900 border border-emerald-500/30 rounded-2xl text-center space-y-2">
-              <div class="text-[10px] text-slate-400 uppercase font-bold tracking-widest">Código de 8 Dígitos Gerado:</div>
+              <div class="text-[10px] text-slate-400 uppercase font-bold tracking-widest">Código de Pareamento Oficial:</div>
               <div id="aba-whats-codigo-grande" class="text-2xl sm:text-3xl font-mono font-black text-emerald-400 tracking-widest select-all">
-                16R7 - WKDB
+                ---- ----
               </div>
               <div class="flex justify-center gap-2 pt-1">
                 <button onclick="copiarCodigoPareamento()" class="px-3.5 py-1.5 bg-emerald-600/30 hover:bg-emerald-600/50 text-emerald-300 border border-emerald-500/30 rounded-xl text-xs font-bold transition inline-flex items-center gap-1 shadow">
                   <span>📋</span> Copiar Código
                 </button>
                 <a id="link-externo-render-aba" href="https://robo-caveira-bot-html.onrender.com/conectar" target="_blank" class="px-3.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded-xl text-xs font-bold transition inline-flex items-center gap-1">
-                  <span>🔗</span> Link Render
+                  <span>🔗</span> Abrir Conexão Direta
                 </a>
               </div>
-              <div class="text-[10px] text-slate-400 text-left pt-2 border-t border-slate-800/80 space-y-1">
-                <strong class="text-indigo-400 block">Como conectar no seu celular:</strong>
-                <div>1. Abra o WhatsApp no celular</div>
-                <div>2. Toque em <strong>Aparelhos Conectados &gt; Conectar um Aparelho</strong></div>
-                <div>3. Embaixo da câmera, toque em <strong>"Conectar com número de telefone"</strong></div>
-                <div>4. Digite o código de 8 dígitos acima!</div>
+              <div class="text-[11px] text-amber-300 text-left pt-2 border-t border-slate-800/80 space-y-1 bg-amber-950/20 p-2 rounded-xl border border-amber-500/20">
+                <strong class="text-amber-400 block font-bold">⚠️ ONDE DIGITAR ESSE CÓDIGO?</strong>
+                <div>1. Abra o WhatsApp <strong>NO SEU CELULAR</strong> (não aqui no navegador);</div>
+                <div>2. Vá nos 3 pontinhos &gt; <strong>Aparelhos Conectados &gt; Conectar um Aparelho</strong>;</div>
+                <div>3. Embaixo da câmera, toque em <strong>"Conectar com número de telefone"</strong>;</div>
+                <div>4. Digite no seu celular o código que aparecer acima!</div>
               </div>
             </div>
           </div>
@@ -490,43 +490,52 @@
         </p>
 
         <div class="space-y-2">
+          <label class="block text-slate-300 text-[11px] font-bold">1. Digite seu número do WhatsApp:</label>
           <input type="tel" id="pairing-telefone-input" placeholder="Ex: 5522998765432" class="w-full bg-slate-950 border border-slate-700 rounded-xl p-3 text-xs text-white font-mono focus:border-indigo-500 focus:outline-none">
           <button onclick="solicitarCodigoWeb()" id="btn-gerar-pairing-modal" class="w-full py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-bold transition shadow flex items-center justify-center gap-1.5">
-            <span>⚡</span> Gerar Código de 8 Dígitos
+            <span>⚡</span> Gerar Código de Pareamento
           </button>
         </div>
 
         <!-- Box do Código de 8 Dígitos -->
-        <div id="pairing-resultado-box" class="hidden p-4 bg-slate-950 border border-emerald-500/30 rounded-2xl text-center space-y-2">
-          <div class="text-[10px] text-slate-400 uppercase tracking-widest font-bold">Código Oficial Gerado:</div>
+        <div id="pairing-resultado-box" class="hidden p-4 bg-slate-950 border border-emerald-500/40 rounded-2xl text-center space-y-3">
+          <div class="text-[10px] text-emerald-400 uppercase tracking-widest font-bold">Código Gerado Oficial:</div>
           <div id="pairing-codigo-display" class="text-3xl font-mono font-black text-emerald-400 tracking-widest bg-slate-900 py-2.5 rounded-xl border border-emerald-500/40 select-all">
             ---- ----
           </div>
-          <div class="text-[11px] text-slate-300 text-left bg-slate-900/60 p-2.5 rounded-xl border border-slate-800 space-y-1">
-            <strong class="text-indigo-400 block">Como ativar no seu celular:</strong>
-            <div>1. Abra o WhatsApp no celular</div>
-            <div>2. Vá em <strong>Aparelhos Conectados &gt; Conectar um Aparelho</strong></div>
-            <div>3. Embaixo da câmera, toque em <strong>"Conectar com número de telefone"</strong></div>
-            <div>4. Digite o código de 8 dígitos acima!</div>
+          <div class="text-[11px] text-amber-300 text-left bg-amber-950/30 p-3 rounded-xl border border-amber-500/30 space-y-1.5">
+            <strong class="text-amber-400 block font-bold">⚠️ ATENÇÃO: NÃO DIGITE ESTE CÓDIGO NO SITE!</strong>
+            <div>Este código deve ser digitado <strong>NO SEU CELULAR</strong> no aplicativo WhatsApp:</div>
+            <div>1. Abra o WhatsApp no celular;</div>
+            <div>2. Toque em <strong>Aparelhos Conectados &gt; Conectar um Aparelho</strong>;</div>
+            <div>3. Abaixo da câmera, toque no link: <strong>"Conectar com número de telefone"</strong>;</div>
+            <div>4. Digite o código de 8 dígitos acima no celular!</div>
           </div>
         </div>
 
-        <div id="pairing-erro-box" class="hidden p-2.5 bg-red-950/50 border border-red-500/30 rounded-xl text-xs text-red-400 text-center"></div>
+        <div id="pairing-erro-box" class="hidden p-3 bg-red-950/60 border border-red-500/40 rounded-xl text-xs text-red-300 text-center space-y-1"></div>
 
+        <!-- Conexão Direta e Configurações Técnicas -->
         <div class="p-3 bg-slate-950 border border-slate-800 rounded-xl space-y-2">
           <div class="flex justify-between items-center">
-            <span class="font-bold text-indigo-400 text-[11px]">URL do seu Servidor no Render:</span>
-            <a id="link-direto-render" href="https://robo-caveira-bot-html.onrender.com/conectar" target="_blank" class="text-[10px] text-emerald-400 hover:underline flex items-center gap-1 font-bold">
-              <span>🔗</span> Abrir Conexão Direta
+            <span class="font-bold text-slate-300 text-[11px]">🔗 Conexão Direta (Sem precisar de app):</span>
+            <a id="link-direto-render" href="https://robo-caveira-bot-html.onrender.com/conectar" target="_blank" class="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-[10px] font-bold shadow flex items-center gap-1 transition">
+              <span>🚀</span> Abrir Tela Direta
             </a>
           </div>
-          <div class="flex gap-2">
-            <input type="text" id="input-api-url" value="https://robo-caveira-bot-html.onrender.com" placeholder="https://robo-caveira-bot-html.onrender.com" class="flex-1 bg-slate-900 border border-slate-700 rounded-lg p-2 text-xs text-white font-mono focus:border-indigo-500 focus:outline-none">
-            <button onclick="salvarUrlServidor()" class="px-3 py-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg font-bold text-xs transition">Salvar</button>
-          </div>
-          <div class="text-[10px] text-slate-400">
-            Dica: Confira no painel do Render se a URL do seu serviço é exatamente essa.
-          </div>
+          <details class="text-[11px] text-slate-400 pt-1">
+            <summary class="cursor-pointer hover:text-white font-medium">⚙️ Configurações Avançadas de Servidor (Opcional)</summary>
+            <div class="mt-2 space-y-2 pt-2 border-t border-slate-800">
+              <label class="block text-[10px] text-slate-400">Endereço Web do Servidor Node.js (Render / PC):</label>
+              <div class="flex gap-2">
+                <input type="text" id="input-api-url" value="https://robo-caveira-bot-html.onrender.com" placeholder="https://robo-caveira-bot-html.onrender.com" class="flex-1 bg-slate-900 border border-slate-700 rounded-lg p-2 text-xs text-white font-mono focus:border-indigo-500 focus:outline-none">
+                <button onclick="salvarUrlServidor()" class="px-3 py-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg font-bold text-xs transition">Salvar</button>
+              </div>
+              <div class="text-[10px] text-slate-500">
+                ⚠️ Não digite códigos aqui. Este campo serve apenas para o endereço web do servidor (iniciando com https://).
+              </div>
+            </div>
+          </details>
         </div>
       </div>
 
@@ -825,6 +834,17 @@
       if (aba === 'relatorio') renderizarRelatorioTexto();
     }
 
+    // FUNÇÃO AUXILIAR DE SEGURANÇA (PREVENÇÃO CONTRA XSS)
+    function escapeHtml(str) {
+      if (str === null || str === undefined) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
     // RENDERIZAR FEED SILENCIOSO
     function renderizarFeed() {
       const cont = document.getElementById('feed-mensagens-container');
@@ -848,10 +868,10 @@
 
         div.innerHTML = `
           <div class="flex items-center justify-between">
-            <span class="text-slate-400 font-mono text-[11px]">${item.hora} • <strong>${item.autor}</strong> (${item.grupo})</span>
+            <span class="text-slate-400 font-mono text-[11px]">${escapeHtml(item.hora)} • <strong>${escapeHtml(item.autor)}</strong> (${escapeHtml(item.grupo)})</span>
             ${badge}
           </div>
-          <div class="text-slate-200 text-xs font-sans">"${item.texto}"</div>
+          <div class="text-slate-200 text-xs font-sans">"${escapeHtml(item.texto)}"</div>
         `;
         cont.appendChild(div);
       });
@@ -973,17 +993,17 @@
 
         item.innerHTML = `
           <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5">
-            <strong class="text-white text-sm tracking-wide">${op.tipo} • ${op.navio}</strong>
+            <strong class="text-white text-sm tracking-wide">${escapeHtml(op.tipo)} • ${escapeHtml(op.navio)}</strong>
             <div class="flex items-center gap-1.5 flex-wrap">
               ${slaBadge}
               ${statusBadge}
             </div>
           </div>
           <div class="grid grid-cols-2 gap-2 text-slate-300 text-[11px] bg-slate-950 p-2.5 rounded-xl border border-slate-800/80">
-            <div>• Terminal: <strong>${op.terminal}</strong></div>
-            <div>• Veículo: <strong>${op.veiculo}</strong></div>
-            <div>• Prestador: <strong>${op.fornecedor}</strong></div>
-            <div>• Horários: <strong>${op.horaInicial}</strong> às <strong>${op.horaFinal || 'Aguardando saída...'}</strong></div>
+            <div>• Terminal: <strong>${escapeHtml(op.terminal)}</strong></div>
+            <div>• Veículo: <strong>${escapeHtml(op.veiculo)}</strong></div>
+            <div>• Prestador: <strong>${escapeHtml(op.fornecedor)}</strong></div>
+            <div>• Horários: <strong>${escapeHtml(op.horaInicial)}</strong> às <strong>${escapeHtml(op.horaFinal || 'Aguardando saída...')}</strong></div>
           </div>
           <div class="flex justify-end gap-2 pt-1">
             <button onclick="excluirOperacao(${idx})" class="px-2.5 py-1 text-slate-500 hover:text-red-400 text-xs">Excluir</button>
@@ -1137,7 +1157,7 @@ Informo que, caso necessário, os documentos originais seguem devidamente arquiv
         const item = document.createElement('div');
         item.className = 'p-3 bg-slate-900 border border-slate-800 rounded-2xl text-xs flex justify-between items-start gap-2 shadow-sm';
         item.innerHTML = `
-          <div class="text-slate-200">✓ ${at}</div>
+          <div class="text-slate-200">✓ ${escapeHtml(at)}</div>
           <button onclick="estadoCCOS.atividadesExtras.splice(${idx}, 1); salvarEstado(); renderizarAtividades();" class="text-slate-500 hover:text-red-400 p-1">✕</button>
         `;
         cont.appendChild(item);
@@ -1237,12 +1257,33 @@ ${estadoCCOS.equipes.assumindo}`;
       a.click();
     }
 
-    function dispararRelatorioNosGrupos() {
-      const apiUrl = localStorage.getItem('CAVEIRA_API_URL') || '';
-      if (apiUrl) {
-        fetch(`${apiUrl}/api/disparar-relatorio`, { method: 'POST' }).catch(() => {});
+    async function dispararRelatorioNosGrupos() {
+      const apiUrl = (localStorage.getItem('CAVEIRA_API_URL') || 'https://robo-caveira-bot-html.onrender.com').replace(/\/+$/, '');
+      const apiToken = localStorage.getItem('CAVEIRA_API_TOKEN') || '';
+
+      if (!confirm("⚠️ Confirmar o disparo imediato do Relatório Oficial de Turno (8 Seções) e anexo .txt nos grupos operacionais do CCOS?")) {
+        return;
       }
-      alert("🚀 COMANDO ENVIADO!\n\nO CAVEIRA BOT publicou o Relatório Consolidado de 8 seções e anexou o arquivo .txt oficial nos dois grupos operacionais monitorados!");
+
+      try {
+        const headers = { 'Content-Type': 'application/json' };
+        if (apiToken) headers['x-api-key'] = apiToken;
+
+        const res = await fetch(`${apiUrl}/api/disparar-relatorio`, {
+          method: 'POST',
+          headers
+        });
+
+        const data = await res.json().catch(() => ({}));
+
+        if (res.ok && data.sucesso) {
+          alert("🚀 RELATÓRIO DISPARADO COM SUCESSO!\n\nO CAVEIRA BOT publicou o Relatório Consolidado de 8 seções e anexou o arquivo .txt oficial nos grupos operacionais monitorados!");
+        } else {
+          alert(`⚠️ Falha ao disparar relatório:\n${data.erro || data.mensagem || 'Verifique se o WhatsApp está conectado no servidor Render.'}`);
+        }
+      } catch (err) {
+        alert(`❌ Erro de comunicação com o servidor:\n${err.message}\n\nVerifique se o serviço no Render está ativo.`);
+      }
     }
 
     // WIZARD DE 8 ETAPAS
@@ -1384,13 +1425,24 @@ ${estadoCCOS.equipes.assumindo}`;
       } catch (e) {}
     }
 
+    // SANITIZAÇÃO DE URL DO SERVIDOR (CORRIGE ERROS DE DIGITAÇÃO DE CÓDIGOS)
+    function obterUrlServidorSegura() {
+      let u = localStorage.getItem('CAVEIRA_API_URL');
+      if (!u || !u.startsWith('http')) {
+        u = 'https://robo-caveira-bot-html.onrender.com';
+        localStorage.setItem('CAVEIRA_API_URL', u);
+      }
+      return u.replace(/\/+$/, '');
+    }
+
     // MODAL DE PAREAMENTO POR CÓDIGO DE 8 DÍGITOS
     function abrirModalPareamentoWhatsApp() {
       document.getElementById('modal-pareamento').classList.remove('hidden');
-      const apiUrl = localStorage.getItem('CAVEIRA_API_URL') || 'https://robo-caveira-bot-html.onrender.com';
-      document.getElementById('input-api-url').value = apiUrl;
+      const apiUrl = obterUrlServidorSegura();
+      const inputUrl = document.getElementById('input-api-url');
+      if (inputUrl) inputUrl.value = apiUrl;
       const linkDireto = document.getElementById('link-direto-render');
-      if (linkDireto) linkDireto.href = `${apiUrl.replace(/\/+$/, '')}/conectar`;
+      if (linkDireto) linkDireto.href = `${apiUrl}/conectar`;
     }
 
     function fecharModalPareamento() {
@@ -1399,19 +1451,18 @@ ${estadoCCOS.equipes.assumindo}`;
 
     async function solicitarCodigoWeb() {
       const btn = document.getElementById('btn-gerar-pairing-modal');
-      const tel = document.getElementById('pairing-telefone-input').value.trim();
+      const telInput = document.getElementById('pairing-telefone-input');
+      const tel = telInput.value.trim().replace(/\D/g, '');
       const boxRes = document.getElementById('pairing-resultado-box');
       const boxErr = document.getElementById('pairing-erro-box');
       const disp = document.getElementById('pairing-codigo-display');
       
-      let inputVal = document.getElementById('input-api-url').value.trim();
-      let apiUrl = (inputVal || localStorage.getItem('CAVEIRA_API_URL') || 'https://robo-caveira-bot-html.onrender.com').replace(/\/+$/, '');
-      localStorage.setItem('CAVEIRA_API_URL', apiUrl);
+      const apiUrl = obterUrlServidorSegura();
 
       boxErr.classList.add('hidden');
 
       if (!tel || tel.length < 10) {
-        boxErr.innerText = "Por favor, digite o número completo com DDI (55) e DDD. Ex: 5522998765432";
+        boxErr.innerText = "⚠️ Por favor, digite seu número completo com DDI (55) e DDD. Ex: 5522998765432";
         boxErr.classList.remove('hidden');
         return;
       }
@@ -1421,14 +1472,24 @@ ${estadoCCOS.equipes.assumindo}`;
 
       try {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 25000);
+        const timeoutId = setTimeout(() => controller.abort(), 35000);
 
         const r = await fetch(`${apiUrl}/api/pairing-code?numero=${encodeURIComponent(tel)}`, {
           signal: controller.signal
         });
         clearTimeout(timeoutId);
 
-        const d = await r.json();
+        const contentType = r.headers.get('content-type') || '';
+        let d = {};
+
+        if (contentType.includes('application/json')) {
+          d = await r.json();
+        } else {
+          const textoResp = await r.text();
+          if (textoResp.includes('<!DOCTYPE') || !r.ok) {
+            throw new Error(`O servidor no Render está iniciando ou acordando (no plano gratuito leva cerca de 40 segundos). Clique no botão "Abrir Tela Direta" acima ou aguarde 30 segundos e tente novamente.`);
+          }
+        }
 
         if (d.sucesso && d.codigo) {
           disp.innerText = d.codigo;
@@ -1436,28 +1497,33 @@ ${estadoCCOS.equipes.assumindo}`;
           btn.innerText = "✓ Código Gerado! Digite no WhatsApp do celular";
           btn.className = "w-full py-2.5 bg-emerald-600 text-white font-bold rounded-xl text-xs";
         } else {
-          throw new Error(d.erro || "Falha ao solicitar código");
+          throw new Error(d.erro || "Falha ao solicitar código à Meta");
         }
       } catch (e) {
         let msg = e.message;
         if (e.name === 'AbortError' || msg.includes('Failed to fetch') || msg.includes('NetworkError')) {
-          msg = `⚠️ O servidor no Render pode estar iniciando ou 'dormindo' (plano gratuito leva ~40s para acordar). Clique no botão "Abrir Conexão Direta" acima ou aguarde 30s e tente novamente!`;
+          msg = `⚠️ O servidor no Render pode estar iniciando ou dormindo (plano gratuito leva ~40s para acordar). Clique no botão verde "Abrir Tela Direta" acima ou aguarde 30s e clique em Tentar Novamente!`;
         }
         boxErr.innerText = msg;
         boxErr.classList.remove('hidden');
         btn.disabled = false;
-        btn.innerText = "Tentar Novamente";
+        btn.innerHTML = '⚡ Tentar Novamente';
       }
     }
 
     function salvarUrlServidor() {
       let u = document.getElementById('input-api-url').value.trim().replace(/\/+$/, '');
-      if (u) {
-        localStorage.setItem('CAVEIRA_API_URL', u);
-        const linkDireto = document.getElementById('link-direto-render');
-        if (linkDireto) linkDireto.href = `${u}/conectar`;
-        alert('URL do Servidor salva com sucesso: ' + u);
+      if (!u.startsWith('http://') && !u.startsWith('https://')) {
+        alert(`❌ ATENÇÃO: URL INVÁLIDA!\n\nVocê digitou: "${u}"\n\n⚠️ O código de pareamento (como 16R7-WKDB) deve ser digitado NO SEU CELULAR no WhatsApp, e NÃO aqui no navegador!\n\nO endereço do servidor deve começar com https:// (ex: https://robo-caveira-bot-html.onrender.com).`);
+        document.getElementById('input-api-url').value = 'https://robo-caveira-bot-html.onrender.com';
+        localStorage.setItem('CAVEIRA_API_URL', 'https://robo-caveira-bot-html.onrender.com');
+        return;
       }
+
+      localStorage.setItem('CAVEIRA_API_URL', u);
+      const linkDireto = document.getElementById('link-direto-render');
+      if (linkDireto) linkDireto.href = `${u}/conectar`;
+      alert('✓ Endereço do Servidor salvo com sucesso: ' + u);
     }
 
     // Sincronização periódica se conectado a um servidor Node.js
@@ -1506,39 +1572,50 @@ ${estadoCCOS.equipes.assumindo}`;
 
     // FUNÇÕES DA CENTRAL WHATSAPP CCOS (ABA WHATSAPP)
     async function gerarCodigoNaAbaWhatsApp() {
-      const tel = document.getElementById('aba-whats-telefone').value.trim();
+      const tel = document.getElementById('aba-whats-telefone').value.trim().replace(/\D/g, '');
       const btn = document.getElementById('btn-gerar-codigo-aba');
       const disp = document.getElementById('aba-whats-codigo-grande');
-      let apiUrl = (localStorage.getItem('CAVEIRA_API_URL') || 'https://robo-caveira-bot-html.onrender.com').replace(/\/+$/, '');
+      const apiUrl = obterUrlServidorSegura();
 
       if (!tel || tel.length < 10) {
-        alert("⚠️ Por favor, digite o número completo com DDD (ex: 5522998765432).");
+        alert("⚠️ Por favor, digite seu número completo com DDI e DDD (ex: 5522998765432).");
         return;
       }
 
       btn.disabled = true;
-      btn.innerHTML = '<span class="animate-spin">⏳</span> Gerando...';
+      btn.innerHTML = '<span class="animate-spin">⏳</span> Solicitando código à Meta...';
 
       try {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 25000);
+        const timeoutId = setTimeout(() => controller.abort(), 35000);
 
         const r = await fetch(`${apiUrl}/api/pairing-code?numero=${encodeURIComponent(tel)}`, { signal: controller.signal });
         clearTimeout(timeoutId);
-        const d = await r.json();
+
+        const contentType = r.headers.get('content-type') || '';
+        let d = {};
+
+        if (contentType.includes('application/json')) {
+          d = await r.json();
+        } else {
+          const textoResp = await r.text();
+          if (textoResp.includes('<!DOCTYPE') || !r.ok) {
+            throw new Error(`O servidor no Render está iniciando ou acordando (~40s de espera no plano gratuito). Aguarde 30s ou abra o link direto do Render.`);
+          }
+        }
 
         if (d.sucesso && d.codigo) {
           disp.innerText = d.codigo;
           btn.innerHTML = '✓ Código Gerado!';
           btn.className = 'px-4 py-2.5 bg-emerald-600 text-white rounded-xl text-xs font-bold transition shadow';
-          alert(`🎉 CÓDIGO OFICIAL GERADO: ${d.codigo}\n\nDigite agora no seu WhatsApp no celular:\nAparelhos Conectados > Conectar um Aparelho > Conectar com número de telefone!`);
+          alert(`🎉 CÓDIGO OFICIAL GERADO: ${d.codigo}\n\n⚠️ ATENÇÃO: Digite este código NO SEU CELULAR no WhatsApp:\nAparelhos Conectados > Conectar um Aparelho > Conectar com número de telefone!`);
         } else {
           throw new Error(d.erro || "Falha ao solicitar código à Meta");
         }
       } catch (e) {
         let msg = e.message;
-        if (e.name === 'AbortError' || msg.includes('Failed to fetch')) {
-          msg = "⚠️ O servidor no Render pode estar acordando do modo sleep. Aguarde 30s ou acerte a URL.";
+        if (e.name === 'AbortError' || msg.includes('Failed to fetch') || msg.includes('NetworkError')) {
+          msg = "⚠️ O servidor no Render pode estar acordando do modo sleep (~40s). Aguarde 30s ou use o Link Render ao lado.";
         }
         alert(msg);
         btn.disabled = false;
@@ -1561,7 +1638,7 @@ ${estadoCCOS.equipes.assumindo}`;
       const pill = document.getElementById('whats-status-pill');
       const text = document.getElementById('whats-status-text');
       const badgeTopo = document.getElementById('badge-status-conexao');
-      let apiUrl = (localStorage.getItem('CAVEIRA_API_URL') || 'https://robo-caveira-bot-html.onrender.com').replace(/\/+$/, '');
+      const apiUrl = obterUrlServidorSegura();
 
       try {
         const r = await fetch(`${apiUrl}/ping`);
@@ -1584,9 +1661,13 @@ ${estadoCCOS.equipes.assumindo}`;
     }
 
     async function testarMensagemLider() {
-      let apiUrl = (localStorage.getItem('CAVEIRA_API_URL') || 'https://robo-caveira-bot-html.onrender.com').replace(/\/+$/, '');
+      const apiUrl = obterUrlServidorSegura();
+      const apiToken = localStorage.getItem('CAVEIRA_API_TOKEN') || '';
       try {
-        const r = await fetch(`${apiUrl}/api/testar-lider`, { method: 'POST' });
+        const headers = { 'Content-Type': 'application/json' };
+        if (apiToken) headers['x-api-key'] = apiToken;
+
+        const r = await fetch(`${apiUrl}/api/testar-lider`, { method: 'POST', headers });
         const d = await r.json();
         if (d.sucesso) {
           alert("📩 Mensagem de teste enviada com sucesso para o WhatsApp do Líder Ruddgero!");
@@ -1600,9 +1681,13 @@ ${estadoCCOS.equipes.assumindo}`;
 
     async function desconectarWhatsApp() {
       if (!confirm("⚠️ Tem certeza que deseja desconectar o WhatsApp do robô para parear outro aparelho?")) return;
-      let apiUrl = (localStorage.getItem('CAVEIRA_API_URL') || 'https://robo-caveira-bot-html.onrender.com').replace(/\/+$/, '');
+      const apiUrl = obterUrlServidorSegura();
+      const apiToken = localStorage.getItem('CAVEIRA_API_TOKEN') || '';
       try {
-        const r = await fetch(`${apiUrl}/api/desconectar-whatsapp`, { method: 'POST' });
+        const headers = { 'Content-Type': 'application/json' };
+        if (apiToken) headers['x-api-key'] = apiToken;
+
+        const r = await fetch(`${apiUrl}/api/desconectar-whatsapp`, { method: 'POST', headers });
         const d = await r.json();
         alert(d.mensagem || "Sessão resetada.");
         verificarStatusWhatsAppApi();

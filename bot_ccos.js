@@ -12,10 +12,10 @@ const admin = require('firebase-admin');
 // ==========================================
 // 1. VARIÁVEIS DE AMBIENTE & CONFIGURAÇÕES TELEGRAM
 // ==========================================
-const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN || process.env.BOT_TOKEN;
+const TELEGRAM_TOKEN = process.env.TELEGRAM_BOT_TOKEN || process.env.TELEGRAM_TOKEN || process.env.BOT_TOKEN;
 if (!TELEGRAM_TOKEN) {
-    console.error("FATAL: Variável TELEGRAM_TOKEN não encontrada no .env!");
-    process.exit(1);
+    console.warn("⚠️ [TELEGRAM] Token não informado (TELEGRAM_BOT_TOKEN / TELEGRAM_TOKEN). Módulo inativo.");
+    return;
 }
 
 const bot = new TelegramBot(TELEGRAM_TOKEN, { polling: true });
@@ -1306,9 +1306,14 @@ bot.on('message', async (msg) => {
     const texto = msg.text ? msg.text.trim() : '';
     if (!texto) return;
 
+    const ehGrupo = msg.chat.type === 'group' || msg.chat.type === 'supergroup';
     const { autorizado, isAdmin, usuario } = verificarPermissao(chatId);
     if (!autorizado) {
-        return bot.sendMessage(chatId, `⛔ *Acesso Restrito ao CCOS*\n\nSeu ID Telegram (*${chatId}*) não está cadastrado no sistema.\nSolicite a liberação ao Líder Ruddgero Ribeiro.`, { parse_mode: 'Markdown' });
+        // Se for grupo, silêncio absoluto (não expõe nem perturba o grupo com "Acesso Restrito")
+        if (!ehGrupo) {
+            return bot.sendMessage(chatId, `⛔ *Acesso Restrito ao CCOS*\n\nSeu ID Telegram (*${chatId}*) não está cadastrado no sistema.\nSolicite a liberação ao Líder Ruddgero Ribeiro.`, { parse_mode: 'Markdown' });
+        }
+        return;
     }
 
     const estadoPrivado = cacheUsuariosPrivados.get(chatId);
@@ -2123,20 +2128,7 @@ bot.on('callback_query', async (query) => {
 });
 
 // ==========================================
-// 14. SERVIDOR EXPRESS (KEEPALIVE / HEALTHCHECK PARA O RENDER)
+// 14. EXPORTAÇÃO DO MÓDULO TELEGRAM (SEM CONFLITO DE PORTA)
 // ==========================================
-const app = express();
-const PORT = process.env.PORT || 3000;
-
-app.get('/', (req, res) => {
-    res.send({
-        status: "ONLINE",
-        sistema: "Caveira Bot ERP CCOS",
-        versao: "2.5.0-MASTER-TELEGRAM",
-        timestamp: new Date().toISOString()
-    });
-});
-
-app.listen(PORT, () => {
-    console.log(`🌐 Servidor Web de Health Check ativo na porta ${PORT}`);
-});
+// O servidor Express HTTP principal é executado em bot_ccos_whatsapp.js
+module.exports = { bot };

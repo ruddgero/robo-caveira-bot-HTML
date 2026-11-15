@@ -345,11 +345,43 @@ ${plantao.passagemTurno?.equipeAssumindo || 'Renan Neves, Ewerton Brito e Marian
 }
 
 // ==========================================
-// 6. MOTOR WHATSAPP BAILEYS
+// 6. MOTOR WHATSAPP BAILEYS & PERSISTÊNCIA FIRESTORE
 // ==========================================
+async function salvarCredenciaisNoFirestore(creds) {
+    if (!db) return;
+    try {
+        const credsJson = JSON.stringify(creds);
+        await db.collection('whatsapp_auth_session').doc('creds').set({
+            dados: credsJson,
+            atualizadoEm: admin.firestore.FieldValue.serverTimestamp()
+        });
+    } catch (err) {
+        console.warn("⚠️ Aviso ao salvar credenciais do WhatsApp no Firestore:", err.message);
+    }
+}
+
+async function restaurarCredenciaisDoFirestore(pastaAuth) {
+    if (!db) return;
+    try {
+        const doc = await db.collection('whatsapp_auth_session').doc('creds').get();
+        if (doc.exists && doc.data()?.dados) {
+            if (!fs.existsSync(pastaAuth)) fs.mkdirSync(pastaAuth, { recursive: true });
+            const caminhoCreds = path.join(pastaAuth, 'creds.json');
+            if (!fs.existsSync(caminhoCreds)) {
+                fs.writeFileSync(caminhoCreds, doc.data().dados, 'utf-8');
+                console.log("💾 [WHATSAPP AUTH] Sessão restaurada do Firestore com sucesso!");
+            }
+        }
+    } catch (err) {
+        console.warn("⚠️ Aviso ao restaurar credenciais do WhatsApp do Firestore:", err.message);
+    }
+}
+
 async function iniciarBotWhatsApp() {
     try {
         const pastaAuth = path.join(__dirname, 'auth_whatsapp_ccos');
+        await restaurarCredenciaisDoFirestore(pastaAuth);
+
         const { state, saveCreds } = await useMultiFileAuthState(pastaAuth);
         const { version } = await fetchLatestBaileysVersion();
 
@@ -361,7 +393,12 @@ async function iniciarBotWhatsApp() {
             browser: ['CCOS Caveira Bot', 'Chrome', '120.0.0']
         });
 
-        sockWhatsApp.ev.on('creds.update', saveCreds);
+        sockWhatsApp.ev.on('creds.update', async () => {
+            await saveCreds();
+            if (state.creds) {
+                await salvarCredenciaisNoFirestore(state.creds);
+            }
+        });
 
         sockWhatsApp.ev.on('connection.update', (update) => {
             const { connection, lastDisconnect, qr } = update;
@@ -387,12 +424,15 @@ async function iniciarBotWhatsApp() {
             if (type !== 'notify') return;
 
             for (const m of messages) {
-                if (!m.message || m.key.fromMe) continue;
+                if (!m.message) continue;
 
                 const chatId = m.key.remoteJid;
                 const ehGrupo = chatId.endsWith('@g.us');
+                const ehFromMe = !!m.key.fromMe;
                 const remetente = m.key.participant || chatId;
-                const nomeAutor = m.pushName || remetente.split('@')[0];
+                const remetenteNumero = remetente.split('@')[0].replace(/\D/g, '');
+                const liderNumero = NUMERO_LIDER_RUDDGERO.replace(/\D/g, '');
+                const nomeAutor = m.pushName || remetenteNumero;
 
                 const texto = m.message.conversation ||
                               m.message.extendedTextMessage?.text ||
@@ -401,12 +441,15 @@ async function iniciarBotWhatsApp() {
 
                 if (!texto) continue;
 
-                const ehGrupoMonitorado = GRUPOS_MONITORADOS.length === 0 || GRUPOS_MONITORADOS.includes(chatId);
+                // LGPD: Se não houver grupos configurados, NÃO monitora nenhum por segurança
+                const ehGrupoMonitorado = GRUPOS_MONITORADOS.length > 0 && GRUPOS_MONITORADOS.includes(chatId);
 
                 // ==========================================
                 // CASO A: MENSAGEM NO GRUPO MONITORADO (100% SILENCIOSO)
                 // ==========================================
                 if (ehGrupo && ehGrupoMonitorado) {
+                    if (ehFromMe) continue; // Não reprocessa mensagens próprias no grupo
+
                     if (ehMensagemRuido(texto)) {
                         feedInterceptado.push({
                             id: Date.now(),
@@ -465,9 +508,17 @@ async function iniciarBotWhatsApp() {
                 }
 
                 // ==========================================
-                // CASO B: COMANDO NO PRIVADO DO LÍDER
+                // CASO B: COMANDO NO PRIVADO (APENAS LÍDER AUTORIZADO)
                 // ==========================================
                 if (!ehGrupo) {
+                    const numerosAutorizados = (process.env.WHATSAPP_NUMEROS_AUTORIZADOS || '').split(',').map(n => n.replace(/\D/g, '')).filter(Boolean);
+                    const ehAutorizado = ehFromMe || remetenteNumero === liderNumero || numerosAutorizados.includes(remetenteNumero);
+
+                    if (!ehAutorizado) {
+                        // Não responde terceiros no privado para manter discrição total
+                        continue;
+                    }
+
                     const comando = texto.trim().toLowerCase();
                     const plantao = await carregarPlantaoAtivo();
 
@@ -494,6 +545,8 @@ async function iniciarBotWhatsApp() {
                                 caption: `📄 *Arquivo oficial emitido pelo CCOS:* \`${nomeArquivo}\``
                             });
                             await sockWhatsApp.sendMessage(chatId, { text: `🚀 *Relatório e arquivo .txt disparados com sucesso no grupo!*` });
+                        } else {
+                            await sockWhatsApp.sendMessage(chatId, { text: `⚠️ *Aviso:* Nenhum grupo configurado em WHATSAPP_GRUPO_1 para disparo.` });
                         }
                         continue;
                     }
@@ -509,11 +562,52 @@ async function iniciarBotWhatsApp() {
 // 7. SERVIDOR HTTP EXPRESS (API PARA O APP GITHUB PAGES)
 // ==========================================
 const app = express();
-app.use(cors());
+
+// Configuração segura de CORS (GitHub Pages + Localhost)
+const origensPermitidas = [
+    'https://ruddgero.github.io',
+    process.env.CORS_ORIGIN || ''
+].filter(Boolean);
+
+app.use(cors({
+    origin: function (origem, callback) {
+        if (!origem) return callback(null, true);
+        const permitida = origensPermitidas.some(o => o === '*' || origem === o || origem.startsWith('https://ruddgero.github.io') || origem.includes('localhost') || origem.includes('127.0.0.1'));
+        if (permitida) {
+            callback(null, true);
+        } else {
+            callback(new Error('Bloqueado pelas políticas de segurança CORS'));
+        }
+    }
+}));
+
 app.use(express.json());
 
-// Servir os arquivos estáticos se hospedado junto no Render
-app.use(express.static(__dirname));
+// SEGURANÇA: Bloqueio estrito de acesso a segredos e arquivos do sistema
+app.use((req, res, next) => {
+    const url = req.url.toLowerCase();
+    if (url.includes('.env') || url.includes('auth_whatsapp') || url.includes('creds') || url.includes('package.json') || url.includes('.git')) {
+        return res.status(403).json({ erro: 'Acesso Proibido por Segurança.' });
+    }
+    next();
+});
+
+// Servir APENAS a pasta public/ (Nunca servir __dirname para evitar vazamento de credenciais)
+const pastaPublica = path.join(__dirname, 'public');
+if (!fs.existsSync(pastaPublica)) fs.mkdirSync(pastaPublica, { recursive: true });
+app.use(express.static(pastaPublica));
+
+// Middleware de Autenticação para Endpoints Críticos (Se configurado API_SECRET_TOKEN)
+function verificarAutenticacao(req, res, next) {
+    const tokenEsperado = process.env.API_SECRET_TOKEN;
+    if (!tokenEsperado) return next(); // Se não definido no .env, opera em modo flexível
+
+    const tokenRecebido = req.headers['x-api-key'] || req.query.token;
+    if (tokenRecebido === tokenEsperado) {
+        return next();
+    }
+    return res.status(401).json({ sucesso: false, erro: 'Acesso não autorizado: Token de API ausente ou inválido.' });
+}
 
 // Endpoint 1: Status Geral do Sistema
 app.get('/api/status', async (req, res) => {
@@ -529,6 +623,21 @@ app.get('/api/status', async (req, res) => {
     });
 });
 
+// Endpoint 1.1: Sincronização Unificada de Plantão (Single Source of Truth)
+app.get('/api/plantao', async (req, res) => {
+    const plantao = await carregarPlantaoAtivo();
+    res.json(plantao);
+});
+
+app.post('/api/plantao', verificarAutenticacao, async (req, res) => {
+    try {
+        await salvarPlantaoAtivo(req.body);
+        res.json({ sucesso: true, mensagem: 'Plantão atualizado com sucesso.' });
+    } catch (e) {
+        res.status(500).json({ sucesso: false, erro: e.message });
+    }
+});
+
 // Endpoint 2: Feed Silencioso Interceptado
 app.get('/api/feed', (req, res) => {
     res.json(feedInterceptado.slice(-50).reverse());
@@ -540,7 +649,7 @@ app.get('/api/operacoes', (req, res) => {
 });
 
 // Endpoint 4: Registrar Nova Operação
-app.post('/api/operacoes', (req, res) => {
+app.post('/api/operacoes', verificarAutenticacao, (req, res) => {
     const { tipo, navio, terminal, fornecedor, veiculo, horaInicial, horaFinal } = req.body;
     const nova = {
         id: Date.now(),
@@ -559,8 +668,8 @@ app.post('/api/operacoes', (req, res) => {
     res.json({ sucesso: true, operacao: nova });
 });
 
-// Endpoint 5: Marcar Saída e Liberar E-mail
-app.post('/api/operacoes/:id/saida', async (req, res) => {
+// Endpoint 5: Marcar Saída e Liberar E-mail (com proteção contra duplicidade)
+app.post('/api/operacoes/:id/saida', verificarAutenticacao, async (req, res) => {
     const id = parseInt(req.params.id, 10);
     const op = operacoesBordo.find(o => o.id === id);
     if (!op) return res.status(404).json({ erro: 'Operação não encontrada' });
@@ -568,23 +677,33 @@ app.post('/api/operacoes/:id/saida', async (req, res) => {
     op.horaFinal = req.body.horaFinal || (new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) + 'h');
     op.finalizada = true;
 
-    // Dispara envio de e-mail se SMTP estiver configurado
-    const resultadoEmail = await enviarEmailOperacao(op, new Date().toLocaleDateString('pt-BR'));
+    // Dispara envio de e-mail APENAS se não tiver sido enviado antes e se AUTO_DISPARO_EMAIL estiver habilitado
+    let resultadoEmail = null;
+    if (!op.emailEnviado && process.env.AUTO_DISPARO_EMAIL === 'true') {
+        resultadoEmail = await enviarEmailOperacao(op, new Date().toLocaleDateString('pt-BR'));
+        op.emailEnviado = resultadoEmail?.enviadoViaSmtp || false;
+    }
 
     res.json({ sucesso: true, operacao: op, email: resultadoEmail });
 });
 
 // Endpoint 6: Disparar Relatório Oficial nos Grupos
-app.post('/api/disparar-relatorio', async (req, res) => {
+app.post('/api/disparar-relatorio', verificarAutenticacao, async (req, res) => {
+    if (!sockWhatsApp || statusConexaoWhatsApp !== 'CONECTADO') {
+        return res.status(400).json({ sucesso: false, erro: 'WhatsApp não está conectado no servidor para disparar mensagens.' });
+    }
+
+    if (GRUPOS_MONITORADOS.length === 0) {
+        return res.status(400).json({ sucesso: false, erro: 'Nenhum grupo configurado nas variáveis WHATSAPP_GRUPO_1 ou WHATSAPP_GRUPO_2.' });
+    }
+
     const plantao = await carregarPlantaoAtivo();
     const relatorioFinal = formatarRelatorioFinal(plantao);
 
-    if (sockWhatsApp && GRUPOS_MONITORADOS.length > 0) {
-        for (const g of GRUPOS_MONITORADOS) {
-            await sockWhatsApp.sendMessage(g, { text: relatorioFinal }).catch(() => {});
-        }
+    for (const g of GRUPOS_MONITORADOS) {
+        await sockWhatsApp.sendMessage(g, { text: relatorioFinal }).catch(() => {});
     }
-    res.json({ sucesso: true, mensagem: 'Relatório disparado com sucesso!' });
+    res.json({ sucesso: true, mensagem: 'Relatório disparado com sucesso nos grupos!' });
 });
 
 // Endpoint Keep-Alive (Evita suspensão do Render)
@@ -599,7 +718,7 @@ app.get('/ping', (req, res) => {
 });
 
 // Endpoint: Teste direto no privado do Líder Ruddgero
-app.post('/api/testar-lider', async (req, res) => {
+app.post('/api/testar-lider', verificarAutenticacao, async (req, res) => {
     if (!sockWhatsApp || statusConexaoWhatsApp !== 'CONECTADO') {
         return res.status(400).json({ sucesso: false, erro: 'WhatsApp não está conectado no momento.' });
     }
@@ -617,7 +736,7 @@ app.post('/api/testar-lider', async (req, res) => {
 });
 
 // Endpoint: Desconectar WhatsApp / Resetar Sessão
-app.post('/api/desconectar-whatsapp', async (req, res) => {
+app.post('/api/desconectar-whatsapp', verificarAutenticacao, async (req, res) => {
     try {
         if (sockWhatsApp) {
             await sockWhatsApp.logout().catch(() => {});
