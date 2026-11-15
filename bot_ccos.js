@@ -6,7 +6,10 @@ process.env.GEMINI_API_VERSION = process.env.GEMINI_API_VERSION || 'v1beta';
 
 const express = require('express');
 const TelegramBot = require('node-telegram-bot-api');
-const { GoogleGenAI } = require('@google/genai');
+let GoogleGenAI = null;
+try {
+    GoogleGenAI = require('@google/genai').GoogleGenAI;
+} catch (_) {}
 const admin = require('firebase-admin');
 
 // ==========================================
@@ -154,7 +157,7 @@ const tecladoOperador = tecladoPrincipal; // Mesma visualização para todos
 // 5. INTELIGÊNCIA ARTIFICIAL GEMINI API (SDK OFICIAL)
 // ==========================================
 let aiClient = null;
-if (process.env.GEMINI_API_KEY) {
+if (process.env.GEMINI_API_KEY && GoogleGenAI) {
     try {
         aiClient = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
         console.log("✨ Gemini AI Oficial (@google/genai) configurado com sucesso.");
