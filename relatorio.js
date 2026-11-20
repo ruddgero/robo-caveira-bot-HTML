@@ -209,8 +209,28 @@ function ehNomeDeNavio(linha, navios = NAVIOS_PADRAO) {
 
 // Linha no formato antigo do robô ("14:36h Saída a passeio de 05 tripulantes – veículo placa X. Saída às 08:21h.")
 // vira o padrão atual ("Saída a passeio de 05 tripulantes.")
+// Números por extenso nas mensagens ("seis tripulantes" → 06)
+const EXTENSO = { um: 1, uma: 1, dois: 2, duas: 2, tres: 3, quatro: 4, cinco: 5, seis: 6, sete: 7, oito: 8, nove: 9, dez: 10, onze: 11, doze: 12, treze: 13, quatorze: 14, catorze: 14, quinze: 15, dezesseis: 16, dezessete: 17, dezoito: 18, dezenove: 19, vinte: 20 };
+const RE_QTD = `(\\d{1,3}|${Object.keys(EXTENSO).join('|')})`;
+const RE_TRIPULANTES_LIVRE = new RegExp(`^saida (?:(a passeio|para atendimento medico) )?(?:de )?${RE_QTD} tripulantes?(?: (a passeio|para atendimento medico))?(?: (?:(?:ate o presente momento|ainda) )?(nao retornaram|retornaram)(?: ate o presente momento)?)?$`);
+
+// Linha do item 6 escrita à mão → padrão ("Destracado" → "Desatracado."; "Saida de seis tripulantes a passeio. Até o presente
+// momento não retornaram" → "Saída a passeio de 06 tripulantes. Não retornaram até o presente momento.")
+function padronizarLinhaNavio(l) {
+    const n = semAcento(l).toLowerCase().replace(/[.,;!]/g, ' ').replace(/\s+/g, ' ').trim();
+    if (/^(destr?acad[oa]|desatracou|desatracad[oa])$/.test(n)) return 'Desatracado.';
+    if (/^(atracad[oa]|atracou)$/.test(n)) return 'Atracado.';
+    const m = n.match(RE_TRIPULANTES_LIVRE);
+    if (m) {
+        const qtd = EXTENSO[m[2]] || parseInt(m[2], 10);
+        const mov = /medico/.test(m[1] || m[3] || '') ? 'Saída para atendimento médico' : 'Saída a passeio';
+        return `${mov} de ${formatarQtdTripulantes(qtd)}.${m[4] === 'nao retornaram' ? ' Não retornaram até o presente momento.' : m[4] === 'retornaram' ? ' Retornaram.' : ''}`;
+    }
+    return l;
+}
+
 function linhaNoPadrao(linha) {
-    let l = limparMarcador(String(linha || '').replace(/[*_~]/g, '')).trim();
+    let l = padronizarLinhaNavio(limparMarcador(String(linha || '').replace(/[*_~]/g, '')).trim());
     const antiga = l.match(/^\d{1,2}:\d{2}h\s+(.+)$/);
     if (antiga && /tripulante|rancho|materia|entrega|fornecimento|dta|[aá]gua|combust|res[ií]duo|k-?9|mergulho|lacre|opera[cç][aã]o de bordo/i.test(antiga[1])) {
         let corpo = antiga[1].split(/\s+[–-]\s+/)[0].replace(/\.\s*$/, '');
@@ -606,6 +626,19 @@ function blocoNavios(lista, b) {
     }).join('\n\n');
 }
 
+// Atividade no padrão: "Vide e-mail" → "Detalhes no e-mail encaminhado."; "Realizado a solicitação" → "Realizada a solicitação"
+function padronizarAtividade(t) {
+    let l = limparMarcador(String(t || '')).trim();
+    if (!l) return l;
+    l = l.replace(/\s*[.;,:-]?\s*\(?\s*vide (o )?e-?mail( encaminhado)?\s*\)?\.?\s*$/i, '. Detalhes no e-mail encaminhado.');
+    l = l.replace(/^(Realizado|Executado|Feito)( a | uma )(solicita|verifica|limpeza|ronda|entrega|inspe|abertura|troca|instala|manuten|reuni|vistoria|retirada|comunica|orienta|abordagem)/i,
+        (_, v, a, x) => `${v.replace(/o$/i, 'a')}${a}${x}`);
+    l = l.replace(/\bGATE\b/g, 'Gate').replace(/\bPORTARIA\b(?=.*[a-z])/g, 'portaria');
+    l = l.charAt(0).toUpperCase() + l.slice(1);
+    if (/[\p{L}\d)]$/u.test(l)) l += '.';
+    return l;
+}
+
 // avisos: pendências do tipo AVISO em aberto [{titulo, texto, historico}]
 function textoAviso(p) {
     const ultima = (p.historico || []).filter(h => h.tipo === 'ATUALIZACAO').slice(-1)[0];
@@ -645,7 +678,7 @@ function formatarRelatorio(f, avisos = [], { negrito = true } = {}) {
         `Total de leituras: ${f.sistemas?.ocrLeituras || '—'} veículos.`,
         '',
         b('4. ATIVIDADES REALIZADAS'),
-        blocoLista(f.atividades),
+        blocoLista((f.atividades || []).map(a => padronizarAtividade(typeof a === 'string' ? a : a.texto))),
         '',
         b('5. AVISOS E AÇÕES DE ACOMPANHAMENTO'),
         blocoAvisos,
@@ -670,16 +703,38 @@ function formatarRelatorio(f, avisos = [], { negrito = true } = {}) {
     ].join('\n');
 }
 
-function conferirFicha(f, operacoes = []) {
+function conferirFicha(f, operacoes = [], avisos = [], hoje = agora()) {
     const alertas = [];
     const ki = numeroKm(f.vtr?.kmInicial), kf = numeroKm(f.vtr?.kmFinal);
     if (ki === null || kf === null) alertas.push('KM da VTR não preenchido.');
     else if (kf < ki) alertas.push('KM final menor que o KM inicial.');
+    else if (kf === ki) alertas.push('KM final igual ao KM inicial — a VTR não rodou no turno? Confira.');
     else if (kf - ki > 150) alertas.push(`VTR rodou ${kf - ki} km no turno — confira.`);
     if (!f.sistemas?.ocrAssertividade || !f.sistemas?.ocrLeituras) alertas.push('OCR (assertividade/leituras) não preenchido.');
     if (!(f.equipes?.saindo || '').trim() || !(f.equipes?.assumindo || '').trim()) alertas.push('Passagem de turno (equipes) incompleta.');
     const abertas = (operacoes || []).filter(o => !o.horaFinal).length;
     if (abertas) alertas.push(`${abertas} operação(ões) de bordo sem horário de saída.`);
+
+    // datas e previsões que já passaram (o texto precisa ser atualizado)
+    const [dH, mH, aH] = hoje.data.split('/').map(Number);
+    const minHoje = (() => { const [h, m] = hoje.hora.split(':').map(Number); return h * 60 + m; })();
+    const comparar = (d, m) => { const dif = (m - mH) * 31 + (d - dH); return dif < -200 ? 1 : dif > 200 ? -1 : Math.sign(dif); };   // virada de ano
+    (avisos || []).forEach((a, i) => {
+        const texto = textoAviso(a);
+        const re = /(previs|para|agendad|marcad|alinhad|ser[aá]|retirada|segunda|ter[cç]a|quarta|quinta|sexta|s[aá]bado|domingo)[^.\n]{0,40}?\(?(\d{1,2})\/(\d{1,2})(?:\/\d{2,4})?\)?/gi;
+        const passadas = [...texto.matchAll(re)].map(x => [+x[2], +x[3]]).filter(([d, m]) => d >= 1 && d <= 31 && m >= 1 && m <= 12 && comparar(d, m) < 0);
+        const tit = `5.${i + 1}. ${(a.titulo || 'AVISO').trim()}`;
+        if (passadas.length) alertas.push(`${tit}: a data ${passadas.map(([d, m]) => `${String(d).padStart(2, '0')}/${String(m).padStart(2, '0')}`).join(', ')} já passou — atualize o aviso.`);
+        const solta = String(a.texto || '').split('\n').map(l => l.trim()).find(l => /^[^.!?]{1,40}:$/.test(l));
+        if (solta) alertas.push(`${tit}: linha solta "${solta}" no texto — confira.`);
+    });
+    for (const term of ['tore', 'toil']) for (const n of f.navios?.[term] || []) for (const l of n.linhas || []) {
+        const m = semAcento(l).match(/^previsao de (des)?atracacao em (\d{2})\/(\d{2}) as (\d{2}):(\d{2})/i);
+        if (!m) continue;
+        const c = comparar(+m[2], +m[3]);
+        if (c < 0 || (c === 0 && +m[4] * 60 + +m[5] < minHoje))
+            alertas.push(`${n.navio}: a previsão de ${m[1] ? 'desatracação' : 'atracação'} (${m[2]}/${m[3]} às ${m[4]}:${m[5]}) já passou — troque pela manobra realizada ou atualize a previsão.`);
+    }
     return alertas;
 }
 
@@ -1202,7 +1257,7 @@ module.exports = {
     proximoTurno, turnoAnterior, linhasExcel,
     ehMensagemDeSaida, TIPOS_OPERACAO, MOVIMENTOS, NAVIOS_PADRAO,
     fichaVazia, naviosDeTexto, arrumarNavios, ehNomeDeNavio, linhaNoPadrao, ehOperacaoConcluida, adicionarLinhaNavio, ehRelatorioDeTurno, lerRelatorio, fichaHerdada,
-    formatarRelatorio, conferirFicha, formatarPassagemEscala, textoAviso,
+    formatarRelatorio, conferirFicha, formatarPassagemEscala, textoAviso, padronizarLinhaNavio, padronizarAtividade,
     lerMensagemPadrao, classificarMensagem, extrairCampos, rascunhosOperacao, atividadeDasOperacoes,
     tipoOperacaoDoTexto, movimentoDoTexto, resumoNavio, minutaEmail, mensagemPadrao, manobraDoTexto, linhaManobra, numeroKm, navioConhecido, terminalDoNavio,
     formatarQtdTripulantes, ehSemAlteracao, separarNomes, juntarNomes, nomeProprio, lerEquipesComPipe, nomeNavioLimpo, chaveNavio, acharNavio, trocarLinhaNavio

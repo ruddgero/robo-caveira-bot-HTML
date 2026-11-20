@@ -651,7 +651,7 @@ function textoRelatorio({ negrito = true } = {}) {
 }
 
 function conferencia() {
-    return R.conferirFicha(estado.ficha, operacoesDaFicha(estado.ficha.id));
+    return R.conferirFicha(estado.ficha, operacoesDaFicha(estado.ficha.id), avisosAbertos());
 }
 
 async function herdar(relatorioId, usuario) {
@@ -764,9 +764,55 @@ function fraseLegivel(t) {
     return min.replace(/[\wÀ-ÿ-]+/g, w => (SIGLAS.has(w.toUpperCase()) ? w.toUpperCase() : w));
 }
 
+// Nomes próprios (pessoas, empresas, áreas) aprendidos dos relatórios e do cadastro da equipe/organograma:
+// a regra "só a primeira letra da frase em maiúscula" não pode deixar "tiago rosa" ou "wallace chagas" em minúsculo.
+const FIXOS_PROPRIOS = ['Ferroport', 'Digital', 'Gate', 'Sunset', 'Anglo American', 'Porto do Açu', 'Grosse'];
+let cacheNomes = { chave: null, pares: [], simples: new Map() };
+function nomesProprios() {
+    const chave = `${estado.historico.length}:${(estado.organograma?.equipes || []).length}:${(estado.equipes || []).length}`;
+    if (cacheNomes.chave === chave) return cacheNomes;
+    const maius = new Map(), minus = new Map(), pares = new Map();
+    const conta = (m, k) => m.set(k, (m.get(k) || 0) + 1);
+    for (const h of estado.historico.slice(-200)) {
+        for (const linha of String(h.texto || '').split('\n')) {
+            const palavras = linha.replace(/[*_✓•]/g, ' ').split(/\s+/).filter(Boolean);
+            let inicio = true, anterior = null;
+            for (const bruto of palavras) {
+                const w = bruto.replace(/^[("'“]+|[)"'”.,;:!?]+$/g, '');
+                const fimFrase = /[.!?:]$/.test(bruto);
+                if (/^\p{Lu}\p{Ll}{2,}$/u.test(w) && !inicio) {
+                    conta(maius, w.toLowerCase());
+                    if (anterior) conta(pares, `${anterior} ${w}`);
+                    anterior = fimFrase ? null : w;
+                } else {
+                    if (/^\p{Ll}{3,}$/u.test(w)) conta(minus, w);
+                    anterior = null;
+                }
+                inicio = fimFrase;
+            }
+        }
+    }
+    const simples = new Map();
+    const COMUNS = new Set(['dias', 'dia', 'horas', 'hora', 'semana', 'semanas', 'mes', 'meses', 'ano', 'anos', 'minutos', 'time', 'sala', 'data', 'centro', 'portao', 'poste', 'equipe', 'navio', 'terminal']);
+    for (const [w, n] of maius) if (n >= 2 && n >= 3 * (minus.get(w) || 0) && !PALAVRAS_VAZIAS.has(semAcento(w)) && !COMUNS.has(semAcento(w))) simples.set(w, w.charAt(0).toUpperCase() + w.slice(1));
+    const listaPares = [...pares].filter(([, n]) => n >= 2).map(([p]) => p);
+    for (const n of (estado.config ? nomesDaEquipe() : [])) if (/\s/.test(n)) listaPares.push(n); else simples.set(n.toLowerCase(), n);
+    for (const n of FIXOS_PROPRIOS) if (/\s/.test(n)) listaPares.push(n); else simples.set(n.toLowerCase(), n);
+    cacheNomes = { chave, pares: [...new Set(listaPares)].sort((a, b) => b.length - a.length), simples };
+    return cacheNomes;
+}
+const escRe = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+function capitalizarNomes(t) {
+    if (!t) return t;
+    const { pares, simples } = nomesProprios();
+    let r = t;
+    for (const p of pares) r = r.replace(new RegExp(`(?<!\\p{L})${escRe(p)}(?!\\p{L})`, 'giu'), m => (m === m.toUpperCase() ? m : p));
+    return r.replace(/\p{L}+/gu, w => (w === w.toLowerCase() && simples.has(w) ? simples.get(w) : w));
+}
+
 // Padrão de escrita das pendências: TÍTULO EM CAIXA ALTA; demais textos com a primeira letra de cada frase/linha em maiúscula
 function maiusculaInicial(t) {
-    const txt = fraseLegivel(String(t || '').trim());
+    const txt = capitalizarNomes(fraseLegivel(String(t || '').trim()));
     return txt.split('\n').map(l => l.trim()).filter(Boolean)
         .map(l => l.replace(/(^|[.!?]\s+)([a-zà-ÿ])/g, (_, a, c) => a + c.toUpperCase()))
         .join('\n');
@@ -776,13 +822,23 @@ function maiusculaInicial(t) {
 function separarTitulo(titulo, texto) {
     let t = String(titulo || '').replace(/\s+/g, ' ').trim();
     let d = String(texto || '').trim();
-    const m = t.match(/^([^:]{2,70}?)\s*:\s*(.*)$/);
+    // título cortado dentro do parêntese ("… (TRECHO INICIAL" + "Gate 1 ao poste 31): …"): volta o pedaço para o título
+    const abertos = (t.match(/\(/g) || []).length - (t.match(/\)/g) || []).length;
+    const cont = abertos > 0 && d.match(/^([^()\n]{1,50}\))\s*:?\s*/);
+    if (cont) { t = `${t}: ${cont[1]}`; d = d.slice(cont[0].length); }
+    // separa "TÍTULO: texto" no primeiro dois-pontos FORA de parênteses
+    let m = null;
+    for (let i = 0, prof = 0; i < t.length; i++) {
+        const c = t[i];
+        if (c === '(') prof++; else if (c === ')') prof = Math.max(0, prof - 1);
+        else if (c === ':' && !prof && i >= 2 && i <= 95) { m = [t, t.slice(0, i).trim(), t.slice(i + 1).trim()]; break; }
+    }
     if (m) {
         t = m[1];
         const resto = fraseLegivel(m[2].trim());
         const jaTem = resto && semAcento(d).toUpperCase().includes(semAcento(resto).toUpperCase().slice(0, 40));
         if (resto && !jaTem) d = d ? `${resto}\n${d}` : resto;
-    } else if (t.length > 70) {
+    } else if (t.length > (/\(.*\)/.test(t) ? 95 : 70)) {
         if (!semAcento(d).toUpperCase().includes(semAcento(t).toUpperCase().slice(0, 40))) d = d ? `${t}\n${d}` : t;
         t = t.slice(0, 60).replace(/\s+\S*$/, '');
     }
@@ -790,7 +846,35 @@ function separarTitulo(titulo, texto) {
 }
 const chavePendencia = titulo => semAcento(separarTitulo(titulo).titulo).toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 40);
 
-// Arruma títulos compridos e junta pendências abertas repetidas (mesmo título), somando os históricos
+// Mesmo assunto com títulos diferentes ("CÂMERA DA FILTRAGEM" × "REMANEJAR A CÂMERA FIXA PORTÃO 04 FILTRAGEM")
+function mesmoAssunto(a, b) {
+    if (chavePendencia(a.titulo) === chavePendencia(b.titulo)) return true;
+    const ta = palavrasChave(a.titulo), tb = palavrasChave(b.titulo);
+    const na = ta.filter(w => /\d/.test(w)), nb = tb.filter(w => /\d/.test(w));
+    if (na.length && nb.length && !na.some(x => nb.includes(x))) return false;      // "PORTÃO 02" ≠ "PORTÃO 04"
+    const comum = ta.filter(w => tb.includes(w)).length;
+    const menor = Math.min(ta.length, tb.length);
+    if (menor >= 2 && comum === menor) return true;
+    if (comum >= 2 && comum / new Set([...ta, ...tb]).size >= 0.5) return true;
+    const xa = palavrasChave(a.texto), xb = palavrasChave(b.texto);
+    const comumTxt = xa.filter(w => xb.includes(w)).length;
+    return comum >= 1 && xa.length >= 6 && xb.length >= 6 && comumTxt / new Set([...xa, ...xb]).size >= 0.35;
+}
+// Junta o texto antigo no novo sem repetir: do antigo só ficam as frases com nome, sigla ou número que o novo não tem
+function juntarTextos(novo, antigo, titulo = '') {
+    if (!antigo) return novo || '';
+    if (!novo) return antigo;
+    const tokens = t => new Set(semAcento(t).toLowerCase().split(/[^a-z0-9]+/).filter(Boolean));
+    const ref = tokens(`${novo} ${titulo}`);
+    const frases = antigo.split(/(?<=[.!?])\s+|\n+/).map(f => f.trim()).filter(Boolean);
+    const ficam = frases.filter(f => f.split(/\s+/).slice(1).map(w => w.replace(/[^\p{L}\d/-]/gu, ''))
+        .filter(w => /^\p{Lu}/u.test(w) || /\d/.test(w))
+        .some(w => [...tokens(w)].some(x => !ref.has(x))));
+    return ficam.length ? `${novo}\n${ficam.join(' ')}` : novo;
+}
+
+// Arruma títulos compridos e junta pendências abertas repetidas (mesmo assunto), somando os históricos.
+// Vale a última versão: título e texto da mais recente; o texto antigo só continua se tiver informação que a nova não tem.
 function arrumarPendencias() {
     let mudou = false;
     for (const p of estado.pendencias) {
@@ -800,16 +884,21 @@ function arrumarPendencias() {
         if (p.tratativa) p.tratativa = maiusculaInicial(p.tratativa);
         if (p.responsavel) p.responsavel = maiusculaInicial(p.responsavel);
         for (const e of p.etapas || []) e.texto = maiusculaInicial(e.texto);
-        for (const h of p.historico || []) if (h.texto) h.texto = maiusculaInicial(h.texto);
+        for (const h of p.historico || []) {
+            if (h.texto) h.texto = maiusculaInicial(h.texto);
+            if (h.tipo === 'ATUALIZACAO' && /^Pendência repetida juntada/.test(h.texto || '')) h.tipo = 'SISTEMA';   // registro interno não vai para o relatório
+        }
         if (antes !== JSON.stringify([p.tratativa, p.responsavel, p.etapas, p.historico])) mudou = true;
     }
-    const abertas = new Map();
+    const abertas = [];
     for (const p of [...estado.pendencias].sort((a, b) => String(a.criadoEm).localeCompare(String(b.criadoEm)))) {
         if (p.status !== 'ABERTA') continue;
-        const k = chavePendencia(p.titulo);
-        const dono = abertas.get(k);
-        if (!dono) { abertas.set(k, p); continue; }
-        if (p.texto && !semAcento(dono.texto).toUpperCase().includes(semAcento(p.texto).toUpperCase().slice(0, 40))) dono.texto = dono.texto ? `${dono.texto}\n${p.texto}` : p.texto;
+        const dono = abertas.find(x => x.tipo === p.tipo && mesmoAssunto(x, p));
+        if (!dono) { abertas.push(p); continue; }
+        const textoAntigo = dono.texto || '';
+        // a mais recente (p) dá o título e o texto; o texto antigo fica só se tiver algo que o novo não diz
+        if (p.titulo) dono.titulo = p.titulo;
+        if (p.texto) dono.texto = juntarTextos(p.texto, textoAntigo, `${p.titulo} ${dono.titulo}`);
         dono.responsavel = dono.responsavel || p.responsavel || '';
         dono.prazo = dono.prazo || p.prazo || '';
         dono.etapas = [...(dono.etapas || []), ...(p.etapas || []).filter(e => !(dono.etapas || []).some(x => x.texto === e.texto))];
@@ -817,7 +906,8 @@ function arrumarPendencias() {
         dono.historico = [...dono.historico, ...p.historico.filter(h => h.tipo !== 'CRIACAO' && !vistos.has(`${h.em}|${h.texto}`))]
             .sort((a, b) => String(a.em).localeCompare(String(b.em)));
         const t = agora();
-        dono.historico.push({ tipo: 'ATUALIZACAO', em: t.iso, data: t.data.slice(0, 5), hora: t.hora, por: 'Robô', texto: `Pendência repetida juntada a esta (${p.origem || 'origem não informada'}).` });
+        dono.historico.push({ tipo: 'SISTEMA', em: t.iso, data: t.data.slice(0, 5), hora: t.hora, por: 'Robô',
+            texto: `Pendência repetida juntada a esta (${p.origem || 'origem não informada'}).${textoAntigo && dono.texto !== textoAntigo && !dono.texto.includes(textoAntigo) ? ` Texto anterior: ${textoAntigo}` : ''}` });
         estado.pendencias = estado.pendencias.filter(x => x.id !== p.id);
         mudou = true;
     }
@@ -845,6 +935,7 @@ function novaPendencia({ tipo, titulo, texto, responsavel, prazo, etapas }, usua
 async function salvarPendencias() {
     const limite = Date.now() - 30 * 24 * 3600 * 1000;
     estado.pendencias = estado.pendencias.filter(p => p.status === 'ABERTA' || new Date(p.concluidoEm || 0).getTime() > limite);
+    arrumarPendencias();   // assunto repetido com outro título vira uma pendência só
     await store.set('pendencias', estado.pendencias);
 }
 

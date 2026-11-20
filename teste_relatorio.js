@@ -224,7 +224,7 @@ assert.strictEqual(NV.atualizarEstadias(estadias, fichaT, [{ id: 'x1', ...em, da
 const NU = require('./nucleo');
 assert.deepStrictEqual(NU.separarTitulo('DOCK STATION: Consultar o e-mail encaminhado', ''), { titulo: 'DOCK STATION', texto: 'Consultar o e-mail encaminhado' });
 assert.deepStrictEqual(NU.separarTitulo('DOCK STATION:', ''), { titulo: 'DOCK STATION', texto: '' });
-assert.strictEqual(NU.separarTitulo('CÂMERA DA FILTRAGEM: A PTA SERÁ DA EMPRESA RIP E O TIME DA DIGITAL ACOMPANHA', '').texto, 'A PTA será da empresa RIP e o time da digital acompanha');
+assert.strictEqual(NU.separarTitulo('CÂMERA DA FILTRAGEM: A PTA SERÁ DA EMPRESA RIP E O TIME DA DIGITAL ACOMPANHA', '').texto, 'A PTA será da empresa RIP e o time da Digital acompanha');
 // padrão de escrita: título em caixa alta, demais textos com a primeira letra de cada frase/linha em maiúscula
 assert.strictEqual(NU.maiusculaInicial('contatar o Alex. aguardando a TI\nsegunda linha'), 'Contatar o Alex. Aguardando a TI\nSegunda linha');
 assert.deepStrictEqual(NU.separarTitulo('dock station', 'consultar o e-mail'), { titulo: 'DOCK STATION', texto: 'Consultar o e-mail' });
@@ -328,4 +328,21 @@ assert.strictEqual(passeioVan.rascunhos[0].horaInicial, '14:50');
 assert.strictEqual(passeioVan.rascunhos[0].placa, 'KZI-6D14');
 assert.strictEqual(passeioVan.rascunhos[0].conferir.length, 0);
 assert.ok(passeioVan.rascunhos[0].alertas.some(a => /Quantidade de tripulantes/.test(a)));
+// ---- Padrão do relatório (relatório do diurno de 20/11/2026 arrumado à mão)
+assert.strictEqual(R.linhaNoPadrao('Destracado'), 'Desatracado.');
+assert.strictEqual(R.linhaNoPadrao('Saida de seis tripulantes a passeio. Até o presente momento não retornaram'), 'Saída a passeio de 06 tripulantes. Não retornaram até o presente momento.');
+assert.strictEqual(R.linhaNoPadrao('Saída de 5 tripulantes a passeio.'), 'Saída a passeio de 05 tripulantes.');
+assert.strictEqual(R.linhaNoPadrao('Saída para atendimento médico de 02 tripulantes.'), 'Saída para atendimento médico de 02 tripulantes.');
+assert.strictEqual(R.linhaNoPadrao('Atracado em 19/11 às 10:30.'), 'Atracado em 19/11 às 10:30.');
+assert.strictEqual(R.padronizarAtividade('O totem de senha foi acondicionado na sala de briefing da portaria. Vide e-mail'), 'O totem de senha foi acondicionado na sala de briefing da portaria. Detalhes no e-mail encaminhado.');
+assert.strictEqual(R.padronizarAtividade('Realizado a solicitação de desentupimento do esgoto do GATE 01. Vide e-mail'), 'Realizada a solicitação de desentupimento do esgoto do Gate 01. Detalhes no e-mail encaminhado.');
+const fPad = R.fichaVazia(); fPad.vtr = { kmInicial: '19458', kmFinal: '19458' };
+fPad.navios = { tore: [], toil: [{ navio: 'AMETISTA BRASIL', linhas: ['Previsão de desatracação em 20/11 às 20:00.'] }] };
+const confPad = R.conferirFicha(fPad, [], [{ titulo: 'NOBREAK', texto: 'Retirada alinhada para segunda-feira (16/11).\nEcho inicial:' }], { data: '20/11/2026', hora: '21:00' });
+assert.ok(confPad.some(a => /KM final igual/.test(a)));
+assert.ok(confPad.some(a => /16\/11 já passou/.test(a)));
+assert.ok(confPad.some(a => /linha solta "Echo inicial:"/.test(a)));
+assert.ok(confPad.some(a => /AMETISTA BRASIL: a previsão de desatracação/.test(a)));
+assert.ok(!R.conferirFicha(fPad, [], [{ titulo: 'X', texto: 'Retirada para 25/11.' }], { data: '20/11/2026', hora: '10:00' }).some(a => /já passou/.test(a)));
+assert.ok(R.textoAviso({ texto: 'Texto.', historico: [{ tipo: 'ATUALIZACAO', data: '20/11', hora: '10:58', texto: 'Lista enviada.' }, { tipo: 'SISTEMA', data: '20/11', hora: '11:11', texto: 'Pendência repetida juntada a esta.' }] }).endsWith('Atualização (20/11 10:58h): Lista enviada.'));
 console.log('\n✅ Todos os testes passaram.');
