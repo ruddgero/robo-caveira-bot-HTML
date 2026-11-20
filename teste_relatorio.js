@@ -320,4 +320,12 @@ const mapaLoc = ROI.mapaDeLocais([{ local: 'Portaria Principal' }, { local: 'Por
 assert.strictEqual(mapaLoc.get('Portaria Principal (Saída de veículos)'), 'Portaria Principal');
 assert.strictEqual(mapaLoc.get('Portaria Principal - Rai-x'), 'Portaria Principal');
 assert.strictEqual(mapaLoc.get('Gate 01'), 'Gate 01');
+// Saída a passeio sem a palavra "tripulantes" (mensagem real do grupo): vira operação, com horário de entrada
+const passeioVan = R.classificarMensagem('*SAIDA A PASSEIO*\nNAVIO: MARTHA OLDENDORFF\nTERMINAL: T-ORE\nVEÍCULO: VAN/ KZI6D14\nMOTORISTA: DIOGO ARAUJO\nEMPRESA: BJM TRANSPORTE\nENTRADA PELO CAIS DO PIER AS: 14:50', undefined, '14:53');
+assert.strictEqual(passeioVan.sugestao, 'OPERACAO');
+assert.strictEqual(passeioVan.rascunhos[0].movimento, 'Saída a passeio');
+assert.strictEqual(passeioVan.rascunhos[0].horaInicial, '14:50');
+assert.strictEqual(passeioVan.rascunhos[0].placa, 'KZI-6D14');
+assert.strictEqual(passeioVan.rascunhos[0].conferir.length, 0);
+assert.ok(passeioVan.rascunhos[0].alertas.some(a => /Quantidade de tripulantes/.test(a)));
 console.log('\n✅ Todos os testes passaram.');
