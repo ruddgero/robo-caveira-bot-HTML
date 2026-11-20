@@ -139,6 +139,7 @@ async function carregar() {
         ]);
         if (migrou) console.log('🔄 [MIGRAÇÃO] Dados da versão anterior convertidos (avisos → pendências, navios e operações).');
     }
+    if (arrumarPendencias()) { await store.set('pendencias', estado.pendencias); console.log('🧹 [PENDÊNCIAS] Títulos arrumados e repetidas juntadas.'); }
 }
 
 function aoAlerta(fn) { handlers.alerta = fn; }
@@ -537,10 +538,9 @@ async function herdar(relatorioId, usuario) {
     await arquivarFichaAtual();
     const nova = R.fichaHerdada(rel, estado.ficha, estado.config);
     // avisos do relatório recebido viram pendências (sem duplicar os que já estão abertos)
-    const chave = s => semAcento(s).toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 40);
     for (const av of rel.dados.avisos || []) {
         if (!(av.titulo || av.texto)) continue;
-        if (estado.pendencias.some(p => p.status === 'ABERTA' && chave(p.titulo) === chave(av.titulo))) continue;
+        if (estado.pendencias.some(p => p.status === 'ABERTA' && chavePendencia(p.titulo) === chavePendencia(av.titulo))) continue;
         estado.pendencias.push(novaPendencia({ tipo: 'AVISO', titulo: av.titulo, texto: av.texto }, null, `Relatório ${rel.dados.turno || ''} ${rel.dados.data || ''} (${rel.autor || 'equipe anterior'})`, nova));
     }
     rel.herdadoEm = agora().iso;
@@ -632,6 +632,60 @@ async function dispensarRelatorioPendente(usuario) {
 // Pendências (avisos e Digital) com histórico e tratativas
 // =====================================================================
 const TIPOS_PENDENCIA = ['AVISO', 'DIGITAL', 'PROJETO'];
+
+// Texto todo em MAIÚSCULAS (veio do título) fica legível na descrição; siglas continuam em maiúsculas
+const SIGLAS = new Set(['PTA', 'RIP', 'TI', 'CFTV', 'CA', 'DPS', 'SPDA', 'PF', 'RFB', 'US', 'OCR', 'VTR', 'ROV', 'K9', 'DTA', 'ADM', 'CCOS', 'ET', 'FM-200', 'T-ORE', 'T-OIL', 'PTW', 'EPI', 'ISPS', 'GSI', 'CPA', 'ASO', 'NR']);
+function fraseLegivel(t) {
+    if (!t || /[a-zà-ÿ]/.test(t) || t.length < 20) return t;
+    const min = t.toLowerCase().replace(/(^|[.!?]\s+)([a-zà-ÿ])/g, (_, a, l) => a + l.toUpperCase());
+    return min.replace(/[\wÀ-ÿ-]+/g, w => (SIGLAS.has(w.toUpperCase()) ? w.toUpperCase() : w));
+}
+
+// "DOCK STATION: Consultar o e-mail…" → título "DOCK STATION"; o resto vai para a descrição (nada se perde)
+function separarTitulo(titulo, texto) {
+    let t = String(titulo || '').replace(/\s+/g, ' ').trim();
+    let d = String(texto || '').trim();
+    const m = t.match(/^([^:]{2,70}?)\s*:\s*(.*)$/);
+    if (m) {
+        t = m[1];
+        const resto = fraseLegivel(m[2].trim());
+        const jaTem = resto && semAcento(d).toUpperCase().includes(semAcento(resto).toUpperCase().slice(0, 40));
+        if (resto && !jaTem) d = d ? `${resto}\n${d}` : resto;
+    } else if (t.length > 70) {
+        if (!semAcento(d).toUpperCase().includes(semAcento(t).toUpperCase().slice(0, 40))) d = d ? `${t}\n${d}` : t;
+        t = t.slice(0, 60).replace(/\s+\S*$/, '');
+    }
+    return { titulo: t.replace(/[\s:;.,\-–]+$/, '').toUpperCase(), texto: d };
+}
+const chavePendencia = titulo => semAcento(separarTitulo(titulo).titulo).toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 40);
+
+// Arruma títulos compridos e junta pendências abertas repetidas (mesmo título), somando os históricos
+function arrumarPendencias() {
+    let mudou = false;
+    for (const p of estado.pendencias) {
+        const { titulo, texto } = separarTitulo(p.titulo, p.texto);
+        if (titulo !== p.titulo || texto !== p.texto) { p.titulo = titulo; p.texto = texto; mudou = true; }
+    }
+    const abertas = new Map();
+    for (const p of [...estado.pendencias].sort((a, b) => String(a.criadoEm).localeCompare(String(b.criadoEm)))) {
+        if (p.status !== 'ABERTA') continue;
+        const k = chavePendencia(p.titulo);
+        const dono = abertas.get(k);
+        if (!dono) { abertas.set(k, p); continue; }
+        if (p.texto && !semAcento(dono.texto).toUpperCase().includes(semAcento(p.texto).toUpperCase().slice(0, 40))) dono.texto = dono.texto ? `${dono.texto}\n${p.texto}` : p.texto;
+        dono.responsavel = dono.responsavel || p.responsavel || '';
+        dono.prazo = dono.prazo || p.prazo || '';
+        dono.etapas = [...(dono.etapas || []), ...(p.etapas || []).filter(e => !(dono.etapas || []).some(x => x.texto === e.texto))];
+        const vistos = new Set(dono.historico.map(h => `${h.em}|${h.texto}`));
+        dono.historico = [...dono.historico, ...p.historico.filter(h => h.tipo !== 'CRIACAO' && !vistos.has(`${h.em}|${h.texto}`))]
+            .sort((a, b) => String(a.em).localeCompare(String(b.em)));
+        const t = agora();
+        dono.historico.push({ tipo: 'ATUALIZACAO', em: t.iso, data: t.data.slice(0, 5), hora: t.hora, por: 'Robô', texto: `Pendência repetida juntada a esta (${p.origem || 'origem não informada'}).` });
+        estado.pendencias = estado.pendencias.filter(x => x.id !== p.id);
+        mudou = true;
+    }
+    return mudou;
+}
 function limparEtapas(etapas) {
     return (Array.isArray(etapas) ? etapas : String(etapas || '').split('\n'))
         .map(e => (typeof e === 'string' ? { texto: e } : e))
@@ -640,9 +694,10 @@ function limparEtapas(etapas) {
 }
 function novaPendencia({ tipo, titulo, texto, responsavel, prazo, etapas }, usuario, origem = '', ficha = estado.ficha) {
     const t = agora();
+    const sep = separarTitulo(titulo, texto);
     return {
         id: novoId(), tipo: TIPOS_PENDENCIA.includes(tipo) ? tipo : 'AVISO',
-        titulo: String(titulo || '').trim().toUpperCase(), texto: String(texto || '').trim(),
+        titulo: sep.titulo, texto: sep.texto,
         responsavel: String(responsavel || '').trim(), prazo: String(prazo || '').trim(), etapas: limparEtapas(etapas),
         status: 'ABERTA', origem, criadoEm: t.iso, criadoPor: quem(usuario),
         turno: ficha?.turno || '', data: ficha?.data || t.data,
@@ -660,6 +715,15 @@ async function criarPendencia(dados, usuario, origem = 'Registrada manualmente')
     if (!(dados.titulo || '').trim() && !(dados.texto || '').trim()) throw erro('Preencha o título ou a descrição.');
     const p = novaPendencia(dados, usuario, origem);
     if (!p.titulo) p.titulo = p.texto.split('\n')[0].slice(0, 60).toUpperCase();
+    // já existe aberta com o mesmo título: vira atualização dela (não duplica)
+    const igual = estado.pendencias.find(x => x.status === 'ABERTA' && chavePendencia(x.titulo) === chavePendencia(p.titulo));
+    if (igual) {
+        if (p.texto) registrarNoHistorico(igual, p.texto, usuario?.nome || 'Robô', 'duplicada');
+        if (p.responsavel && !igual.responsavel) igual.responsavel = p.responsavel;
+        if (p.prazo && !igual.prazo) igual.prazo = p.prazo;
+        await salvarPendencias();
+        return igual;
+    }
     estado.pendencias.push(p);
     await salvarPendencias();
     auditar(usuario, `Criou ${p.tipo === 'DIGITAL' ? 'pendência da Digital' : p.tipo === 'PROJETO' ? 'projeto' : 'aviso'}`, p.titulo);
@@ -1485,6 +1549,6 @@ module.exports = {
     registrarOperacoes, registrarSaida, atualizarOperacao, excluirOperacao, enviarEmailOperacao, marcarEmailOperacao, destinatarioEmail,
     receberMensagem, atualizarItemEntrada,
     previaPlanilha, planilhaDoTurno, planilhaPorTurno, arquivoPlanilha,
-    aceitarSugestao, descartarSugestao, confirmarEntrada, pendenciaDoAssunto,
+    aceitarSugestao, descartarSugestao, confirmarEntrada, pendenciaDoAssunto, separarTitulo, arrumarPendencias,
     iniciarEscala, continuarEscala, construirPassagem, salvarPassagem, restaurarPassagem, textoPassagem
 };

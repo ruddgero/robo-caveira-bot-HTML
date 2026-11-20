@@ -834,25 +834,35 @@ function pedirHora(titulo, fn, msg) {
   abrirModal(titulo, [c], botoesSalvar(async () => { await fn(t.value); fecharModal(); aviso(msg); await recarregarTudo(); }, 'Registrar'));
 }
 
-// Pendência com ações rápidas (usada no turno e no menu Pendências)
+// Cartão limpo da pendência (turno e menu Pendências): título + uma linha da descrição.
+// Passar o mouse mostra tudo; tocar/clicar abre a pendência, onde ficam as ações (atualizar, dar baixa, corrigir).
 const ROTULO_TIPO = { AVISO: '📌 Aviso', DIGITAL: '🛠️ Digital', PROJETO: '📐 Projeto' };
 function cartaoPendenciaRapida(p) {
   const ult = [...(p.historico || [])].reverse().find(h => h.tipo !== 'CRIACAO');
   const etapas = p.etapas || [];
   const feitas = etapas.filter(e => e.feito).length;
   const proxima = etapas.find(e => !e.feito);
-  return el('div', { class: `acao-rapida${p.status !== 'ABERTA' ? ' concluida' : ''}` },
-    el('div', { class: 'linha', style: 'justify-content:space-between' },
+  const aberta = p.status === 'ABERTA';
+  const resumo = p.tipo === 'PROJETO' && etapas.length
+    ? `${feitas}/${etapas.length} etapas${proxima ? ` · próxima: ${proxima.texto}` : ' · todas feitas'}`
+    : (p.texto || '').split('\n')[0];
+  const dica = el('div', { class: 'dica', role: 'tooltip' },
+    el('strong', { text: p.titulo }),
+    el('div', { class: 'mudo pequeno', text: [ROTULO_TIPO[p.tipo] || p.tipo, aberta ? 'Aberta' : 'Concluída', p.responsavel && `Resp.: ${p.responsavel}`, p.prazo && `Prazo: ${p.prazo}`].filter(Boolean).join(' · ') }),
+    p.texto ? el('div', { class: 'dica-texto', text: p.texto }) : null,
+    etapas.length ? el('div', {}, ...etapas.map(e => el('div', { class: 'pequeno', text: `${e.feito ? '✓' : '○'} ${e.texto}${e.prazo ? ' · ' + e.prazo : ''}` }))) : null,
+    el('div', { class: 'mudo pequeno', text: `Aberta em ${quando(p.criadoEm)}${p.origem ? ' · ' + p.origem : ''}` }),
+    ult ? el('div', { class: 'pequeno', text: `Última atualização (${ult.data} ${ult.hora} · ${ult.por}): ${ult.texto || ''}` }) : null,
+    !aberta && p.tratativa ? el('div', { class: 'pequeno', text: `Tratativa: ${p.tratativa}` }) : null,
+    el('div', { class: 'mudo pequeno', text: 'Clique para abrir e atualizar ou dar baixa' }));
+  return el('button', { class: `pend-cartao${aberta ? '' : ' concluida'}`, onclick: () => abrirPendencia(p) },
+    el('div', { class: 'linha', style: 'justify-content:space-between;flex-wrap:nowrap' },
       el('span', { class: 'etiqueta', text: ROTULO_TIPO[p.tipo] || p.tipo }),
-      el('span', { class: 'mudo pequeno', text: [p.responsavel && `Resp.: ${p.responsavel}`, p.prazo && `Prazo: ${p.prazo}`].filter(Boolean).join(' · ') })),
-    el('button', { class: 'link-titulo', onclick: () => abrirPendencia(p) }, p.titulo || p.texto),
+      p.sugestaoConclusao && aberta ? el('span', { class: 'etiqueta ok', text: '💡 parece resolvido' }) : el('span', { class: 'mudo pequeno corta', text: p.responsavel || '' })),
+    el('div', { class: 'pend-titulo', text: p.titulo || p.texto }),
+    resumo ? el('div', { class: 'pend-resumo', text: resumo }) : null,
     p.tipo === 'PROJETO' && etapas.length ? el('div', { class: 'progresso-etapas' }, el('div', { style: `width:${Math.round(feitas / etapas.length * 100)}%` })) : null,
-    p.tipo === 'PROJETO' && etapas.length ? el('div', { class: 'mudo pequeno', text: `${feitas}/${etapas.length} etapas${proxima ? ` · próxima: ${proxima.texto}${proxima.prazo ? ' (' + proxima.prazo + ')' : ''}` : ' · todas feitas'}` }) : null,
-    ult ? el('div', { class: 'mudo pequeno', text: `${ult.data} ${ult.hora} · ${ult.por}: ${String(ult.texto || '').slice(0, 140)}` }) : null,
-    p.sugestaoConclusao && p.status === 'ABERTA' ? el('div', { class: 'citacao', style: 'border-left-color:var(--verde)', text: `💡 Parece resolvido: "${p.sugestaoConclusao.texto.slice(0, 160)}"` }) : null,
-    p.status === 'ABERTA' ? el('div', { class: 'linha' },
-      el('button', { class: 'btn pequeno', onclick: () => atualizarPendenciaModal(p) }, 'Atualizar'),
-      el('button', { class: 'btn pequeno verde', onclick: () => concluirPendenciaModal(p) }, '✓ Dar baixa')) : el('div', { class: 'mudo pequeno', text: `Resolvido por ${p.concluidoPor?.nome || '?'}: ${p.tratativa || ''}` }));
+    dica);
 }
 
 function atualizarPendenciaModal(p) {
