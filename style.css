@@ -319,3 +319,15 @@ html, body { overflow-x: clip; }
   .barra-acoes .estado-salvo { flex-basis: 100%; text-align: center; }
   .barra-acoes .btn { flex: 1 1 0; min-width: 0; padding: 10px 4px; font-size: 13px; white-space: nowrap; }
 }
+
+/* v5.0 · Pendências do turno e da Segurança Patrimonial */
+.acao-rapida { display: grid; gap: 6px; padding: 11px 12px; border-radius: 12px; border: 1px solid var(--borda); background: var(--fundo); }
+.acao-rapida.alerta { border-color: #5a4313; box-shadow: inset 3px 0 0 var(--ambar); }
+.acao-rapida.concluida { opacity: .7; }
+.acao-rapida .linha { flex-wrap: wrap; }
+.link-titulo { background: none; border: 0; padding: 0; text-align: left; font-weight: 600; color: inherit; cursor: pointer; font-size: 15px; }
+.link-titulo:hover { text-decoration: underline; }
+.progresso-etapas { height: 6px; border-radius: 3px; background: var(--borda); overflow: hidden; }
+.progresso-etapas > div { height: 100%; background: var(--verde); }
+.check.feito { text-decoration: line-through; color: var(--mudo); }
+.contadores { grid-template-columns: repeat(3, minmax(0, 1fr)); }

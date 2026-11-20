@@ -41,6 +41,20 @@ Entrada na portaria: 14:50Hs
 
 **Retorno do passeio:** `Retorno ao terminal dos 05 tripulantes do navio UBUNTU HUMANITY`
 
+## Plantão › Turno: tudo do turno num lugar só
+- **Contadores** (A confirmar, Em aberto, E-mails, Pendências gerais, Urgentes, Mensagens): toque para filtrar.
+- **⚠️ A confirmar**: um toque resolve (ex.: `T-ORE ✓` ou `T-OIL`). O relatório atualiza na hora.
+- **Em aberto**: `🏁 Registrar saída` (veículo) ou `↩ Registrar retorno` (tripulantes do passeio).
+- **Gerais**: as pendências da Segurança Patrimonial, com `Atualizar` e `✓ Dar baixa`.
+- Abas: **Turno | Relatório | E-mails | Histórico**.
+
+## Menu Pendências (só Segurança Patrimonial)
+- **Avisos** (todas as abertas) · **Digital** · **Projetos** (etapas, prazos, próxima etapa) · **Concluídas**. Filtro por responsável.
+- **Dar baixa** exige a tratativa (o que foi feito). Vale para o Plantão e para o menu ao mesmo tempo e vai para o relatório (Atividades).
+- O robô atualiza sozinho o histórico da pendência quando o assunto aparece no grupo ou nas atividades do relatório publicado.
+  Se a mensagem disser que foi resolvido ("reparada", "operacional"…), aparece **💡 Parece resolvido** com a tratativa já preenchida.
+- **💡 Sugestões do robô**: atividade com "favor acompanhar", "aguardando", "próxima semana"… que ainda não tem pendência. `✓ Criar` em um toque.
+
 ## Errou a mensagem?
 - **Apague e mande de novo** ou **edite** no grupo: o robô sempre fica com a **última versão**.
 - O que o robô não tiver certeza vai para **⚠️ A confirmar** (terminal diferente do navio atracado, nome parecido, sem horário…). Toque e confirme.

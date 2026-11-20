@@ -793,11 +793,12 @@ function rascunhosOperacao(textoOriginal, horaMensagem, navios = NAVIOS_PADRAO) 
 
     const alertasBase = [];
     const conferirBase = [];
+    const escolhasBase = [];   // opções de um toque para o líder resolver o "a confirmar"
     if (placas.incompletas.length) alertasBase.push(`Placa incompleta na mensagem: ${placas.incompletas.join(', ')} — conferir`);
     let horaInicial = normalizarHora(c.horaInicial || '');
     if (!horaInicial && !c.horaFinal) {
         if (horas.length === 1) horaInicial = horas[0];
-        else if (horas.length > 1) { horaInicial = horas[0]; conferirBase.push(`Mensagem com mais de um horário (${horas.join(', ')}) — confirmar o horário de entrada`); }
+        else if (horas.length > 1) { horaInicial = horas[0]; conferirBase.push(`Mensagem com mais de um horário (${horas.join(', ')}) — confirmar o horário de entrada`); escolhasBase.push({ campo: 'horaInicial', rotulo: 'Horário de entrada', opcoes: horas }); }
         else if (horaMensagem) { horaInicial = horaMensagem; alertasBase.push(`Horário de entrada não estava na mensagem: usado o horário da postagem (${horaMensagem})`); }
     }
     // linhas não reconhecidas vão para Observações (nada se perde)
@@ -809,12 +810,17 @@ function rascunhosOperacao(textoOriginal, horaMensagem, navios = NAVIOS_PADRAO) 
         const nomeFinal = nomeNavioLimpo(conhecido ? conhecido.nome : nomeNavio);
         const conferir = [...conferirBase];
         const alertas = [...alertasBase];
-        if (conhecido && chaveNavio(conhecido.nome) !== chaveNavio(nomeNavio))
+        const escolhas = [...escolhasBase];
+        if (conhecido && chaveNavio(conhecido.nome) !== chaveNavio(nomeNavio)) {
             conferir.push(`Navio escrito "${nomeNavioLimpo(nomeNavio)}" é parecido com "${nomeFinal}" — confirmar o navio`);
-        if (terminalEscrito && conhecido?.terminal && conhecido.terminal !== terminalEscrito)
+            escolhas.push({ campo: 'navio', rotulo: 'Navio', opcoes: [nomeFinal, nomeNavioLimpo(nomeNavio).toUpperCase()] });
+        }
+        if (terminalEscrito && conhecido?.terminal && conhecido.terminal !== terminalEscrito) {
             conferir.push(`Mensagem diz ${terminalEscrito}, mas o navio ${nomeFinal} está no ${conhecido.terminal} — confirmar o terminal`);
+            escolhas.push({ campo: 'terminal', rotulo: 'Terminal', opcoes: [conhecido.terminal, terminalEscrito] });
+        }
         const terminal = terminalEscrito || conhecido?.terminal || '';
-        if (!terminal) conferir.push('Terminal não informado — confirmar');
+        if (!terminal) { conferir.push('Terminal não informado — confirmar'); escolhas.push({ campo: 'terminal', rotulo: 'Terminal', opcoes: ['T-ORE', 'T-OIL'] }); }
         if (!nomeFinal) conferir.push('Navio não informado — confirmar');
         return {
             tipo,
@@ -838,7 +844,8 @@ function rascunhosOperacao(textoOriginal, horaMensagem, navios = NAVIOS_PADRAO) 
             horaFinal: normalizarHora(c.horaFinal || ''),
             observacoes,
             conferir,
-            alertas
+            alertas,
+            escolhas
         };
     });
 }
@@ -991,13 +998,17 @@ function manobraDoTexto(textoOriginal, navios = NAVIOS_PADRAO) {
         if (m && !/^(navio|o navio|previs|atraca|desatraca)/i.test(m[1].trim())) navio = nomeNavioLimpo(m[1]).toUpperCase();
     }
     const terminal = normalizarTerminal(texto) || conhecido?.terminal || '';
+    const mb = { tipo, navio, terminal, hora, data };
+    mb.linha = linhaManobra(mb);
+    return mb;
+}
+function linhaManobra({ tipo, data, hora }) {
     const d = data ? ` em ${data}` : '', h = hora ? ` às ${hora}` : '';
-    const linha = {
+    return {
         ATRACACAO: `Atracado${d}${h}.`, DESATRACACAO: `Desatracado${d}${h}.`, FUNDEIO: `Fundeado${d}${h}.`,
         MANOBRA: 'Em manobra de atracação.', MANOBRA_DES: 'Em manobra de desatracação.',
         PREV_ATRACACAO: `Previsão de atracação${d}${h}.`, PREV_DESATRACACAO: `Previsão de desatracação${d}${h}.`
     }[tipo];
-    return { tipo, navio, terminal, hora, data, linha };
 }
 
 // ---------------------------------------------------------------------
@@ -1099,6 +1110,6 @@ module.exports = {
     fichaVazia, naviosDeTexto, adicionarLinhaNavio, ehRelatorioDeTurno, lerRelatorio, fichaHerdada,
     formatarRelatorio, conferirFicha, formatarPassagemEscala, textoAviso,
     lerMensagemPadrao, classificarMensagem, extrairCampos, rascunhosOperacao, atividadeDasOperacoes,
-    tipoOperacaoDoTexto, movimentoDoTexto, resumoNavio, minutaEmail, mensagemPadrao, manobraDoTexto, numeroKm, navioConhecido, terminalDoNavio,
+    tipoOperacaoDoTexto, movimentoDoTexto, resumoNavio, minutaEmail, mensagemPadrao, manobraDoTexto, linhaManobra, numeroKm, navioConhecido, terminalDoNavio,
     formatarQtdTripulantes, ehSemAlteracao, separarNomes, juntarNomes, nomeProprio, lerEquipesComPipe, nomeNavioLimpo, chaveNavio, acharNavio, trocarLinhaNavio
 };

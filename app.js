@@ -114,7 +114,7 @@ async function baixarArquivo(url, nomePadrao) {
 const S = {
   usuario: null, meta: null, estado: null, aba: 'central', ultimaAba: {}, historico: null, filtroEmails: 'todos', buscaHist: '',
   central: null, ficha: null, fichaBase: null, versao: 0, conferencia: [], avisos: [], operacoes: [],
-  entrada: [], config: null, filtroEntrada: 'pendente', busca: '', filtroPend: 'todas',
+  entrada: [], config: null, filtroEntrada: 'pendente', busca: '', filtroTurno: 'turno', subfiltroTurno: '', abaPend: 'avisos', respPend: '',
   sujo: false, salvando: false, timerSalvar: null, timerEstado: null, painelTimer: null
 };
 const ehLider = () => ['ADMIN', 'LIDER'].includes(S.usuario?.perfil);
@@ -384,12 +384,13 @@ function desenharTopo() {
   p.className = 'pilula ' + classe;
   p.querySelector('.txt').textContent = txt;
   const bp = $('#badge-pendencias');
-  const np = (S.central ? itensPendentes().length : (e?.pendenciasAbertas || 0)) + (e?.pendentesEntrada || 0);
+  const np = S.central ? itensPendentes().length : (e?.pendenciasAbertas || 0);   // só Segurança Patrimonial
   bp.hidden = !np; bp.textContent = np > 99 ? '99+' : np;
-  bp.style.background = e?.urgentes || (S.central && emailsPendentes().some(o => o.email?.status === 'ERRO')) ? 'var(--vermelho)' : 'var(--ambar)';
+  bp.style.background = 'var(--ambar)';
   if (!$('#subabas').hidden) desenharSubabas();
   const bc = $('#badge-central');
-  const alerta = (e?.plantao?.relatorioPendenteId ? 1 : 0) + (e?.plantao?.sugerirNovaEscala && deplantao() ? 1 : 0) + (!e?.plantao?.liderId ? 1 : 0);
+  const nTurno = S.central ? itensTurno().filter(i => i.grupo === 'confirmar').length : 0;
+  const alerta = (e?.plantao?.relatorioPendenteId ? 1 : 0) + (e?.plantao?.sugerirNovaEscala && deplantao() ? 1 : 0) + (!e?.plantao?.liderId ? 1 : 0) + nTurno + (e?.urgentes || 0);
   bc.hidden = !alerta; bc.textContent = '!'; bc.style.background = 'var(--ambar)';
 }
 
@@ -399,8 +400,10 @@ const ehDesktop = () => MQ_DESKTOP.matches;
 MQ_DESKTOP.addEventListener?.('change', () => { if (S.ficha) redesenharAba(); });
 
 // Navegação: 4 abas principais; Plantão e Pendências têm subabas
-const GRUPOS = { plantao: ['central', 'relatorio', 'emails'], pendencias: ['pendencias', 'entrada'], historico: ['historico'], painel: ['painel'] };
-const ROTULOS_SUB = { central: 'Turno', relatorio: 'Relatório', emails: 'E-mails', pendencias: 'Pendências', entrada: 'Mensagens do grupo' };
+// Tudo do turno fica em Plantão (Turno | Relatório | E-mails | Histórico; as mensagens do grupo abrem pelo Turno).
+// O menu Pendências é só da Segurança Patrimonial.
+const GRUPOS = { plantao: ['central', 'relatorio', 'emails', 'historico', 'entrada'], pendencias: ['pendencias'], painel: ['painel'] };
+const ROTULOS_SUB = { central: 'Turno', relatorio: 'Relatório', emails: 'E-mails', historico: 'Histórico' };
 const grupoDa = aba => Object.keys(GRUPOS).find(g => GRUPOS[g].includes(aba)) || 'plantao';
 const DESENHAR = {
   central: () => desenharCentral(), relatorio: () => desenharRelatorio(), emails: () => desenharEmails(),
@@ -410,13 +413,12 @@ function redesenharAba() { (DESENHAR[S.aba] || (() => {}))(); }
 
 function desenharSubabas() {
   const box = $('#subabas');
-  const vistas = GRUPOS[grupoDa(S.aba)];
+  const vistas = GRUPOS[grupoDa(S.aba)].filter(v => ROTULOS_SUB[v]);
   box.hidden = vistas.length < 2;
   if (box.hidden) return;
   const contagem = {
-    emails: S.central ? emailsPendentes().length : 0,
-    pendencias: S.central ? itensPendentes().length : 0,
-    entrada: S.estado?.pendentesEntrada || 0
+    central: S.central ? itensTurno().filter(i => i.grupo === 'confirmar').length : 0,
+    emails: S.central ? emailsPendentes().length : 0
   };
   box.replaceChildren(...vistas.map(v => el('button', { class: v === S.aba ? 'ativa' : '', onclick: () => trocarAba(v) },
     ROTULOS_SUB[v], contagem[v] ? el('span', { class: 'n', text: contagem[v] > 99 ? '99+' : String(contagem[v]) }) : null)));
@@ -467,6 +469,7 @@ async function atualizarEstado() {
     if (S.estado.pendentesEntrada !== ant?.pendentesEntrada || S.estado.urgentes !== ant?.urgentes || m.operacoes !== a.operacoes) {
       await carregarEntrada();
       if (S.aba === 'entrada' && livre) desenharListaEntrada();
+      if (S.aba === 'central' && livre) desenharCentral();
       desenharSubabas();
       if (S.estado.urgentes > (ant?.urgentes || 0)) aviso('🚨 Mensagem urgente no grupo (Pendências › Mensagens)', true);
     }
@@ -568,7 +571,9 @@ function desenharCentral() {
 
   // --- Plantão
   const p = E.plantao;
-  const semSaida = C.operacoes.filter(o => !o.horaFinal).length;
+  const turno = itensTurno();
+  const nConf = turno.filter(i => i.grupo === 'confirmar').length, nAberto = turno.filter(i => i.grupo === 'aberto').length;
+  const filtrar = sub => () => { S.filtroTurno = 'turno'; S.subfiltroTurno = sub; redesenharAba(); document.querySelector('#aba-central .duas-colunas > div:last-child')?.scrollIntoView({ behavior: 'smooth' }); };
   if (!p.liderId) {
     esq.append(el('div', { class: 'faixa atencao' },
       el('strong', { text: 'Ninguém assumiu o plantão' }),
@@ -585,9 +590,12 @@ function desenharCentral() {
           eq.saindo && !/conforme/i.test(eq.saindo) ? el('div', { class: 'mudo pequeno', text: `Equipe de serviço: ${eq.saindo}` }) : null),
         ehLider() && !deplantao() ? el('button', { class: 'btn pequeno', onclick: assumir }, 'Assumir') : el('span', { class: 'etiqueta ok', text: deplantao() ? 'Você' : 'Ativo' })),
       el('div', { class: 'contadores' },
+        contador(nConf, 'A confirmar', filtrar('confirmar'), nConf > 0),
+        contador(nAberto, 'Em aberto', filtrar('aberto')),
+        contador(emailsPendentes().length, 'E-mails', filtrar('emails'), emailsPendentes().some(o => o.email?.status === 'ERRO')),
+        contador(pendenciasAbertas().length, 'Pendências gerais', () => { S.filtroTurno = 'gerais'; S.subfiltroTurno = ''; redesenharAba(); }),
         contador(E.urgentes, 'Urgentes', () => { S.filtroEntrada = 'pendente'; trocarAba('entrada'); }, E.urgentes > 0),
-        contador(emailsPendentes().length, 'E-mails', () => { S.filtroEmails = 'encaminhar'; trocarAba('emails'); }, emailsPendentes().some(o => o.email?.status === 'ERRO')),
-        contador(semSaida, 'Sem saída', () => { S.filtroEmails = 'semsaida'; trocarAba('emails'); }, false)),
+        contador(E.pendentesEntrada, 'Mensagens', () => { S.filtroEntrada = 'pendente'; trocarAba('entrada'); })),
       deplantao() ? el('button', { class: 'btn primario largo', style: 'padding:13px;font-size:15px', onclick: () => trocarAba('relatorio') }, '📑 Fechar turno') : null));
   }
 
@@ -616,7 +624,7 @@ function desenharCentral() {
   esq.append(el('div', { class: 'rodape-discreto' }, el('button', { onclick: abrirEscala }, '📦 Passagem da escala')));
 
   // --- Pendências ao lado (no celular, logo abaixo)
-  dir.append(cartaoPendencias());
+  dir.append(cartaoPendenciasTurno());
   c.replaceChildren(el('div', { class: 'duas-colunas' }, esq, dir));
 }
 
@@ -705,130 +713,288 @@ async function novaEmBranco() {
 }
 
 // ------------------------------ Pendências --------------------------
+// Duas visões:
+//  • Plantão › Turno: "Pendências do turno" (a confirmar, operações em aberto, e-mails) + as gerais
+//  • Menu Pendências: só Segurança Patrimonial (Avisos | Digital | Projetos | Concluídas)
+// A baixa é a mesma nos dois lugares (mesma pendência, mesma tratativa) e vai para o relatório.
 function emailsPendentes() {
   return (S.central?.operacoes || []).filter(o => o.horaFinal && !o.email?.encaminhadoEm);
 }
+const saidaSemRetorno = o => o.tipo === 'TRIPULACAO' && /^Sa[ií]da/i.test(o.movimento || '') && !o.horaRetorno;
+const pendenciasAbertas = () => (S.central?.pendencias || []).filter(p => p.status === 'ABERTA');
+const aConfirmar = () => (S.entrada || []).filter(i => i.status === 'pendente' && String(i.destino || '').startsWith('⚠️') && !i.apagado);
 
+// Patrimonial (menu Pendências + badge)
 function itensPendentes() {
+  return [...pendenciasAbertas(), ...(S.central?.sugestoes || [])];
+}
+
+// Itens do turno (painel do Plantão)
+function itensTurno() {
   const C = S.central;
   const itens = [];
-  for (const p of C.pendencias.filter(x => x.status === 'ABERTA')) {
-    itens.push({
-      grupo: p.tipo === 'DIGITAL' ? 'digital' : 'avisos', ic: p.tipo === 'DIGITAL' ? '🛠️' : '📌', tit: p.titulo || p.texto,
-      sub: `${p.tipo === 'DIGITAL' ? 'Digital' : 'Aviso'} · aberto há ${p.turnosAberto} turno${p.turnosAberto > 1 ? 's' : ''}${p.historico.length > 1 ? ` · ${p.historico.length - 1} atualização(ões)` : ''}`,
-      abrir: () => abrirPendencia(p)
-    });
-  }
-  for (const o of C.operacoes.filter(x => !x.horaFinal)) {
-    itens.push({ grupo: 'operacoes', ic: '🚢', tit: `${o.rotuloTipo} · ${o.navio || 'navio?'}`, sub: `Em andamento desde ${o.horaInicial || '?'}${o.placa ? ' · ' + o.placa : ''}`, abrir: () => abrirOperacao(o) });
-  }
-  for (const o of emailsPendentes()) {
-    const st = o.email?.status;
-    const zap = o.email?.whatsappEm ? ' · minuta no seu WhatsApp' : '';
-    const sub = st === 'ENVIADO' ? `Enviado ao líder ${quando(o.email.enviadoEm)} · falta encaminhar`
-      : st === 'ERRO' ? `Falha no envio${zap} · toque para copiar` : st === 'SEM_CONTA' ? `Pronto para copiar${zap}` : 'Gerando…';
-    itens.push({ grupo: 'emails', ic: '✉️', tit: `E-mail · ${o.rotuloTipo} · ${o.navio || ''}`, sub, erro: st === 'ERRO', abrir: () => abrirEmail(o) });
-  }
+  for (const i of aConfirmar()) itens.push({ grupo: 'confirmar', item: i });
+  for (const o of C.operacoes.filter(o => (o.conferir || []).length)) itens.push({ grupo: 'confirmar', op: o });
+  for (const o of C.operacoes.filter(o => !(o.conferir || []).length && (!o.horaFinal || saidaSemRetorno(o)))) itens.push({ grupo: 'aberto', op: o });
+  for (const o of emailsPendentes()) itens.push({ grupo: 'emails', email: o });
   return itens;
 }
 
 function desenharPendencias() {
   const c = $('#aba-pendencias');
   if (!S.central) return;
-  c.replaceChildren(cartaoPendencias());
+  c.replaceChildren(paginaPendencias());
   desenharTopo();
 }
 
-function cartaoPendencias() {
-  const itens = itensPendentes();
-  const filtros = [['todas', 'Todas'], ['avisos', 'Avisos'], ['digital', 'Digital'], ['operacoes', 'Operações'], ['emails', 'E-mails']];
-  const visiveis = itens.filter(i => S.filtroPend === 'todas' || i.grupo === S.filtroPend);
-  const concluidas = S.central.pendencias.filter(p => p.status === 'CONCLUIDA');
+// ---- Painel "Pendências do turno" (aba Plantão › Turno)
+function cartaoPendenciasTurno() {
+  const turno = itensTurno();
+  const gerais = pendenciasAbertas();
+  const f = S.filtroTurno || 'turno';
+  const sub = S.subfiltroTurno || '';
+  const visTurno = f === 'gerais' ? [] : turno.filter(i => !sub || i.grupo === sub);
+  const visGerais = f === 'turno' ? [] : gerais;
+  const aba = (v, t, n) => el('button', { class: 'filtro' + (f === v ? ' ativo' : ''), onclick: () => { S.filtroTurno = v; S.subfiltroTurno = ''; redesenharAba(); } }, `${t}${n ? ` (${n})` : ''}`);
   return el('section', { class: 'cartao' },
-    el('div', { class: 'cartao-topo' }, el('h2', { text: `Pendências (${itens.length})` }),
-      el('div', { class: 'linha' },
-        el('button', { class: 'btn pequeno', onclick: () => novaPendencia('AVISO') }, '+ Aviso'),
-        el('button', { class: 'btn pequeno', onclick: () => novaPendencia('DIGITAL') }, '+ Digital'))),
-    el('div', { class: 'filtros' }, filtros.map(([v, t]) => {
-      const n = v === 'todas' ? itens.length : itens.filter(i => i.grupo === v).length;
-      return el('button', { class: 'filtro' + (S.filtroPend === v ? ' ativo' : ''), onclick: () => { S.filtroPend = v; redesenharAba(); } }, `${t}${n ? ` (${n})` : ''}`);
-    })),
-    emailsPendentes().length && (S.filtroPend === 'emails' || S.filtroPend === 'todas')
-      ? el('div', {}, el('button', { class: 'btn pequeno', onclick: copiarTodosEmails }, `📋 Copiar todos os e-mails (${emailsPendentes().length})`)) : null,
-    visiveis.length
-      ? el('div', { class: 'lista-pend' }, visiveis.map(i => el('button', { class: `pend${i.erro ? ' erro' : ''}`, onclick: i.abrir },
-        el('span', { class: 'ic', text: i.ic }), el('span', { style: 'min-width:0' }, el('div', { class: 'tit', text: i.tit }), el('div', { class: 'sub', text: i.sub })), el('span', { class: 'seta', text: '›' }))))
-      : el('div', { class: 'vazio' }, el('span', { class: 'ic', text: '✅' }), 'Nada pendente aqui.'),
-    concluidas.length ? el('details', {},
-      el('summary', { class: 'mudo pequeno', style: 'cursor:pointer', text: `Concluídas nos últimos 7 dias (${concluidas.length})` }),
-      el('div', { class: 'lista-pend', style: 'margin-top:8px' }, concluidas.map(p => el('button', { class: 'pend concluida', onclick: () => abrirPendencia(p) },
-        el('span', { class: 'ic', text: '✓' }), el('span', { style: 'min-width:0' }, el('div', { class: 'tit', text: p.titulo }), el('div', { class: 'sub', text: `Resolvido por ${p.concluidoPor?.nome || '?'}: ${p.tratativa || ''}` })), el('span', { class: 'seta', text: '›' }))))) : null
+    el('div', { class: 'cartao-topo' }, el('h2', { text: 'Pendências do turno' }),
+      emailsPendentes().length ? el('button', { class: 'btn pequeno', onclick: copiarTodosEmails }, `📋 Copiar e-mails (${emailsPendentes().length})`) : null),
+    el('div', { class: 'filtros' }, aba('turno', 'Turno', turno.length), aba('gerais', 'Gerais', gerais.length), aba('todas', 'Todas', turno.length + gerais.length)),
+    sub ? el('div', { class: 'linha' }, el('span', { class: 'etiqueta info', text: { confirmar: '⚠️ A confirmar', aberto: '🚢 Em aberto', emails: '✉️ E-mails' }[sub] }),
+      el('button', { class: 'btn fantasma pequeno', onclick: () => { S.subfiltroTurno = ''; redesenharAba(); } }, 'Mostrar tudo')) : null,
+    (visTurno.length || visGerais.length)
+      ? el('div', { class: 'lista-pend' }, ...visTurno.map(cartaoItemTurno), ...visGerais.map(p => cartaoPendenciaRapida(p)))
+      : el('div', { class: 'vazio' }, el('span', { class: 'ic', text: '✅' }), f === 'gerais' ? 'Nenhuma pendência da Segurança Patrimonial aberta.' : 'Nada pendente no turno.')
   );
 }
 
-function novaPendencia(tipo, inicial = {}, entradaId = null) {
-  const [c1, ti] = campoLinha('Título (assunto curto)', inicial.titulo || '', { placeholder: tipo === 'DIGITAL' ? 'Ex.: CÂMERA POSTE 12 OSCILANDO' : 'Ex.: BAGAGENS RETIDAS NA RFB – T-OIL', autofocus: true });
-  const [c2, tx] = campoTexto('Descrição / o que acompanhar', inicial.texto || '');
-  abrirModal(tipo === 'DIGITAL' ? '🛠️ Nova pendência da Digital' : '📌 Novo aviso', [
-    inicial.citacao ? el('div', { class: 'citacao', text: inicial.citacao }) : null, c1, c2,
-    el('p', { class: 'mudo pequeno', style: 'margin:0', text: tipo === 'DIGITAL' ? 'Fica em Pendências até ser concluída e entra na passagem da escala.' : 'Aparece na seção 5 do relatório até alguém concluir com a tratativa.' })
+function cartaoItemTurno(i) {
+  if (i.item) return cartaoAConfirmar(i.item);
+  if (i.grupo === 'confirmar' && i.op) {
+    const o = i.op;
+    return el('div', { class: 'acao-rapida alerta' },
+      el('div', { class: 'linha' }, el('span', { class: 'etiqueta atencao', text: '⚠️ A confirmar' }), el('span', { class: 'mudo pequeno', text: `${o.rotuloTipo} · ${o.navio || ''}` })),
+      ...(o.conferir || []).map(t => el('div', { class: 'pequeno', text: t })),
+      el('div', { class: 'linha' },
+        el('button', { class: 'btn pequeno verde', onclick: () => acaoRapida(() => api('PUT', `/api/operacoes/${o.id}`, {}), 'Operação mantida ✓') }, '✓ Manter'),
+        el('button', { class: 'btn pequeno', onclick: () => abrirOperacao(o) }, 'Abrir'),
+        el('button', { class: 'btn fantasma pequeno', style: 'color:var(--vermelho)', onclick: async () => { if (await confirmar('Excluir operação?', `${o.rotuloTipo} · ${o.navio}`, 'Excluir', true)) acaoRapida(() => api('POST', `/api/operacoes/${o.id}/excluir`), 'Operação excluída'); } }, 'Excluir')));
+  }
+  if (i.grupo === 'aberto') {
+    const o = i.op;
+    const passeio = saidaSemRetorno(o) && o.horaFinal;
+    return el('div', { class: 'acao-rapida' },
+      el('div', { class: 'linha' }, el('span', { class: 'etiqueta info', text: '🚢 Em aberto' }), el('span', { class: 'mudo pequeno', text: `${o.navio || '?'} · ${o.terminal || ''}` })),
+      el('div', { class: 'pequeno', text: passeio ? `${o.movimento} de ${o.quantidade || '?'} tripulante(s). Não retornaram.` : `${o.rotuloTipo}${o.placa ? ' · ' + o.placa : ''} · entrada ${o.horaInicial || '?'} · sem saída` }),
+      el('div', { class: 'linha' },
+        passeio
+          ? el('button', { class: 'btn pequeno verde', onclick: () => pedirHora('Retorno dos tripulantes', h => api('PUT', `/api/operacoes/${o.id}`, { horaRetorno: h }), 'Retorno registrado ✓') }, '↩ Registrar retorno')
+          : el('button', { class: 'btn pequeno verde', onclick: () => registrarSaida(o) }, '🏁 Registrar saída'),
+        el('button', { class: 'btn pequeno', onclick: () => abrirOperacao(o) }, 'Abrir')));
+  }
+  const o = i.email, st = o.email?.status;
+  return el('button', { class: `pend${st === 'ERRO' ? ' erro' : ''}`, onclick: () => abrirEmail(o) },
+    el('span', { class: 'ic', text: '✉️' }),
+    el('span', { style: 'min-width:0' }, el('div', { class: 'tit', text: `E-mail · ${o.rotuloTipo} · ${o.navio || ''}` }),
+      el('div', { class: 'sub', text: st === 'ENVIADO' ? `Enviado ao líder ${quando(o.email.enviadoEm)} · falta encaminhar` : st === 'ERRO' ? 'Falha no envio · toque para copiar' : 'Pronto para copiar' })),
+    el('span', { class: 'seta', text: '›' }));
+}
+
+// "A confirmar" com botões de um toque
+function cartaoAConfirmar(item) {
+  const escolhas = [...(item.escolhas || []), ...((item.rascunhos || [])[0]?.escolhas || [])];
+  const unicas = escolhas.filter((e, k) => escolhas.findIndex(x => x.campo === e.campo) === k);
+  const sel = {};
+  const enviar = async () => {
+    try { await api('POST', `/api/entrada/${encodeURIComponent(item.id)}/confirmar`, { escolhas: sel }); aviso('Confirmado ✓ · relatório atualizado'); await recarregarTudo(); }
+    catch (e) { aviso(e.message, true); }
+  };
+  const linhas = unicas.map(e => el('div', { class: 'linha' }, el('span', { class: 'mudo pequeno', text: e.rotulo + ':' }),
+    ...e.opcoes.map((v, k) => el('button', { class: `btn pequeno${k === 0 ? ' verde' : ''}`, onclick: ev => {
+      sel[e.campo] = v;
+      ev.target.parentNode.querySelectorAll('button').forEach(b => b.classList.toggle('primario', b === ev.target));
+      if (unicas.every(x => sel[x.campo])) enviar();
+    } }, `${v}${k === 0 ? ' ✓' : ''}`))));
+  return el('div', { class: 'acao-rapida alerta' },
+    el('div', { class: 'linha' }, el('span', { class: 'etiqueta atencao', text: '⚠️ A confirmar' }), el('span', { class: 'mudo pequeno', text: `${item.autor || ''} · ${item.hora || ''}` })),
+    el('div', { class: 'pequeno', text: String(item.destino || '').replace(/^⚠️ A confirmar:\s*/, '') }),
+    el('details', {}, el('summary', { class: 'mudo pequeno', text: 'Ver mensagem do grupo' }), el('div', { class: 'texto-bruto', text: item.texto })),
+    ...linhas,
+    el('div', { class: 'linha' },
+      unicas.length ? null : el('button', { class: 'btn pequeno verde', onclick: () => abrirDestino(item, item.sugestao in DESTINOS ? item.sugestao : 'OPERACAO') }, 'Completar e confirmar'),
+      el('button', { class: 'btn pequeno', onclick: () => abrirDestino(item, item.sugestao in DESTINOS ? item.sugestao : 'OPERACAO') }, 'Editar antes'),
+      el('button', { class: 'btn fantasma pequeno', onclick: () => marcarItem(item, 'ignorado') }, 'Ignorar')));
+}
+
+async function acaoRapida(fn, msg) {
+  try { await fn(); aviso(msg); await recarregarTudo(); } catch (e) { aviso(e.message, true); }
+}
+function pedirHora(titulo, fn, msg) {
+  const [c, t] = campoLinha('Horário (HH:MM)', agoraBR().hora, { autofocus: true });
+  abrirModal(titulo, [c], botoesSalvar(async () => { await fn(t.value); fecharModal(); aviso(msg); await recarregarTudo(); }, 'Registrar'));
+}
+
+// Pendência com ações rápidas (usada no turno e no menu Pendências)
+const ROTULO_TIPO = { AVISO: '📌 Aviso', DIGITAL: '🛠️ Digital', PROJETO: '📐 Projeto' };
+function cartaoPendenciaRapida(p) {
+  const ult = [...(p.historico || [])].reverse().find(h => h.tipo !== 'CRIACAO');
+  const etapas = p.etapas || [];
+  const feitas = etapas.filter(e => e.feito).length;
+  const proxima = etapas.find(e => !e.feito);
+  return el('div', { class: `acao-rapida${p.status !== 'ABERTA' ? ' concluida' : ''}` },
+    el('div', { class: 'linha', style: 'justify-content:space-between' },
+      el('span', { class: 'etiqueta', text: ROTULO_TIPO[p.tipo] || p.tipo }),
+      el('span', { class: 'mudo pequeno', text: [p.responsavel && `Resp.: ${p.responsavel}`, p.prazo && `Prazo: ${p.prazo}`].filter(Boolean).join(' · ') })),
+    el('button', { class: 'link-titulo', onclick: () => abrirPendencia(p) }, p.titulo || p.texto),
+    p.tipo === 'PROJETO' && etapas.length ? el('div', { class: 'progresso-etapas' }, el('div', { style: `width:${Math.round(feitas / etapas.length * 100)}%` })) : null,
+    p.tipo === 'PROJETO' && etapas.length ? el('div', { class: 'mudo pequeno', text: `${feitas}/${etapas.length} etapas${proxima ? ` · próxima: ${proxima.texto}${proxima.prazo ? ' (' + proxima.prazo + ')' : ''}` : ' · todas feitas'}` }) : null,
+    ult ? el('div', { class: 'mudo pequeno', text: `${ult.data} ${ult.hora} · ${ult.por}: ${String(ult.texto || '').slice(0, 140)}` }) : null,
+    p.sugestaoConclusao && p.status === 'ABERTA' ? el('div', { class: 'citacao', style: 'border-left-color:var(--verde)', text: `💡 Parece resolvido: "${p.sugestaoConclusao.texto.slice(0, 160)}"` }) : null,
+    p.status === 'ABERTA' ? el('div', { class: 'linha' },
+      el('button', { class: 'btn pequeno', onclick: () => atualizarPendenciaModal(p) }, 'Atualizar'),
+      el('button', { class: 'btn pequeno verde', onclick: () => concluirPendenciaModal(p) }, '✓ Dar baixa')) : el('div', { class: 'mudo pequeno', text: `Resolvido por ${p.concluidoPor?.nome || '?'}: ${p.tratativa || ''}` }));
+}
+
+function atualizarPendenciaModal(p) {
+  const [c, t] = campoTexto('Nova atualização', '', { autofocus: true, placeholder: 'Ex.: Daniel (Sênior) definiu troca do cabo para terça.' });
+  abrirModal(`Atualizar · ${p.titulo}`, [c], botoesSalvar(async () => {
+    await api('POST', `/api/pendencias/${p.id}/atualizar`, { texto: t.value }); fecharModal(); aviso('Atualização registrada ✓'); await recarregarTudo();
+  }, 'Registrar'));
+}
+// Baixa única: vale no turno e no geral; a tratativa vai para o relatório (Atividades)
+function concluirPendenciaModal(p) {
+  const [c, t] = campoTexto('O que foi feito para resolver? (tratativa obrigatória)', p.sugestaoConclusao?.texto || '', { autofocus: true, linhas: 4, placeholder: 'Ex.: Cancela do Gate 1 reparada pela Digital (troca do motor), testada às 14h e operacional.' });
+  const chk = el('input', { type: 'checkbox', checked: true });
+  abrirModal(`Dar baixa · ${p.titulo}`, [c, el('label', { class: 'check' }, chk, 'Colocar no relatório do turno (Atividades)'),
+    el('p', { class: 'mudo pequeno', style: 'margin:0', text: 'A baixa vale para o Plantão e para o menu Pendências ao mesmo tempo.' })],
+  botoesSalvar(async () => {
+    if (!t.value.trim()) { t.focus(); throw new Error('Escreva a tratativa: o que foi feito para resolver.'); }
+    await api('POST', `/api/pendencias/${p.id}/concluir`, { tratativa: t.value, registrarAtividade: chk.checked });
+    fecharModal(); aviso('Baixa registrada ✓'); await recarregarTudo();
+  }, '✓ Dar baixa', 'verde'));
+}
+
+// ---- Menu Pendências: só Segurança Patrimonial
+function paginaPendencias() {
+  const todas = S.central.pendencias;
+  const abertas = todas.filter(p => p.status === 'ABERTA');
+  const aba = S.abaPend || 'avisos';
+  const resp = S.respPend || '';
+  const lista = { avisos: abertas, digital: abertas.filter(p => p.tipo === 'DIGITAL'), projetos: abertas.filter(p => p.tipo === 'PROJETO'),
+    concluidas: todas.filter(p => p.status !== 'ABERTA').sort((a, b) => String(b.concluidoEm).localeCompare(String(a.concluidoEm))) }[aba] || abertas;
+  const responsaveis = [...new Set(lista.map(p => p.responsavel).filter(Boolean))].sort();
+  const visiveis = lista.filter(p => !resp || p.responsavel === resp)
+    .sort((a, b) => aba === 'concluidas' ? 0 : (prazoNum(a.prazo) - prazoNum(b.prazo)) || String(b.criadoEm).localeCompare(String(a.criadoEm)));
+  const n = { avisos: abertas.length, digital: abertas.filter(p => p.tipo === 'DIGITAL').length, projetos: abertas.filter(p => p.tipo === 'PROJETO').length };
+  const sug = S.central.sugestoes || [];
+  return el('div', { class: 'aba-interna' },
+    el('section', { class: 'cartao' },
+      el('div', { class: 'cartao-topo' }, el('h2', { text: 'Pendências · Segurança Patrimonial' }),
+        el('div', { class: 'linha' },
+          el('button', { class: 'btn pequeno', onclick: () => novaPendencia('AVISO') }, '+ Aviso'),
+          el('button', { class: 'btn pequeno', onclick: () => novaPendencia('DIGITAL') }, '+ Digital'),
+          el('button', { class: 'btn pequeno', onclick: () => novaPendencia('PROJETO') }, '+ Projeto'))),
+      el('div', { class: 'filtros' }, [['avisos', 'Avisos'], ['digital', 'Digital'], ['projetos', 'Projetos'], ['concluidas', 'Concluídas']].map(([v, t]) =>
+        el('button', { class: 'filtro' + (aba === v ? ' ativo' : ''), onclick: () => { S.abaPend = v; S.respPend = ''; redesenharAba(); } }, `${t}${n[v] ? ` (${n[v]})` : ''}`))),
+      responsaveis.length > 1 ? el('div', { class: 'filtros' },
+        el('button', { class: 'filtro' + (!resp ? ' ativo' : ''), onclick: () => { S.respPend = ''; redesenharAba(); } }, 'Todos'),
+        ...responsaveis.map(r => el('button', { class: 'filtro' + (resp === r ? ' ativo' : ''), onclick: () => { S.respPend = r; redesenharAba(); } }, r))) : null,
+      aba === 'avisos' && sug.length ? el('div', { class: 'faixa info' },
+        el('strong', { text: `💡 Sugestões do robô (${sug.length})` }),
+        el('p', { class: 'pequeno', style: 'margin:0', text: 'Atividades que pedem acompanhamento e ainda não têm pendência.' }),
+        ...sug.map(s => el('div', { class: 'acao-rapida' },
+          el('div', { class: 'pequeno', text: s.texto }),
+          el('div', { class: 'mudo pequeno', text: s.origem }),
+          el('div', { class: 'linha' },
+            el('button', { class: 'btn pequeno verde', onclick: () => acaoRapida(() => api('POST', `/api/sugestoes/${s.id}/aceitar`, {}), 'Pendência criada ✓') }, `✓ Criar ${s.tipo === 'DIGITAL' ? 'na Digital' : 'aviso'}`),
+            el('button', { class: 'btn pequeno', onclick: () => novaPendencia(s.tipo, { titulo: s.titulo, texto: s.texto }, null, s.id) }, 'Editar e criar'),
+            el('button', { class: 'btn fantasma pequeno', onclick: () => acaoRapida(() => api('POST', `/api/sugestoes/${s.id}/descartar`), 'Sugestão descartada') }, 'Descartar'))))) : null,
+      visiveis.length ? el('div', { class: 'lista-pend' }, visiveis.map(cartaoPendenciaRapida))
+        : el('div', { class: 'vazio' }, el('span', { class: 'ic', text: '✅' }), aba === 'concluidas' ? 'Nenhuma pendência concluída nos últimos dias.' : 'Nada pendente aqui.')));
+}
+function prazoNum(d) { const m = String(d || '').match(/(\d{2})\/(\d{2})\/(\d{4})/); return m ? +`${m[3]}${m[2]}${m[1]}` : 99999999; }
+
+const RESPONSAVEIS = ['Digital', 'TI', 'Sênior', 'Elétrica', 'Manutenção', 'Projetos', 'Facilities', 'Segurança Patrimonial'];
+function campoResponsavel(valor) {
+  const id = 'lista-resp';
+  const inp = el('input', { type: 'text', value: valor || '', placeholder: 'Digital, TI, Sênior…', list: id });
+  return [el('label', { class: 'campo' }, 'Responsável', inp, el('datalist', { id }, RESPONSAVEIS.map(r => el('option', { value: r })))), inp];
+}
+
+function novaPendencia(tipo, inicial = {}, entradaId = null, sugestaoId = null) {
+  const [c1, ti] = campoLinha('Título (assunto curto)', inicial.titulo || '', { placeholder: tipo === 'DIGITAL' ? 'Ex.: CÂMERA POSTE 12 OSCILANDO' : tipo === 'PROJETO' ? 'Ex.: MELHORIAS CFTV GATE 1 AO POSTE 31' : 'Ex.: BAGAGENS RETIDAS NA RFB – T-OIL', autofocus: true });
+  const [c2, tx] = campoTexto(tipo === 'PROJETO' ? 'Objetivo / escopo' : 'Descrição / o que acompanhar', inicial.texto || '');
+  const [c3, rs] = campoResponsavel(inicial.responsavel);
+  const [c4, pz] = campoLinha('Prazo (dd/mm/aaaa)', inicial.prazo || '', { placeholder: '27/11/2026' });
+  const [c5, et] = tipo === 'PROJETO' ? campoTexto('Etapas (uma por linha · prazo opcional após " - ")', '', { linhas: 4, placeholder: 'Levantamento com a Elétrica - 25/11/2026\nCronograma com a Digital\nInstalação dos postes' }) : [null, null];
+  abrirModal({ DIGITAL: '🛠️ Nova pendência da Digital', PROJETO: '📐 Novo projeto' }[tipo] || '📌 Novo aviso', [
+    inicial.citacao ? el('div', { class: 'citacao', text: inicial.citacao }) : null, c1, c2, el('div', { class: 'grade-2' }, c3, c4), c5,
+    el('p', { class: 'mudo pequeno', style: 'margin:0', text: tipo === 'AVISO' ? 'Aparece no item 5 do relatório até alguém dar baixa com a tratativa.' : 'Fica em Pendências até a baixa e entra na passagem da escala.' })
   ], botoesSalvar(async () => {
-    await api('POST', '/api/pendencias', { tipo, titulo: ti.value, texto: tx.value, entradaId });
+    const etapas = et ? et.value.split('\n').map(l => l.trim()).filter(Boolean).map(l => { const [texto, prazo] = l.split(/\s+-\s+(?=\d{1,2}\/\d{1,2})/); return { texto, prazo: prazo || '' }; }) : undefined;
+    const dados = { tipo, titulo: ti.value, texto: tx.value, responsavel: rs.value, prazo: pz.value, etapas, entradaId };
+    if (sugestaoId) await api('POST', `/api/sugestoes/${sugestaoId}/aceitar`, dados); else await api('POST', '/api/pendencias', dados);
     fecharModal(); aviso('Pendência criada ✓'); await recarregarTudo();
   }, 'Criar'));
 }
 
 function abrirPendencia(p) {
   const aberta = p.status === 'ABERTA';
-  const linhaTempo = el('div', { class: 'linha-tempo' }, p.historico.map(h => el('div', { class: `evento ${h.tipo}` },
-    el('div', { class: 'meta', text: `${h.data} ${h.hora}h · ${h.por} · ${h.tipo === 'CRIACAO' ? 'criou' : h.tipo === 'CONCLUSAO' ? 'concluiu' : 'atualizou'}` }),
+  const linhaTempo = el('div', { class: 'linha-tempo' }, [...p.historico].reverse().map(h => el('div', { class: `evento ${h.tipo}` },
+    el('div', { class: 'meta', text: `${h.data} ${h.hora}h · ${h.por} · ${h.tipo === 'CRIACAO' ? 'criou' : h.tipo === 'CONCLUSAO' ? 'deu baixa' : h.origem === 'grupo' ? 'mensagem do grupo' : h.origem === 'relatorio' ? 'atividade do relatório' : 'atualizou'}` }),
     h.texto ? el('div', { text: h.texto }) : null)));
   const acao = async (fn, msg) => { try { await fn(); fecharModal(); aviso(msg); await recarregarTudo(); } catch (e) { aviso(e.message, true); } };
 
-  const atualizar = () => {
-    const [c, t] = campoTexto('Nova atualização', '', { autofocus: true, placeholder: 'Ex.: Receita informou liberação prevista para amanhã às 10h.' });
-    abrirModal(`Atualizar · ${p.titulo}`, [c], botoesSalvar(() => acao(() => api('POST', `/api/pendencias/${p.id}/atualizar`, { texto: t.value }), 'Atualização registrada ✓'), 'Registrar'));
-  };
-  const concluir = () => {
-    const [c, t] = campoTexto('Como foi resolvido? (obrigatório)', '', { autofocus: true, linhas: 4, placeholder: 'Ex.: Receita liberou as bagagens às 21h; entregues ao agente Sr. X.' });
-    const chk = el('input', { type: 'checkbox', checked: true });
-    abrirModal(`Concluir · ${p.titulo}`, [c, el('label', { class: 'check' }, chk, 'Registrar também nas Atividades do turno')],
-      botoesSalvar(() => {
-        if (!t.value.trim()) { t.focus(); throw new Error('Informe como foi resolvido para concluir.'); }
-        return acao(() => api('POST', `/api/pendencias/${p.id}/concluir`, { tratativa: t.value, registrarAtividade: chk.checked }), 'Pendência concluída ✓');
-      }, '✓ Concluir', 'verde'));
-  };
+  const etapas = (p.etapas || []).map(e => ({ ...e }));
+  const salvarEtapas = () => acao(() => api('PUT', `/api/pendencias/${p.id}`, { etapas }), 'Etapas atualizadas ✓');
+  const blocoEtapas = p.tipo === 'PROJETO' ? el('div', {},
+    el('h3', { text: `Etapas (${etapas.filter(e => e.feito).length}/${etapas.length})` }),
+    el('div', { class: 'lista-pend' }, etapas.map(e => el('label', { class: 'check' + (e.feito ? ' feito' : '') },
+      el('input', { type: 'checkbox', checked: e.feito, disabled: !aberta, onchange: ev => { e.feito = ev.target.checked; salvarEtapas(); } }),
+      `${e.texto}${e.prazo ? ` · prazo ${e.prazo}` : ''}${e.feito && e.feitoEm ? ` · feito ${quando(e.feitoEm)}` : ''}`))),
+    aberta ? el('button', { class: 'btn pequeno', onclick: () => {
+      const [c1, t1] = campoLinha('Nova etapa', '', { autofocus: true });
+      const [c2, t2] = campoLinha('Prazo (dd/mm/aaaa)', '');
+      abrirModal('Nova etapa', [c1, c2], botoesSalvar(() => { if (!t1.value.trim()) throw new Error('Descreva a etapa.'); etapas.push({ texto: t1.value, prazo: t2.value }); return salvarEtapas(); }, 'Adicionar'));
+    } }, '+ Etapa') : null) : null;
+
   const corrigir = () => {
     const [c1, ti] = campoLinha('Título', p.titulo);
     const [c2, tx] = campoTexto('Descrição', p.texto);
-    const tipo = el('select', {}, el('option', { value: 'AVISO', text: 'Aviso (seção 5)' }), el('option', { value: 'DIGITAL', text: 'Pendência da Digital' }));
+    const tipo = el('select', {}, el('option', { value: 'AVISO', text: 'Aviso (item 5 do relatório)' }), el('option', { value: 'DIGITAL', text: 'Pendência da Digital' }), el('option', { value: 'PROJETO', text: 'Projeto' }));
     tipo.value = p.tipo;
-    const [c3, tr] = !aberta ? campoTexto('Como foi resolvido', p.tratativa || '', { linhas: 3 }) : [null, null];
-    abrirModal('Corrigir pendência', [c1, c2, el('label', { class: 'campo' }, 'Tipo', tipo), c3],
+    const [c3, rs] = campoResponsavel(p.responsavel);
+    const [c4, pz] = campoLinha('Prazo (dd/mm/aaaa)', p.prazo || '');
+    const [c5, tr] = !aberta ? campoTexto('Tratativa (como foi resolvido)', p.tratativa || '', { linhas: 3 }) : [null, null];
+    abrirModal('Corrigir pendência', [c1, c2, el('label', { class: 'campo' }, 'Tipo', tipo), el('div', { class: 'grade-2' }, c3, c4), c5],
       botoesSalvar(() => {
         if (!ti.value.trim()) throw new Error('O título não pode ficar vazio.');
         if (tr && !tr.value.trim()) throw new Error('Informe como foi resolvido.');
-        return acao(() => api('PUT', `/api/pendencias/${p.id}`, { titulo: ti.value, texto: tx.value, tipo: tipo.value, ...(tr ? { tratativa: tr.value } : {}) }), 'Pendência corrigida ✓');
+        return acao(() => api('PUT', `/api/pendencias/${p.id}`, { titulo: ti.value, texto: tx.value, tipo: tipo.value, responsavel: rs.value, prazo: pz.value, ...(tr ? { tratativa: tr.value } : {}) }), 'Pendência corrigida ✓');
       }));
   };
   const apagar = async () => {
-    if (await confirmar('Apagar esta pendência?', `"${p.titulo}" será removida de vez (fica registrado na auditoria). Para dar baixa normal, use "Concluir".`, 'Apagar', true))
+    if (await confirmar('Apagar esta pendência?', `"${p.titulo}" será removida de vez (fica registrado na auditoria). Para dar baixa normal, use "Dar baixa".`, 'Apagar', true))
       acao(() => api('POST', `/api/pendencias/${p.id}/excluir`), 'Pendência apagada');
   };
 
   abrirModal(p.titulo || 'Pendência', [
     el('div', { class: 'linha' },
-      el('span', { class: `etiqueta ${p.tipo === 'DIGITAL' ? 'info' : 'atencao'}`, text: p.tipo === 'DIGITAL' ? '🛠️ Digital' : '📌 Aviso' }),
-      el('span', { class: `etiqueta ${aberta ? '' : 'ok'}`, text: aberta ? `Aberta há ${p.turnosAberto} turno(s)` : 'Concluída' })),
+      el('span', { class: 'etiqueta info', text: ROTULO_TIPO[p.tipo] || p.tipo }),
+      el('span', { class: `etiqueta ${aberta ? '' : 'ok'}`, text: aberta ? 'Aberta' : 'Concluída' }),
+      p.responsavel ? el('span', { class: 'etiqueta', text: `Resp.: ${p.responsavel}` }) : null,
+      p.prazo ? el('span', { class: 'etiqueta', text: `Prazo: ${p.prazo}` }) : null),
     p.texto ? el('div', { class: 'citacao', text: p.texto }) : null,
     p.origem ? el('p', { class: 'mudo pequeno', style: 'margin:0', text: `Origem: ${p.origem}` }) : null,
-    !aberta && p.tratativa ? el('div', { class: 'alertas', style: 'background:#0f2a1d;border-color:#1d4d33;color:#86efac' }, el('strong', { text: 'Como foi resolvido: ' }), p.tratativa) : null,
+    p.sugestaoConclusao && aberta ? el('div', { class: 'citacao', style: 'border-left-color:var(--verde)', text: `💡 Parece resolvido (${p.sugestaoConclusao.por}): "${p.sugestaoConclusao.texto}"` }) : null,
+    !aberta && p.tratativa ? el('div', { class: 'alertas', style: 'background:#0f2a1d;border-color:#1d4d33;color:#86efac' }, el('strong', { text: 'Tratativa: ' }), p.tratativa) : null,
+    blocoEtapas,
     el('h3', { text: 'Histórico' }), linhaTempo
   ], aberta ? [
     el('button', { class: 'btn fantasma pequeno', style: 'color:var(--vermelho)', onclick: apagar }, '🗑 Apagar'),
     el('button', { class: 'btn', onclick: corrigir }, '✏️ Corrigir'),
-    el('button', { class: 'btn', onclick: atualizar }, 'Atualizar'),
-    el('button', { class: 'btn verde', onclick: concluir }, '✓ Concluir')
+    el('button', { class: 'btn', onclick: () => atualizarPendenciaModal(p) }, 'Atualizar'),
+    el('button', { class: 'btn verde', onclick: () => concluirPendenciaModal(p) }, '✓ Dar baixa')
   ] : [
     el('button', { class: 'btn fantasma pequeno', style: 'color:var(--vermelho)', onclick: apagar }, '🗑 Apagar'),
     el('button', { class: 'btn', onclick: corrigir }, '✏️ Corrigir'),
@@ -1104,6 +1270,7 @@ function desenharEntrada() {
   const cont = s => S.entrada.filter(i => i.status === s).length;
   const filtros = [['pendente', `Pendentes (${cont('pendente')})`], ['usado', 'Tratadas'], ['ignorado', 'Ignoradas'], ['todas', 'Todas']];
   c.replaceChildren(
+    el('div', { class: 'cartao-topo' }, el('h2', { text: 'Mensagens do grupo' }), el('button', { class: 'btn fantasma pequeno', onclick: () => trocarAba('central') }, '‹ Voltar ao turno')),
     el('div', { class: 'filtros' }, filtros.map(([v, t]) => el('button', { class: 'filtro' + (S.filtroEntrada === v ? ' ativo' : ''), onclick: () => { S.filtroEntrada = v; desenharEntrada(); } }, t))),
     el('input', { type: 'search', placeholder: 'Buscar por navio, placa, nome…', value: S.busca, oninput: e => { S.busca = e.target.value; desenharListaEntrada(); } }),
     el('div', { id: 'lista-entrada', class: 'lista' })
