@@ -461,7 +461,7 @@ async function atualizarEstado() {
 
     if (m.relatorios !== a.relatorios && ant) aviso('📑 Relatório da equipe anterior atualizado');
     if (m.historico !== a.historico && ant) { S.historico = null; if (S.aba === 'historico' && livre) desenharHistorico(); }
-    if (m.rois !== a.rois && ant) { S.roi = null; if (S.aba === 'roi' && livre) desenharROI(); }
+    if (m.rois !== a.rois && ant) { S.roi = null; S.ind = null; if (S.aba === 'roi' && livre) desenharROI(); if (S.aba === 'painel' && livre) desenharPainelGerencial(); }
     if (m.pendencias !== a.pendencias || m.operacoes !== a.operacoes || m.relatorios !== a.relatorios || m.plantao !== a.plantao || m.ficha !== a.ficha) {
       await carregarCentral();
       if (['central', 'pendencias', 'emails'].includes(S.aba) && livre) redesenharAba();
@@ -2234,22 +2234,136 @@ function importarConversa() {
 // =====================================================================
 // ABA PAINEL (visão gerencial — próxima fase)
 // =====================================================================
+// =====================================================================
+// INDICADORES › Ocorrências (ROI)
+// =====================================================================
+const COR_TIPO = { G1: '#2a78d6', G2: '#eb6834', G3: '#1baf7a', G4: '#eda100', G5: '#e87ba4', G6: '#6250d6' };
+const MESES_ABREV = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
+
 function desenharPainelGerencial() {
   const c = $('#aba-painel');
-  const C = S.central;
-  const ops = C?.operacoes || [];
-  const abertas = (C?.pendencias || []).filter(p => p.status === 'ABERTA');
-  const card = (n, t) => el('div', { class: 'contador' }, el('strong', { text: String(n) }), el('span', { text: t }));
+  if (!S.ind || S.ind.__ano !== S.indAno || S.ind.__mes !== S.indMes) {
+    if (!S.ind) c.replaceChildren(el('div', { class: 'vazio' }, 'Carregando indicadores…'));
+    const q = new URLSearchParams(); if (S.indAno) q.set('ano', S.indAno); if (S.indMes) q.set('mes', S.indMes);
+    api('GET', '/api/indicadores/ocorrencias?' + q).then(d => { S.ind = Object.assign(d, { __ano: S.indAno, __mes: S.indMes }); if (S.aba === 'painel') desenharPainelGerencial(); })
+      .catch(e => aviso(e.message, true));
+    if (!S.ind) return;
+  }
+  const d = S.ind, G = d.grupos;
+  const nomeTipo = g => `${g} – ${G[g]}`;
+  const linhasTipos = (porTipo, sim) => [...Object.entries(porTipo).map(([g, n]) => `${nomeTipo(g)}: ${n}`), sim ? `SIMULADO: ${sim}` : ''].filter(Boolean);
+
+  // dica (passar o mouse ou tocar)
+  const dica = el('div', { class: 'ind-dica', hidden: true });
+  const mostrar = (ev, titulo, linhas) => {
+    ev.stopPropagation();
+    dica.replaceChildren(el('strong', { text: titulo }), ...linhas.map(t => el('div', { text: t })));
+    dica.hidden = false;
+    const caixa = c.getBoundingClientRect(), alvo = ev.currentTarget.getBoundingClientRect();
+    const x = Math.min(Math.max(alvo.left - caixa.left + alvo.width / 2 - 100, 4), caixa.width - 208);
+    dica.style.left = x + 'px'; dica.style.top = (alvo.top - caixa.top + c.scrollTop - 8) + 'px';
+  };
+  const esconder = () => { dica.hidden = true; };
+  const comDica = (no, titulo, linhas) => {
+    no.addEventListener('mouseenter', ev => mostrar(ev, titulo, linhas));
+    no.addEventListener('mouseleave', esconder);
+    no.addEventListener('click', ev => mostrar(ev, titulo, linhas));
+    return no;
+  };
+  const pilha = (porTipo, max, horizontal) => el('div', { class: horizontal ? 'ind-pilha h' : 'ind-pilha' },
+    ...Object.keys(G).filter(g => porTipo[g]).map(g => el('span', { style: `${horizontal ? 'width' : 'height'}:${porTipo[g] / max * 100}%;background:${COR_TIPO[g]}` })));
+
+  // filtros
+  const selAno = el('select', { onchange: e => { S.indAno = +e.target.value; S.indMes = 0; desenharPainelGerencial(); } }, d.anos.map(a => el('option', { value: a, text: String(a) })));
+  selAno.value = d.ano;
+  const selMes = el('select', { onchange: e => { S.indMes = +e.target.value; desenharPainelGerencial(); } },
+    el('option', { value: 0, text: 'Ano todo' }), ...d.meses.map(m => el('option', { value: m.mes, text: MESES_ABREV[m.mes - 1] })));
+  selMes.value = d.mes || 0;
+
+  const variacao = d.anterior ? Math.round((d.total - d.anterior) / d.anterior * 100) : null;
+  const topTipo = Object.entries(d.tipos).sort((a, b) => b[1] - a[1])[0];
+  const kpi = (rot, val, sub) => el('div', { class: 'ind-kpi' }, el('small', { text: rot }), el('b', { text: String(val) }), el('span', {}, sub));
+  const periodoTxt = d.mes ? MESES_ABREV[d.mes - 1] + '/' + d.ano : d.parcialAno ? `${d.ano} até ${d.hoje.slice(0, 5)}` : String(d.ano);
+
+  // mês a mês (colunas empilhadas por tipo)
+  const maxMes = Math.max(1, ...d.meses.map(m => m.total));
+  const colunas = el('div', { class: 'ind-colunas' }, d.meses.map(m => comDica(
+    el('div', { class: 'ind-col' + (d.mes === m.mes ? ' sel' : ''), role: 'button', 'aria-label': `${MESES_ABREV[m.mes - 1]}: ${m.total}` },
+      el('em', { text: m.total ? String(m.total) : '' }), el('div', { class: 'ind-barra' }, pilha(m.porTipo, maxMes)), el('small', { text: MESES_ABREV[m.mes - 1] })),
+    `${MESES_ABREV[m.mes - 1]}/${d.ano} · ${m.total} ROI${m.total === 1 ? '' : 's'}`, m.total ? linhasTipos(m.porTipo, m.simulados) : ['Sem ROI'])));
+
+  // locais
+  const top = d.locais.slice(0, 8), resto = d.locais.slice(8);
+  if (resto.length) {
+    const pt = {}; resto.forEach(l => Object.entries(l.porTipo).forEach(([g, n]) => { pt[g] = (pt[g] || 0) + n; }));
+    top.push({ nome: `Outros ${resto.length} locais`, total: resto.reduce((s, l) => s + l.total, 0), porTipo: pt, simulados: resto.reduce((s, l) => s + l.simulados, 0), outros: resto });
+  }
+  const maxLocal = Math.max(1, ...top.map(l => l.total));
+  const locais = el('div', { class: 'ind-locais' }, top.map(l => comDica(el('div', { class: 'ind-local', role: 'button' },
+    el('span', { class: 'nome', text: l.nome }), el('div', { class: 'ind-trilho' }, pilha(l.porTipo, maxLocal, true)), el('b', { text: String(l.total) })),
+    `${l.nome} · ${l.total}`, [...linhasTipos(l.porTipo, l.simulados), ...(l.outros ? l.outros.map(o => `${o.nome}: ${o.total}`) : [])])));
+
+  // histórico anual
+  const maxAno = Math.max(1, ...d.porAno.map(a => a.total));
+  const anos = el('div', { class: 'ind-colunas anos' }, d.porAno.map(a => comDica(
+    el('div', { class: 'ind-col' + (a.ano === d.ano ? ' sel' : ''), role: 'button' },
+      el('em', { text: String(a.total) }), el('div', { class: 'ind-barra' }, pilha(a.porTipo, maxAno)), el('small', { text: a.parcial ? a.ano + '*' : String(a.ano) })),
+    `${a.ano}${a.parcial ? ' (até hoje)' : ''} · ${a.total} ROIs`, linhasTipos(a.porTipo, a.simulados))));
+
+  const legenda = el('div', { class: 'ind-legenda' }, Object.keys(G).map(g => el('span', {}, el('i', { style: `background:${COR_TIPO[g]}` }), nomeTipo(g))));
+  const C = S.central, ops = C?.operacoes || [];
+
   c.replaceChildren(
+    dica,
     el('section', { class: 'cartao' },
-      el('h2', { text: '📊 Painel gerencial' }),
-      el('p', { class: 'mudo', style: 'margin:0', text: 'Em construção. Aqui vão ficar os indicadores do CCOS: operações de bordo, e-mails, pendências, Digital, ocorrências, OCR e KM, com filtros por período e equipe.' })),
-    el('section', { class: 'cartao' },
-      el('h3', { text: 'Turno atual' }),
+      el('div', { class: 'cartao-topo' }, el('h2', { text: '📊 Indicadores › Ocorrências' }),
+        ehAdmin() ? el('button', { class: 'btn pequeno', onclick: abrirLocaisIndicador }, '📍 Locais') : null),
+      el('div', { class: 'grade-2' }, el('label', { class: 'campo' }, 'Ano', selAno), el('label', { class: 'campo' }, 'Mês', selMes)),
+      el('div', { class: 'ind-kpis' },
+        kpi('ROIs no período', d.total, variacao === null ? `${periodoTxt}` : `${d.anterior} no mesmo período de ${d.anoAnterior} (${variacao > 0 ? '+' : ''}${variacao}%)`),
+        kpi(`${d.mesRef.nome}${d.mesRef.parcial ? ' (parcial)' : ''}`, d.mesRef.total, `média dos últimos 3 meses: ${String(d.mesRef.media.toFixed(1)).replace('.', ',')}`),
+        kpi('Tipo mais frequente', topTipo ? topTipo[0] : '—', topTipo ? `${G[topTipo[0]]} · ${topTipo[1]} (${Math.round(topTipo[1] / d.total * 100)}%)` : 'sem ROI'),
+        kpi('Simulados', d.simulados, ['contam no total, com o selo ', el('span', { class: 'etiqueta simulado', text: 'SIMULADO' })]))),
+    el('section', { class: 'cartao' }, el('h3', { text: `Por mês e tipo · ${d.ano}` }), legenda, colunas),
+    el('section', { class: 'cartao' }, el('h3', { text: `Locais com mais ocorrências · ${periodoTxt}` }),
+      top.length ? locais : el('div', { class: 'vazio', text: 'Nenhum ROI no período.' })),
+    el('section', { class: 'cartao' }, el('h3', { text: 'Leitura do período' }), d.frases.map(f => el('p', { class: 'ind-frase', text: f }))),
+    el('section', { class: 'cartao' }, el('h3', { text: 'Histórico por ano' }), anos,
+      el('p', { class: 'mudo pequeno', style: 'margin:0', text: 'Passe o mouse ou toque nas barras para ver os tipos e as quantidades. * ano em andamento.' })),
+    el('section', { class: 'cartao' }, el('h3', { text: `ROIs do período (${d.lista.length})` }),
+      el('div', { class: 'lista' }, d.lista.slice(0, 60).map(r => el('button', { class: 'linha-op', onclick: () => abrirRoi(r.id) },
+        el('span', { class: 'ic', style: `color:${COR_TIPO[r.tipo] || 'inherit'}`, text: '●' }),
+        el('span', { style: 'min-width:0' }, el('div', { class: 'tit' }, `ROI ${r.numero} · ${r.tipo}`, ' ', r.simulado ? el('span', { class: 'etiqueta simulado', text: 'SIMULADO' }) : null),
+          el('div', { class: 'sub', text: [r.data, r.local, r.descricao.length > 90 ? r.descricao.slice(0, 87) + '…' : r.descricao].filter(Boolean).join(' · ') })),
+        el('span'))))),
+    el('section', { class: 'cartao' }, el('h3', { text: 'Turno atual' }),
       el('div', { class: 'contadores' },
-        card(ops.length, 'Operações de bordo'), card(ops.filter(o => !o.horaFinal).length, 'Sem saída'),
-        card(abertas.length, 'Pendências abertas'), card(S.historico?.length ?? '—', 'Relatórios no histórico'))));
-  if (!S.historico) carregarHistorico().then(() => { if (S.aba === 'painel') desenharPainelGerencial(); }).catch(() => {});
+        el('div', { class: 'contador' }, el('strong', { text: String(ops.length) }), el('span', { text: 'Operações de bordo' })),
+        el('div', { class: 'contador' }, el('strong', { text: String(ops.filter(o => !o.horaFinal).length) }), el('span', { text: 'Sem saída' })),
+        el('div', { class: 'contador' }, el('strong', { text: String((C?.pendencias || []).filter(p => p.status === 'ABERTA').length) }), el('span', { text: 'Pendências abertas' }))))
+  );
+  c.onclick = esconder;
+}
+
+// Admin: conferir/ajustar os locais do indicador (o texto do ROI não muda)
+async function abrirLocaisIndicador() {
+  try {
+    const { locais } = await api('GET', '/api/indicadores/locais');
+    const lista = el('div', { class: 'lista' });
+    const desenhar = itens => lista.replaceChildren(...itens.map(l => {
+      const [c, i] = campoLinha(`${l.total} ROI${l.total === 1 ? '' : 's'}`, l.nome);
+      return el('div', { class: 'faixa' }, c,
+        el('div', { class: 'mudo pequeno', text: 'Grafias: ' + l.variantes.map(v => `${v.nome} (${v.total})`).join(' | ') }),
+        el('div', { class: 'linha' }, el('button', { class: 'btn pequeno', onclick: async () => {
+          try { desenhar((await api('POST', '/api/indicadores/locais', { variantes: l.variantes.map(v => v.nome), nome: i.value })).locais); S.ind = null; aviso('Local ajustado ✓'); }
+          catch (e) { aviso(e.message, true); }
+        } }, 'Salvar nome')));
+    }));
+    desenhar(locais);
+    abrirModal('📍 Locais do indicador', [
+      el('p', { class: 'mudo', text: 'Grafias parecidas e locais com complemento já vêm juntos. Para juntar dois locais, dê o mesmo nome aos dois. O texto dos ROIs não muda.' }), lista],
+      [el('button', { class: 'btn primario', 'data-fechar': true, onclick: () => { S.ind = null; if (S.aba === 'painel') desenharPainelGerencial(); } }, 'Fechar')]);
+  } catch (e) { aviso(e.message, true); }
 }
 
 // =====================================================================

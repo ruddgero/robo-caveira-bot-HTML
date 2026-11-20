@@ -379,3 +379,35 @@ html, body { overflow-x: clip; }
 #impressao .fotos-imp figure { margin: 0; break-inside: avoid; }
 #impressao .fotos-imp img { width: 100%; max-height: 9cm; object-fit: contain; }
 #impressao .fotos-imp figcaption { font-size: 9pt; font-weight: 700; text-align: center; }
+
+/* =================== v6.1: Indicadores › Ocorrências =================== */
+#aba-painel { position: relative; }
+.ind-dica { position: absolute; z-index: 30; width: 200px; transform: translateY(-100%); background: var(--superficie); border: 1px solid var(--borda); border-radius: 10px; padding: 8px 10px; font-size: 12.5px; display: grid; gap: 2px; pointer-events: none; box-shadow: 0 6px 20px rgba(0,0,0,.35); }
+.ind-dica strong { font-size: 13px; margin-bottom: 2px; }
+.ind-kpis { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.ind-kpi { display: grid; gap: 2px; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--borda); background: var(--fundo); }
+.ind-kpi small { font-size: 12px; color: var(--mudo); }
+.ind-kpi b { font-size: 24px; font-weight: 600; }
+.ind-kpi > span { font-size: 12px; color: var(--mudo); }
+.ind-legenda { display: flex; flex-wrap: wrap; gap: 6px 12px; font-size: 12px; color: var(--mudo); }
+.ind-legenda i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
+.ind-colunas { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 4px; align-items: end; height: 170px; }
+.ind-colunas.anos { height: 150px; }
+.ind-col { display: grid; grid-template-rows: auto 1fr auto; height: 100%; text-align: center; cursor: pointer; border-radius: 6px; padding: 2px 0; }
+.ind-col:hover, .ind-col.sel { background: rgba(79, 124, 255, .10); }
+.ind-col em { font-style: normal; font-size: 11.5px; color: var(--mudo); min-height: 15px; }
+.ind-col small { font-size: 11px; color: var(--mudo); }
+.ind-barra { min-height: 0; height: 100%; display: flex; align-items: flex-end; justify-content: center; }
+.ind-pilha { display: flex; flex-direction: column-reverse; width: min(22px, 70%); height: 100%; justify-content: flex-start; }
+.ind-barra .ind-pilha { height: 100%; }
+.ind-pilha span { display: block; width: 100%; border-top: 1px solid var(--superficie); }
+.ind-pilha span:last-child { border-radius: 4px 4px 0 0; }
+.ind-pilha.h { flex-direction: row; width: 100%; height: 14px; }
+.ind-pilha.h span { height: 100%; border-top: 0; border-right: 1px solid var(--superficie); }
+.ind-pilha.h span:last-child { border-radius: 0 4px 4px 0; }
+.ind-locais { display: grid; gap: 8px; }
+.ind-local { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) 26px; gap: 8px; align-items: center; cursor: pointer; font-size: 13px; }
+.ind-local .nome { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ind-local b { text-align: right; }
+.ind-trilho { display: flex; }
+.ind-frase { margin: 0; padding: 2px 0 2px 10px; border-left: 2px solid var(--primario); font-size: 14px; }

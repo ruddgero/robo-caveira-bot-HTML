@@ -495,6 +495,14 @@ rota('GET', '/api/roi/:id/xlsx', async (req, res, { params }) => {
     return { __arquivo: true, tipo: XLSX, nome: arq.nome, dados: arq.dados };
 });
 
+// --- Indicadores › Ocorrências
+rota('GET', '/api/indicadores/ocorrencias', async req => {
+    const q = new URL(req.url, 'http://x').searchParams;
+    return ROI.indicadorOcorrencias({ ano: q.get('ano'), mes: q.get('mes') });
+});
+rota('GET', '/api/indicadores/locais', async () => ({ locais: ROI.listaDeLocais() }));
+rota('POST', '/api/indicadores/locais', async (req, res, { corpo, u }) => ({ locais: await ROI.renomearLocal(corpo.variantes, corpo.nome, u) }), { perfis: ['ADMIN'] });
+
 // --- Escala
 rota('GET', '/api/escala', async () => nucleo.construirPassagem());
 rota('POST', '/api/escala/iniciar', async (req, res, { u }) => { await nucleo.iniciarEscala(u); return nucleo.construirPassagem(); }, { perfis: LIDERES });

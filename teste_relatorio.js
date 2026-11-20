@@ -316,4 +316,8 @@ assert.strictEqual(locais[0].nome, 'Portaria Principal'); assert.strictEqual(loc
 assert.strictEqual(locais.length, 3);   // ADM 01 ≠ ADM 02
 assert.strictEqual(ROI.adivinharTipo('Caminhão atinge cabos aéreos'), 'G1');
 assert.strictEqual(ROI.adivinharTipo('Porta de contêiner destrancada'), 'G5');
+const mapaLoc = ROI.mapaDeLocais([{ local: 'Portaria Principal' }, { local: 'Portaria Principal' }, { local: 'Portaria Principal (Saída de veículos)' }, { local: 'Portaria Principal - Rai-x' }, { local: 'Gate 01' }]);
+assert.strictEqual(mapaLoc.get('Portaria Principal (Saída de veículos)'), 'Portaria Principal');
+assert.strictEqual(mapaLoc.get('Portaria Principal - Rai-x'), 'Portaria Principal');
+assert.strictEqual(mapaLoc.get('Gate 01'), 'Gate 01');
 console.log('\n✅ Todos os testes passaram.');
