@@ -1576,9 +1576,9 @@ async function carregarNomesEquipe() {
   try { S.nomesEquipe = (await api('GET', '/api/equipe')).nomes; } catch (_) { S.nomesEquipe = S.nomesEquipe || []; }
 }
 
-const CORES_EQUIPE = { azul: '#3b82f6', verde: '#22c55e', vermelha: '#ef4444', amarela: '#eab308', laranja: '#f97316', roxa: '#a855f7', cinza: '#94a3b8' };
+const CORES_EQUIPE = { azul: '#3b82f6', verde: '#22c55e', vermelha: '#ef4444', amarela: '#eab308', laranja: '#f97316', roxa: '#a855f7', cinza: '#94a3b8', branca: '#e5e7eb' };
 async function carregarEquipes() {
-  try { const r = await api('GET', '/api/equipes'); S.equipes = r.equipes; S.lideresDisponiveis = r.lideres; } catch (_) { S.equipes = S.equipes || []; }
+  try { const r = await api('GET', '/api/equipes'); S.equipes = r.equipes; S.lideresDisponiveis = r.lideres; S.escalaTurno = r.escala || {}; } catch (_) { S.equipes = S.equipes || []; }
 }
 
 function editorEquipes() {
@@ -1592,7 +1592,7 @@ function editorEquipes() {
     S.ficha.equipes = e;
     return e;
   };
-  const salvar = () => { const e = eq(); e.saindo = juntarNomes(e.saindoLista); e.assumindo = juntarNomes(e.assumindoLista); agendarSalvar(); render(); };
+  const salvar = (manual = false) => { const e = eq(); if (manual) e.automatico = false; e.saindo = juntarNomes(e.saindoLista); e.assumindo = juntarNomes(e.assumindoLista); agendarSalvar(); render(); };
   const equipe = id => (S.equipes || []).find(x => x.id === id);
 
   const escolherModo = modo => {
@@ -1611,19 +1611,57 @@ function editorEquipes() {
     const e = eq(), q = equipe(id);
     if (!q) return;
     e[lado + 'EquipeId'] = id;
-    e[lado + 'Lista'] = [...q.membros];
+    e[lado + 'Lista'] = [...(lado === 'assumindo' ? (q.membrosProx || q.membros) : q.membros)];
     salvar();
   };
 
-  // tocar num nome: substituir (férias) ou tirar só deste relatório
-  const tocarMembro = (lado, nome) => {
+  // tocar num nome: substituir pelo organograma (mesmo cargo; só este turno ou por período) ou tirar deste relatório
+  const tocarMembro = async (lado, nome) => {
+    let op = null;
+    try { op = await api('GET', `/api/organograma/opcoes/${encodeURIComponent(nome)}`); } catch (_) {}
+    if (!op?.titular) return tocarMembroLivre(lado, nome);
+    const e = eq();
+    let escolhido = null, periodo = false;
+    const lista = el('div', { class: 'chips' });
+    const desenharLista = () => lista.replaceChildren(...op.opcoes.map(o => el('button', {
+      class: `chip${escolhido?.id === o.id ? ' ativo' : ''}`, title: o.ocupado ? 'Já está cobrindo outra pessoa nesse período' : '',
+      onclick: () => { escolhido = o; erroEl.hidden = true; desenharLista(); }
+    }, `${o.nome} · ${o.situacao}${o.ocupado ? ' (ocupado)' : ''}`)));
+    const bSo = el('button', { class: 'filtro ativo', onclick: () => { periodo = false; bSo.className = 'filtro ativo'; bPer.className = 'filtro'; datas.hidden = true; } }, 'Só este turno');
+    const bPer = el('button', { class: 'filtro', onclick: () => { periodo = true; bPer.className = 'filtro ativo'; bSo.className = 'filtro'; datas.hidden = false; } }, 'Por período (férias)');
+    const hoje = S.ficha?.data || agoraBR().data;
+    const [cDe, iDe] = campoLinha('De', hoje), [cAte, iAte] = campoLinha('Até', hoje);
+    const motivo = el('select', {}, ['Férias', 'Folga', 'Atestado', 'Troca de escala', 'Treinamento'].map(m => el('option', { value: m, text: m })));
+    const datas = el('div', { hidden: true, style: 'display:grid;gap:8px' }, el('div', { class: 'grade-2' }, cDe, cAte), el('label', { class: 'campo' }, 'Motivo', motivo));
+    const erroEl = el('p', { class: 'erro pequeno', style: 'margin:0', hidden: true, text: 'Escolha quem vai cobrir.' });
+    desenharLista();
+    abrirModal(`Substituir ${nome}`, [
+      el('p', { class: 'mudo pequeno', style: 'margin:0', text: `${op.titular.funcao || ''} · ${op.titular.equipeNome}. Aparecem só pessoas do mesmo cargo: feristas primeiro, depois quem está de folga.` }),
+      lista, erroEl, el('div', { class: 'filtros' }, bSo, bPer), datas
+    ], [
+      el('button', { class: 'btn fantasma', style: 'color:var(--vermelho)', onclick: () => { e[lado + 'Lista'] = e[lado + 'Lista'].filter(n => n !== nome); fecharModal(); salvar(true); } }, 'Tirar deste relatório'),
+      el('button', { class: 'btn primario', onclick: async () => {
+        if (!escolhido) { erroEl.hidden = false; return; }
+        if (!periodo) {
+          e[lado + 'Lista'] = e[lado + 'Lista'].map(n => (n === nome ? escolhido.nome : n));
+          fecharModal(); salvar(true); return aviso(`${escolhido.nome} cobre ${nome} neste turno ✓`);
+        }
+        try {
+          await api('POST', '/api/organograma/substituicoes', { titularId: op.titular.id, substitutoId: escolhido.id, de: iDe.value.trim(), ate: iAte.value.trim(), motivo: motivo.value });
+          fecharModal(); aviso(`${escolhido.nome} cobre ${nome} de ${iDe.value} a ${iAte.value} ✓`);
+          await Promise.all([carregarEquipes(), carregarFicha()]); redesenharAba();
+        } catch (err) { aviso(err.message, true); }
+      } }, 'Confirmar')
+    ]);
+  };
+  const tocarMembroLivre = (lado, nome) => {
     const e = eq();
     const usados = new Set([...e.saindoLista, ...e.assumindoLista]);
     const livres = (S.nomesEquipe || []).filter(n => !usados.has(n));
     const trocar = novo => {
       const k = lado + 'Lista';
       e[k] = e[k].map(n => (n === nome ? novoNome(novo) : n));
-      fecharModal(); salvar(); aviso(`${nome} → ${novoNome(novo)}`);
+      fecharModal(); salvar(true); aviso(`${nome} → ${novoNome(novo)}`);
     };
     const novoNome = n => nomeProprio(n);
     const [cOutro, iOutro] = campoLinha('Ou digite o nome do substituto', '', { placeholder: 'Ex.: Marcos Bruno' });
@@ -1646,7 +1684,7 @@ function editorEquipes() {
     const usados = new Set([...e.saindoLista, ...e.assumindoLista]);
     const livres = (S.nomesEquipe || []).filter(n => !usados.has(n));
     const [c, i] = campoLinha('Ou digite o nome', '', { placeholder: 'Ex.: Wallace Ferroport' });
-    const add = n => { e[lado + 'Lista'] = [...e[lado + 'Lista'], nomeProprio(n)]; fecharModal(); salvar(); };
+    const add = n => { e[lado + 'Lista'] = [...e[lado + 'Lista'], nomeProprio(n)]; fecharModal(); salvar(true); };
     abrirModal('Adicionar pessoa', [
       livres.length ? el('div', { class: 'chips' }, livres.map(n => el('button', { class: 'chip', onclick: () => add(n) }, n))) : null, c
     ], [el('button', { class: 'btn fantasma', 'data-fechar': true }, 'Cancelar'), el('button', { class: 'btn primario', onclick: async () => {
@@ -1680,14 +1718,17 @@ function editorEquipes() {
       if (!temEquipes) partes.push(el('div', { class: 'alertas' }, el('div', { text: 'Nenhuma equipe cadastrada ainda. Cadastre uma vez e depois é só tocar.' }),
         ehLider() ? el('div', {}, el('button', { class: 'btn pequeno', onclick: abrirEquipes }, '👥 Cadastrar equipes')) : null));
       const qs = equipe(e.saindoEquipeId), qa = equipe(e.assumindoEquipeId);
+      const esc = S.escalaTurno || {};
+      const selo = (id, idEsc) => !idEsc ? null : id === idEsc ? el('span', { class: 'etiqueta ok', text: '✓ pela escala 4×4' })
+        : el('span', { class: 'etiqueta atencao', text: `⚠️ escala: ${equipe(idEsc)?.nome || idEsc}` });
       partes.push(el('div', { class: 'bloco-equipe' },
-        el('div', { class: 'cartao-topo' }, el('strong', { text: 'EQUIPE SAINDO' }), el('span', { class: 'mudo pequeno', text: qs ? `${qs.nome} · equipe do líder` : 'equipe do líder de plantão' })),
+        el('div', { class: 'cartao-topo' }, el('strong', { text: 'EQUIPE SAINDO' }), el('span', { class: 'linha' }, el('span', { class: 'mudo pequeno', text: qs ? qs.nome : 'equipe de serviço' }), selo(e.saindoEquipeId, esc.saindo))),
         e.saindoLista.length && !trocandoSaindo ? membros('saindo') : null,
         (!e.saindoLista.length || trocandoSaindo) && temEquipes ? botoesEquipes('saindo') : null,
         temEquipes ? el('div', {}, el('button', { class: 'link', onclick: () => { trocandoSaindo = !trocandoSaindo; render(); } }, trocandoSaindo ? 'Pronto' : 'Trocar equipe')) : null,
         !temEquipes && !e.saindoLista.length ? membros('saindo') : null));
       partes.push(el('div', { class: 'bloco-equipe' },
-        el('div', { class: 'cartao-topo' }, el('strong', { text: 'EQUIPE ASSUMINDO' }), el('span', { class: 'mudo pequeno', text: qa ? qa.nome : 'toque na equipe que entra' })),
+        el('div', { class: 'cartao-topo' }, el('strong', { text: 'EQUIPE ASSUMINDO' }), el('span', { class: 'linha' }, el('span', { class: 'mudo pequeno', text: qa ? qa.nome : 'toque na equipe que entra' }), selo(e.assumindoEquipeId, esc.assumindo))),
         temEquipes ? botoesEquipes('assumindo', e.saindoEquipeId) : null,
         e.assumindoLista.length || !temEquipes ? el('div', { style: 'display:grid;gap:6px' },
           el('span', { class: 'mudo pequeno', text: 'Integrantes (toque num nome para substituir por férias):' }), membros('assumindo')) : null));
@@ -1709,11 +1750,106 @@ function editorEquipes() {
     }
     partes.push(el('div', { class: 'rodape-equipes' },
       e.modo !== 'MANUAL' ? el('button', { class: 'link', onclick: () => escolherModo('MANUAL') }, '✍️ Digitar com |') : el('button', { class: 'link', onclick: () => escolherModo('EQUIPES') }, '👥 Voltar às equipes'),
-      ehLider() ? el('button', { class: 'link', onclick: abrirEquipes }, '⚙️ Cadastro de equipes') : null));
+      el('button', { class: 'link', onclick: abrirOrganograma }, '👥 Organograma e férias')));
     box.replaceChildren(...partes);
   }
   render();
   return box;
+}
+
+// ----------------------------- Organograma, escala 4×4 e férias ----------------------
+const NOMES_EQ = { AMARELA: 'Amarela', AZUL: 'Azul', BRANCA: 'Branca', VERDE: 'Verde', FERISTA: 'Feristas' };
+const iniciais = n => String(n || '').split(/\s+/).filter(w => w.length > 2 || /^[A-ZÁ-Ú]/.test(w)).map(w => w[0]).slice(0, 2).join('').toUpperCase();
+async function abrirOrganograma() {
+  let o;
+  try { o = await api('GET', '/api/organograma'); } catch (e) { return aviso(e.message, true); }
+  const cor = id => CORES_EQUIPE[(o.equipes.find(e => e.id === id) || {}).cor] || '#94a3b8';
+  const ponto = id => el('span', { class: 'ponto-cor', style: `background:${cor(id)}` });
+  const recarregar = async () => { await Promise.all([carregarEquipes(), carregarFicha()]); fecharPainel(); abrirOrganograma(); };
+
+  const escala = el('section', { class: 'cartao' },
+    el('h2', { text: 'Escala 4×4' }),
+    el('p', { class: 'mudo pequeno', style: 'margin:0', text: `Ordem: ${o.escala.ordem.map(x => NOMES_EQ[x]).join(' → ')} · 2 diurnos, 2 noturnos, 4 folgas` }),
+    el('div', { class: 'tabela-escala' },
+      el('div', { class: 'te-cab' }, el('span', { text: 'Dia' }), el('span', { text: 'Diurno' }), el('span', { text: 'Noturno' })),
+      ...o.escala.dias.map(d => el('div', { class: `te-linha${d.data === o.escala.atual.data ? ' hoje' : ''}` },
+        el('span', { text: d.data.slice(0, 5) }),
+        el('span', {}, ponto(d.diurno), NOMES_EQ[d.diurno] || '—'),
+        el('span', {}, ponto(d.noturno), NOMES_EQ[d.noturno] || '—')))));
+
+  const subs = el('section', { class: 'cartao' },
+    el('div', { class: 'cartao-topo' }, el('h2', { text: 'Férias e substituições' }),
+      ehLider() ? el('button', { class: 'btn pequeno', onclick: () => novaSubstituicaoModal(o, recarregar) }, '+ Substituição') : null),
+    o.substituicoes.length ? el('div', { class: 'lista-pend' }, o.substituicoes.map(x => el('div', { class: 'acao-rapida' },
+      el('div', { class: 'pequeno' }, el('strong', { text: x.substituto }), ` cobre ${x.titular}`),
+      el('div', { class: 'mudo pequeno', text: `${x.motivo} · ${x.de} a ${x.ate}${x.criadoPor ? ' · por ' + x.criadoPor : ''}` }),
+      ehLider() ? el('div', {}, el('button', { class: 'btn fantasma pequeno', onclick: async () => {
+        if (!await confirmar('Cancelar substituição?', `${x.substituto} deixa de cobrir ${x.titular}.`, 'Cancelar substituição', true)) return;
+        try { await api('POST', `/api/organograma/substituicoes/${x.id}/excluir`); aviso('Substituição cancelada'); recarregar(); } catch (e) { aviso(e.message, true); }
+      } }, 'Cancelar')) : null)))
+      : el('p', { class: 'mudo pequeno', style: 'margin:0', text: 'Ninguém de férias ou substituído a partir de hoje.' }));
+
+  const equipes = o.equipes.map(e => el('section', { class: 'cartao' },
+    el('div', { class: 'cartao-topo' }, el('h2', {}, ponto(e.id), e.nome),
+      e.rodizio ? el('span', { class: 'mudo pequeno', text: o.escala.saindo === e.id ? 'de serviço agora' : o.escala.assumindo === e.id ? 'próximo turno' : '' }) : el('span', { class: 'etiqueta', text: 'cobre férias' })),
+    ...e.membros.map(m => {
+      const ef = (e.efetiva?.membros || []).find(x => x.cobrindoId === m.id);
+      return el('button', { class: 'pessoa-linha', onclick: () => ehAdmin() && editarPessoaModal(o, m, e.id, recarregar) },
+        el('span', { class: 'avatar', style: `background:${cor(e.id)}22;color:${cor(e.id)};border-color:${cor(e.id)}55`, text: iniciais(m.nome) }),
+        el('span', { style: 'min-width:0' },
+          el('div', { text: m.nome }),
+          el('div', { class: 'mudo pequeno', text: `${m.funcao} · ${m.base}` }),
+          ef ? el('span', { class: 'etiqueta atencao', text: `${ef.motivo || 'Férias'} até ${ef.ate} · coberto por ${ef.nome}` }) : null));
+    })));
+
+  abrirPainel('Organograma operacional', [
+    el('p', { class: 'mudo pequeno', text: 'Segurança Patrimonial · só as equipes operacionais. O item 8 do relatório sai daqui e da escala, já com as férias aplicadas.' }),
+    escala, subs, ...equipes,
+    ehAdmin() ? el('div', {}, el('button', { class: 'btn', onclick: () => editarPessoaModal(o, {}, 'FERISTA', recarregar) }, '+ Colaborador')) : null
+  ]);
+}
+
+function novaSubstituicaoModal(o, depois) {
+  const pessoas = o.equipes.flatMap(e => e.membros.map(m => ({ ...m, equipe: e.nome, rodizio: e.rodizio })));
+  const tit = el('select', {}, el('option', { value: '', text: 'Quem vai sair (férias, folga…)' }), ...pessoas.filter(p => p.rodizio).map(p => el('option', { value: p.id, text: `${p.nome} · ${p.equipe}` })));
+  const sub = el('select', {}, el('option', { value: '', text: 'Escolha primeiro quem sai' }));
+  tit.addEventListener('change', () => {
+    const t = pessoas.find(p => p.id === tit.value);
+    const ops = pessoas.filter(p => t && p.id !== t.id && p.cargo === t.cargo).sort((a, b) => (a.rodizio - b.rodizio) || a.nome.localeCompare(b.nome, 'pt-BR'));
+    sub.replaceChildren(el('option', { value: '', text: t ? 'Quem cobre (mesmo cargo)' : 'Escolha primeiro quem sai' }), ...ops.map(p => el('option', { value: p.id, text: `${p.nome} · ${p.rodizio ? p.equipe : 'ferista'}` })));
+  });
+  const hoje = S.ficha?.data || agoraBR().data;
+  const [cDe, iDe] = campoLinha('De', hoje), [cAte, iAte] = campoLinha('Até', hoje);
+  const motivo = el('select', {}, ['Férias', 'Folga', 'Atestado', 'Troca de escala', 'Treinamento'].map(m => el('option', { value: m, text: m })));
+  abrirModal('Nova substituição', [
+    el('label', { class: 'campo' }, 'Sai', tit), el('label', { class: 'campo' }, 'Cobre', sub),
+    el('div', { class: 'grade-2' }, cDe, cAte), el('label', { class: 'campo' }, 'Motivo', motivo),
+    el('p', { class: 'mudo pequeno', style: 'margin:0', text: 'Operador cobre só operador e líder cobre só líder. Nesses dias o substituto entra sozinho no item 8.' })
+  ], botoesSalvar(async () => {
+    if (!tit.value || !sub.value) throw new Error('Escolha quem sai e quem cobre.');
+    await api('POST', '/api/organograma/substituicoes', { titularId: tit.value, substitutoId: sub.value, de: iDe.value.trim(), ate: iAte.value.trim(), motivo: motivo.value });
+    fecharModal(); aviso('Substituição registrada ✓'); depois();
+  }, 'Registrar'));
+}
+
+function editarPessoaModal(o, p, equipeId, depois) {
+  const [cN, iN] = campoLinha('Nome completo', p.nome || '', { autofocus: !p.id });
+  const cargo = el('select', {}, el('option', { value: 'LIDER', text: 'Líder de turno' }), el('option', { value: 'OPERADOR', text: 'Operador(a) de CCOS' }));
+  cargo.value = p.cargo || 'OPERADOR';
+  const eq = el('select', {}, o.equipes.map(e => el('option', { value: e.id, text: e.nome })));
+  eq.value = equipeId;
+  const [cF, iF] = campoLinha('Função (como aparece no organograma)', p.funcao || '', { placeholder: 'Operadora de CCOS' });
+  const base = el('select', {}, ['SJB', 'Campos'].map(b => el('option', { value: b, text: b })));
+  base.value = p.base || 'Campos';
+  abrirModal(p.id ? `Editar · ${p.nome}` : 'Novo colaborador', [cN, el('div', { class: 'grade-2' }, el('label', { class: 'campo' }, 'Cargo', cargo), el('label', { class: 'campo' }, 'Equipe', eq)), cF, el('label', { class: 'campo' }, 'Base', base)],
+    [p.id ? el('button', { class: 'btn fantasma', style: 'color:var(--vermelho)', onclick: async () => {
+      if (!await confirmar('Remover do organograma?', `${p.nome} sai do organograma e das substituições.`, 'Remover', true)) return;
+      try { await api('POST', `/api/organograma/pessoa/${p.id}/excluir`); fecharModal(); aviso('Removido'); depois(); } catch (e) { aviso(e.message, true); }
+    } }, 'Remover') : null,
+    ...botoesSalvar(async () => {
+      await api('POST', '/api/organograma/pessoa', { id: p.id, nome: iN.value, cargo: cargo.value, equipeId: eq.value, funcao: iF.value, base: base.value });
+      fecharModal(); aviso('Organograma atualizado ✓'); depois();
+    })].filter(Boolean));
 }
 
 // ----------------------------- Cadastro de equipes ----------------------
@@ -2143,7 +2279,7 @@ function abrirMenu() {
       item('📦', 'Passagem da escala', abrirEscala),
       item('🗃️', 'Rascunhos de turnos arquivados', abrirHistorico),
       item('✨', `Fundo animado: ${Fundo.ativo() ? 'ligado' : 'desligado'}`, () => { Fundo.ligar(!Fundo.ativo()); aviso(Fundo.ativo() ? 'Fundo animado ligado' : 'Fundo animado desligado (economiza bateria)'); }),
-      ehLider() ? item('🧑‍🤝‍🧑', 'Equipes', abrirEquipes) : null,
+      item('🧑‍🤝‍🧑', 'Organograma, escala e férias', abrirOrganograma),
       ehAdmin() ? item('👥', 'Usuários', abrirUsuarios) : null,
       ehAdmin() ? item('⚙️', 'Configurações', abrirConfig) : null,
       item('🚪', 'Sair', async () => { await api('POST', '/api/logout'); mostrarLogin(); }))

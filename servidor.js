@@ -357,10 +357,29 @@ rota('POST', '/api/relatorios-hist/:id/herdar', async (req, res, { params, u }) 
 rota('POST', '/api/relatorios-hist/importar', async (req, res, { corpo, u }) => nucleo.importarMensagens(corpo.mensagens, u), { perfis: LIDERES });
 
 // --- Equipes
-rota('GET', '/api/equipes', async () => ({
-    equipes: nucleo.estado.equipes,
-    lideres: usuarios.todos().filter(x => x.ativo && usuarios.podeLiderar(x)).map(x => ({ id: x.id, nome: x.nome }))
-}));
+// Equipes do item 8 = organograma (com férias/substituições aplicadas) + escala 4×4
+const ORG = require('./organograma');
+rota('GET', '/api/equipes', async () => {
+    const org = nucleo.estado.organograma, f = nucleo.estado.ficha;
+    const esc = nucleo.escalaDoTurno(f);
+    return {
+        equipes: org.equipes.map(e => {
+            const hoje = ORG.equipeEfetiva(org, e.id, f.data), prox = ORG.equipeEfetiva(org, e.id, esc.proximo.data);
+            return { id: e.id, nome: e.nome, cor: e.cor, rodizio: e.rodizio, membros: hoje.nomes, membrosProx: prox.nomes, detalhe: hoje.membros, lideres: [] };
+        }),
+        escala: { saindo: esc.saindo, assumindo: esc.assumindo },
+        lideres: usuarios.todos().filter(x => x.ativo && usuarios.podeLiderar(x)).map(x => ({ id: x.id, nome: x.nome }))
+    };
+});
+rota('GET', '/api/organograma', async () => nucleo.organogramaParaTela());
+rota('GET', '/api/organograma/opcoes/:nome', async (req, res, { params }) => {
+    const f = nucleo.estado.ficha;
+    return ORG.opcoesSubstituto(nucleo.estado.organograma, decodeURIComponent(params.nome), f.data, nucleo.estado.organograma.escala);
+});
+rota('POST', '/api/organograma/substituicoes', async (req, res, { corpo, u }) => ({ substituicao: await nucleo.criarSubstituicao(corpo, u) }), { perfis: LIDERES });
+rota('POST', '/api/organograma/substituicoes/:id/excluir', async (req, res, { params, u }) => { await nucleo.excluirSubstituicao(params.id, u); return { ok: true }; }, { perfis: LIDERES });
+rota('POST', '/api/organograma/pessoa', async (req, res, { corpo, u }) => ({ pessoa: await nucleo.salvarPessoa(corpo, u) }), { perfis: ['ADMIN'] });
+rota('POST', '/api/organograma/pessoa/:id/excluir', async (req, res, { params, u }) => { await nucleo.excluirPessoa(params.id, u); return { ok: true }; }, { perfis: ['ADMIN'] });
 rota('POST', '/api/equipes', async (req, res, { corpo, u }) => ({ equipe: await nucleo.salvarEquipe(corpo, u) }), { perfis: LIDERES });
 rota('POST', '/api/equipes/:id/excluir', async (req, res, { params, u }) => { await nucleo.excluirEquipe(params.id, u); return { ok: true }; }, { perfis: LIDERES });
 

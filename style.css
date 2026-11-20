@@ -344,3 +344,12 @@ html, body { overflow-x: clip; }
 @media (hover: hover) and (pointer: fine) {
   .pend-cartao:hover .dica { display: grid; }
 }
+
+/* v5.3 · organograma e escala */
+.tabela-escala { display: grid; gap: 2px; font-size: 13px; }
+.te-cab, .te-linha { display: grid; grid-template-columns: 60px 1fr 1fr; gap: 8px; padding: 6px 8px; border-radius: 8px; }
+.te-cab { color: var(--mudo); font-size: 12px; }
+.te-linha { background: var(--fundo); }
+.te-linha.hoje { outline: 1px solid var(--primario); }
+.pessoa-linha { display: grid; grid-template-columns: auto 1fr; gap: 10px; align-items: center; width: 100%; padding: 8px 4px; border: 0; border-top: 1px solid var(--borda); background: none; color: inherit; text-align: left; font: inherit; cursor: pointer; }
+.avatar { width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; border: 1px solid; }
