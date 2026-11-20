@@ -3,7 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const PASTA_DADOS = path.join(__dirname, 'dados');
+const PASTA_DADOS = process.env.CAVEIRA_DADOS || path.join(__dirname, 'dados');   // CAVEIRA_DADOS: pasta separada (teste)
 let db = null;
 let modo = 'disco';
 

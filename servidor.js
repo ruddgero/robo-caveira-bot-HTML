@@ -141,7 +141,7 @@ function resumoRelatorio(r) {
 }
 
 function operacaoParaTela(o) {
-    return { ...o, rotuloTipo: R.TIPOS_OPERACAO[o.tipo]?.rotulo || o.tipo };
+    return { ...o, rotuloTipo: R.TIPOS_OPERACAO[o.tipo]?.rotulo || o.tipo, mensagemPadrao: R.mensagemPadrao(o) };
 }
 
 function pendenciaParaTela(p) {
@@ -255,22 +255,66 @@ rota('GET', '/api/ficha/texto', async () => ({
 rota('POST', '/api/ficha/herdar', async (req, res, { corpo, u }) => ({ ficha: await nucleo.herdar(corpo.relatorioId, u) }), { perfis: LIDERES });
 rota('POST', '/api/ficha/nova', async (req, res, { u }) => ({ ficha: await nucleo.novaFichaEmBranco(u) }), { perfis: LIDERES });
 
+// Modo teste: tudo que seria publicado no grupo vai para o WhatsApp do próprio líder
+function meuWhatsapp(u) {
+    const st = whatsapp.status(u.id);
+    return st?.numero ? `${st.numero}@s.whatsapp.net` : '';
+}
+function destinoPublicacao(u) {
+    const cfg = nucleo.estado.config;
+    if (cfg.modoTeste) {
+        const jid = meuWhatsapp(u);
+        if (!jid) throw erro('Modo teste ligado: conecte seu WhatsApp para receber a publicação no seu número.', 409);
+        return { jid, teste: true };
+    }
+    if (!cfg.grupoPublicacao) throw erro('O administrador precisa escolher o grupo de publicação em Configurações.', 409);
+    return { jid: cfg.grupoPublicacao, teste: false };
+}
+
+// Planilha de navios do turno: vai para o WhatsApp do líder (privado) e para o e-mail dele, se houver
+async function entregarPlanilha(u, fichaId) {
+    const pub = nucleo.planilhaDoTurno(fichaId);
+    if (!pub) return false;
+    const arq = nucleo.arquivoPlanilha(pub);
+    const legenda = `🚢 Planilha de navios · ${pub.turno} ${pub.data}\nCopie as linhas e cole nas planilhas T-ORE / T-OIL do departamento.`;
+    const jid = meuWhatsapp(u);
+    if (jid) await whatsapp.enviarArquivo(u.id, jid, arq.dados, arq.nome, XLSX, legenda).catch(e => console.error('⚠️  [PLANILHA] WhatsApp:', e.message));
+    if (u.email && email.configurado()) {
+        await email.enviar({ para: u.email, assunto: `Planilha de navios - ${pub.turno} ${pub.data}`, corpo: legenda, anexos: [arq] })
+            .catch(e => console.error('⚠️  [PLANILHA] E-mail:', e.message));
+    }
+    return true;
+}
+
 rota('POST', '/api/ficha/publicar', async (req, res, { corpo, u }) => {
     exigirPlantao(u);
-    const cfg = nucleo.estado.config;
-    if (!cfg.grupoPublicacao) throw erro('O administrador precisa escolher o grupo de publicação em Configurações.', 409);
+    const destino = destinoPublicacao(u);
     const f = nucleo.estado.ficha;
+    const fichaId = f.id;
     const texto = nucleo.textoRelatorio();
-    await whatsapp.enviarTexto(u.id, cfg.grupoPublicacao, texto);
+    await whatsapp.enviarTexto(u.id, destino.jid, destino.teste ? `🧪 *TESTE — não foi para o grupo*\n\n${texto}` : texto);
     if (corpo.anexarTxt) {
-        await whatsapp.enviarDocumento(u.id, cfg.grupoPublicacao, nucleo.textoRelatorio({ negrito: false }), `Relatorio_Turno_${f.turno}_${f.data.replace(/\//g, '-')}.txt`, '📄 Arquivo do relatório');
+        await whatsapp.enviarDocumento(u.id, destino.jid, nucleo.textoRelatorio({ negrito: false }), `Relatorio_Turno_${f.turno}_${f.data.replace(/\//g, '-')}.txt`, '📄 Arquivo do relatório');
     }
     await nucleo.marcarPublicado(texto, u);
     const publicadoEm = nucleo.estado.ficha.publicadoEm;
     const passarOps = Array.isArray(corpo.passarOps) ? corpo.passarOps.map(String) : [];
     const nova = await nucleo.aposPublicar(texto, u, { passarOps });
-    return { ok: true, publicadoEm, proximo: { turno: nova.ficha?.turno || nucleo.estado.ficha.turno, data: nucleo.estado.ficha.data } };
+    const planilha = await entregarPlanilha(u, fichaId).catch(() => false);
+    return { ok: true, publicadoEm, teste: destino.teste, planilha, proximo: { turno: nova.ficha?.turno || nucleo.estado.ficha.turno, data: nucleo.estado.ficha.data } };
 }, { perfis: LIDERES });
+
+// --- Planilha de navios (T-ORE / T-OIL)
+rota('GET', '/api/planilha-navios/previa', async () => {
+    const arq = nucleo.arquivoPlanilha(nucleo.previaPlanilha());
+    return { __arquivo: true, tipo: XLSX, nome: arq.nome.replace('.xlsx', '_PREVIA.xlsx'), dados: arq.dados };
+});
+rota('GET', '/api/planilha-navios/:turno/:data', async (req, res, { params }) => {
+    const pub = nucleo.planilhaPorTurno(String(params.turno).toUpperCase(), String(params.data).replace(/-/g, '/'));
+    if (!pub) throw erro('Este turno não tem planilha de navios (só os turnos publicados pelo robô a partir da versão 4.9).', 404);
+    const arq = nucleo.arquivoPlanilha(pub);
+    return { __arquivo: true, tipo: XLSX, nome: arq.nome, dados: arq.dados };
+});
 
 // --- Exportação em Excel
 const XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
@@ -360,7 +404,7 @@ rota('POST', '/api/operacoes', async (req, res, { corpo, u }) => {
 rota('POST', '/api/operacoes/minuta', async (req, res, { corpo }) => {
     const o = { ...(corpo || {}) };
     if (o.navio) o.navio = String(o.navio).split('\n')[0].trim().toUpperCase();
-    return R.minutaEmail(o);
+    return { ...R.minutaEmail(o), mensagem: R.mensagemPadrao(o) };
 });
 rota('PUT', '/api/operacoes/:id', async (req, res, { corpo, params, u }) => ({ operacao: operacaoParaTela(await nucleo.atualizarOperacao(params.id, corpo, u)) }));
 rota('POST', '/api/operacoes/:id/saida', async (req, res, { corpo, params, u }) => {
@@ -400,9 +444,9 @@ rota('GET', '/api/escala/texto', async () => ({ whatsapp: nucleo.textoPassagem()
 rota('POST', '/api/escala/publicar', async (req, res, { corpo, u }) => {
     exigirPlantao(u);
     const cfg = nucleo.estado.config;
-    if (!cfg.grupoPublicacao) throw erro('O administrador precisa escolher o grupo de publicação em Configurações.', 409);
-    await whatsapp.enviarTexto(u.id, cfg.grupoPublicacao, nucleo.textoPassagem());
-    if (corpo.anexarTxt) await whatsapp.enviarDocumento(u.id, cfg.grupoPublicacao, nucleo.textoPassagem({ negrito: false }), `Passagem_Escala_${agora().data.replace(/\//g, '-')}.txt`, '📄 Passagem da escala');
+    const destino = destinoPublicacao(u);
+    await whatsapp.enviarTexto(u.id, destino.jid, (destino.teste ? '🧪 *TESTE — não foi para o grupo*\n\n' : '') + nucleo.textoPassagem());
+    if (corpo.anexarTxt) await whatsapp.enviarDocumento(u.id, destino.jid, nucleo.textoPassagem({ negrito: false }), `Passagem_Escala_${agora().data.replace(/\//g, '-')}.txt`, '📄 Passagem da escala');
     nucleo.auditar(u, 'Publicou a passagem da escala');
     return { ok: true };
 }, { perfis: LIDERES });

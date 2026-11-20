@@ -266,6 +266,10 @@ async function enviarDocumento(uid, jid, conteudo, nomeArquivo, legenda) {
     return exigir(uid).sock.sendMessage(jid, { document: Buffer.from(conteudo, 'utf-8'), fileName: nomeArquivo, mimetype: 'text/plain', caption: legenda });
 }
 
+async function enviarArquivo(uid, jid, buffer, nomeArquivo, mimetype, legenda) {
+    return exigir(uid).sock.sendMessage(jid, { document: buffer, fileName: nomeArquivo, mimetype, caption: legenda });
+}
+
 async function pedirCodigo(uid, numero) {
     const s = sessoes.get(uid);
     if (!s || !s.sock || s.estado !== 'AGUARDANDO_PAREAMENTO') {
@@ -293,6 +297,6 @@ async function iniciar(opcoes, uidsParaLigar = []) {
 }
 
 module.exports = {
-    MAX_ATIVAS, iniciar, ativar, pausar, desconectar, status, listarGrupos, enviarTexto, enviarDocumento, pedirCodigo,
+    MAX_ATIVAS, iniciar, ativar, pausar, desconectar, status, listarGrupos, enviarTexto, enviarDocumento, enviarArquivo, pedirCodigo,
     nomesGrupos, disponivel: () => !!baileys
 };

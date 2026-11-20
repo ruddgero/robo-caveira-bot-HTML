@@ -123,7 +123,9 @@ function resumoNavio(op) {
     if (op.tipo === 'TRIPULACAO') {
         const voltou = !!op.horaRetorno;   // saída a passeio/médico só termina quando os tripulantes retornam
         const n = parseInt(String(op.quantidade || '').replace(/\D/g, ''), 10) || 1;
-        let linha = `${op.movimento || 'Embarque'} de ${formatarQtdTripulantes(op.quantidade)}.`;
+        let linha = op.qtdEmbarque && op.qtdDesembarque
+            ? `Embarque de ${String(+op.qtdEmbarque).padStart(2, '0')} e desembarque de ${formatarQtdTripulantes(op.qtdDesembarque)}.`
+            : `${op.movimento || 'Embarque'} de ${formatarQtdTripulantes(op.quantidade)}.`;
         if (ehSaidaDeTripulantes(op)) {
             linha += voltou ? (n === 1 ? ' Retornou ao terminal.' : ' Retornaram ao terminal.')
                 : (n === 1 ? ' Não retornou até o presente momento.' : ' Não retornaram até o presente momento.');
@@ -634,6 +636,10 @@ const ROTULOS = [
     [/^(saida|saida (na |da )?portaria|horario (final|de saida)|hora (final|de saida|saida)|termino)$/, 'horaFinal'],
     [/^(quantidade|quantos|qtd|qtde|tripulantes|n de tripulantes|quantidade de tripulantes|qtd de tripulantes)$/, 'quantidade'],
     [/^(movimento|embarque ou desembarque|movimentacao|tipo de movimentacao|tipo de movimento)$/, 'movimento'],
+    [/^(embarque|embarques|qtd embarque|qtd de embarque|quantidade de embarque)$/, 'qtdEmbarque'],
+    [/^(desembarque|desembarques|qtd desembarque|qtd de desembarque|quantidade de desembarque)$/, 'qtdDesembarque'],
+    [/^(berco|lado do berco|costado)$/, 'berco'],
+    [/^(bordo|lado)$/, 'bordo'],
     [/^(observacao|observacoes|obs)$/, 'observacoes'],
     [/^(autorizado por|autorizados por|autoridade|autoridades|autorizado por autoridades|autorizacao)$/, 'autoridades']
 ];
@@ -716,7 +722,7 @@ const RE_URGENTE = /\b(acidente|incendio|fogo|ferid[oa]s?|ambulancia|vazamento|i
 const RE_OCORRENCIA = /\b(avaria|danificad[oa]|quebr(ou|ado|ada)|furto|roubo|arrombamento|apreensao|inconformidade|irregularidade|recusad[oa]|barrad[oa]|sem autorizacao|nao autorizad[oa]|arriada)\b/;
 const RE_OPERACAO = /\b(rancho|provis(ao|oes)|tripulantes?|tripulacao|residuos?|agua potavel|bunker|combustivel|dta|pecas de bordo|sobressalentes|k9|mergulho|lacre|deslacracao)\b/;
 const RE_DIGITAL = /\b(digital|spda|dps|cftv|cameras?|fibra|nobreak|postes?|filtragem)\b/;
-const RE_NAVIO = /\b(atracad[oa]|desatracad[oa]|atracacao|desatracacao|fundead[oa]|pratico|eta|etb|etd|amarrad[oa])\b/;
+const RE_NAVIO = /\b(atracad[oa]|desatracad[oa]|atracacao|desatracacao|fundead[oa]|fundeio|pratico|eta|etb|etd|amarrad[oa]|em manobra)\b/;
 const RE_AVISO = /\b(acompanhar|atentar|programad[oa] para|aguardando|pendente|previsto para|prevista para|amanha|verificar)\b/;
 const RE_SAIDA = /\b(saida|saiu|deixou o terminal|liberad[oa] na saida)\b/;
 
@@ -738,9 +744,11 @@ function extrairCampos(textoOriginal, navios = NAVIOS_PADRAO) {
     const navio = t.match(/\b(?:NAVIO|M\/V|MV)\s*[-–:]?\s*(?:(?:M\/V|MV|NM)\s*[-–.]?\s*)?([A-Z0-9][A-Z0-9 .]{2,30}?)(?=\s*[-–:.,;(\n]|\s+T-|\s*$)/im);
     const qtd = t.match(/\b(\d{1,3})\s*tripulantes?\b/i);
     const conhecido = navioConhecido(t, navios);
+    // "AMETISTA BRASIL – T-OIL. ..." : nome em maiúsculas antes do terminal
+    const antesDoTerminal = t.match(/^\s*([A-Z0-9][A-Z0-9 .'\/-]{2,40}?)\s*[-–]\s*T[\s.\-]?(?:ORE|OIL)\b/m);
     return {
         placa: normalizarPlaca(t),
-        navio: navio ? navio[1].trim().toUpperCase() : (conhecido ? nomeNavioLimpo(conhecido.nome) : ''),
+        navio: navio ? navio[1].trim().toUpperCase() : (conhecido ? nomeNavioLimpo(conhecido.nome) : (antesDoTerminal ? nomeNavioLimpo(antesDoTerminal[1]) : '')),
         terminal: normalizarTerminal(t) || conhecido?.terminal || '',
         hora: normalizarHora(t),
         quantidade: qtd ? qtd[1].padStart(2, '0') : '',
@@ -770,6 +778,15 @@ function rascunhosOperacao(textoOriginal, horaMensagem, navios = NAVIOS_PADRAO) 
     const listaNavios = p.navios.length ? p.navios : (livre.navio ? [livre.navio] : ['']);
     const terminalEscrito = normalizarTerminal(c.terminal || '') || normalizarTerminal(texto);
     const qtd = c.quantidade || livre.quantidade;
+    // "embarque de 13 e desembarque de 14": as duas quantidades separadas (a planilha tem uma coluna para cada)
+    const num = v => { const n = parseInt(String(v || '').replace(/\D/g, ''), 10); return n ? String(n).padStart(2, '0') : ''; };
+    const qE = num(c.qtdEmbarque) || num((texto.match(/(?<!des)embarque\s+(?:definitivo\s+)?(?:de\s+)?(\d{1,3})/i) || [])[1]);
+    const qD = num(c.qtdDesembarque) || num((texto.match(/desembarque\s+(?:definitivo\s+)?(?:de\s+)?(\d{1,3})/i) || [])[1]);
+    const ambos = !!(qE && qD);
+    // inspeção de caixa de mar (T-ORE): berço Leste/Oeste e bordo E (estibordo) / B (bombordo)
+    const nTxt = semAcento(`${c.berco || ''} ${c.bordo || ''} ${texto}`).toUpperCase();
+    const berco = /\bLESTE\b/.test(nTxt) ? 'LESTE' : /\bOESTE\b/.test(nTxt) ? 'OESTE' : '';
+    const bordo = /ESTIBORDO|BORESTE|\bBORDO:?\s*E\b/.test(nTxt) ? 'E' : /BOMBORDO|\bBORDO:?\s*B\b/.test(nTxt) ? 'B' : '';
     const placas = lerPlacas(c.placa || '');
     const placa = placas.texto || livre.placa;
     const horas = horasDoTexto(texto);
@@ -811,8 +828,12 @@ function rascunhosOperacao(textoOriginal, horaMensagem, navios = NAVIOS_PADRAO) 
             aBordo: arrumar(c.aBordo),
             veiculo: arrumar(c.veiculo),
             placa,
-            quantidade: tipo === 'TRIPULACAO' ? (qtd ? String(parseInt(qtd, 10) || '').padStart(2, '0') : '') : '',
-            movimento: tipo === 'TRIPULACAO' ? (c.movimento ? movimentoDoTexto(c.movimento) || c.movimento : movimentoDoTexto(texto) || 'Embarque') : '',
+            quantidade: tipo === 'TRIPULACAO' ? (ambos ? String(+qE + +qD).padStart(2, '0') : (qtd ? String(parseInt(qtd, 10) || '').padStart(2, '0') : (qE || qD))) : '',
+            movimento: tipo === 'TRIPULACAO' ? (ambos ? 'Embarque e Desembarque' : c.movimento ? movimentoDoTexto(c.movimento) || c.movimento : movimentoDoTexto(texto) || 'Embarque') : '',
+            qtdEmbarque: tipo === 'TRIPULACAO' && ambos ? qE : '',
+            qtdDesembarque: tipo === 'TRIPULACAO' && ambos ? qD : '',
+            berco: tipo === 'MERGULHO' ? berco : '',
+            bordo: tipo === 'MERGULHO' ? bordo : '',
             horaInicial,
             horaFinal: normalizarHora(c.horaFinal || ''),
             observacoes,
@@ -917,7 +938,7 @@ function minutaEmail(op) {
     if (op.tipo === 'TRIPULACAO') {
         corpo = 'Registro a movimentação de tripulação:\n\n' + L([
             `Data: ${data}`, `Navio: ${M(op.navio)}`, `Terminal: ${sa(op.terminal)}`,
-            `Quantos: ${formatarQtdTripulantes(op.quantidade)}`, `Embarque ou desembarque: ${sa(op.movimento)}`, horarios,
+            `Quantos: ${op.qtdEmbarque && op.qtdDesembarque ? `${formatarQtdTripulantes(op.qtdEmbarque)} (embarque) / ${formatarQtdTripulantes(op.qtdDesembarque)} (desembarque)` : formatarQtdTripulantes(op.quantidade)}`, `Embarque ou desembarque: ${sa(op.movimento)}`, horarios,
             `Empresa responsável/ Agência: ${M(op.empresa)}`,
             `Agente/ Motorista autorizado responsável: ${agenteEMotorista(op)}`,
             `Veículo utilizado: ${veiculo}`,
@@ -940,6 +961,86 @@ function minutaEmail(op) {
 
     corpo = `${saudacao(t.horaNum)}\n\n${corpo}\n\nInformo que, caso necessário, os documentos originais seguem devidamente arquivados fisicamente e digitalmente (em nosso departamento).`;
     return { assunto, corpo };
+}
+
+// ---------------------------------------------------------------------
+// Manobra informada no grupo ("Martha Oldendorff atracado às 10:42 T-ORE")
+// → linha padronizada do navio na seção 6
+// ---------------------------------------------------------------------
+function manobraDoTexto(textoOriginal, navios = NAVIOS_PADRAO) {
+    const texto = normalizarTexto(textoOriginal).replace(/[*_~]/g, '').replace(/\s+/g, ' ').trim();
+    const n = semAcento(texto).toLowerCase();
+    const prev = /previs|previst|programad|\beta\b|\betb\b|\betd\b/.test(n);
+    const des = /desatraca(d|cao|ou|r)/.test(n);
+    let tipo = null;
+    if (/em manobra/.test(n)) tipo = des ? 'MANOBRA_DES' : 'MANOBRA';
+    else if (des) tipo = prev ? 'PREV_DESATRACACAO' : 'DESATRACACAO';
+    else if (/\batraca(d|cao|ou|r)/.test(n)) tipo = prev ? 'PREV_ATRACACAO' : 'ATRACACAO';
+    else if (/\bfunde(ad|io|ou)/.test(n)) tipo = 'FUNDEIO';
+    if (!tipo) return null;
+    const hora = normalizarHora(texto);
+    const dm = texto.match(/(\d{1,2})\/(\d{1,2})(?:\/\d{2,4})?/);
+    const data = dm ? `${dm[1].padStart(2, '0')}/${dm[2].padStart(2, '0')}` : '';
+    const conhecido = navioConhecido(texto, navios);
+    let navio = conhecido ? nomeNavioLimpo(conhecido.nome) : '';
+    if (!navio) {
+        const VERBO = '(?:foi\\s+|est[aá]\\s+|esta\\s+)?(?:atracad|desatracad|fundead|em manobra|com previs|previs|atraca[cç][aã]o|desatraca[cç][aã]o)';
+        const m = texto.match(new RegExp(`(?:navio|m\\/v|mv)\\s*[-:]?\\s*([A-Za-z0-9][A-Za-z0-9 .'-]{2,40}?)\\s*(?=[-–,:(.]|\\s+(?:foi|est[aá]|atracad|desatracad|fundead|em manobra|com previs|previs|no t|t-?ore|t-?oil|t\\.)|$)`, 'i'))
+            || texto.match(new RegExp(`^([A-Za-z0-9][A-Za-z0-9 .'-]{2,40}?)\\s*[-–,:]?\\s*${VERBO}`, 'i'))
+            || texto.match(/(?:atraca[cç][aã]o|desatraca[cç][aã]o|manobra)\s+(?:conclu[ií]da\s+)?(?:do|da)\s+(?:navio\s+)?([A-Za-z0-9][A-Za-z0-9 .'-]{2,40}?)\s*(?=[-–,:(.]|\s+(?:às|as|em|no|para|t-?ore|t-?oil)\b|$)/i);
+        if (m && !/^(navio|o navio|previs|atraca|desatraca)/i.test(m[1].trim())) navio = nomeNavioLimpo(m[1]).toUpperCase();
+    }
+    const terminal = normalizarTerminal(texto) || conhecido?.terminal || '';
+    const d = data ? ` em ${data}` : '', h = hora ? ` às ${hora}` : '';
+    const linha = {
+        ATRACACAO: `Atracado${d}${h}.`, DESATRACACAO: `Desatracado${d}${h}.`, FUNDEIO: `Fundeado${d}${h}.`,
+        MANOBRA: 'Em manobra de atracação.', MANOBRA_DES: 'Em manobra de desatracação.',
+        PREV_ATRACACAO: `Previsão de atracação${d}${h}.`, PREV_DESATRACACAO: `Previsão de desatracação${d}${h}.`
+    }[tipo];
+    return { tipo, navio, terminal, hora, data, linha };
+}
+
+// ---------------------------------------------------------------------
+// Mensagem padrão do grupo (o mesmo modelo que a equipe já usa).
+// O robô lê este formato 100%: o app gera a mensagem a partir da operação.
+// ---------------------------------------------------------------------
+function terminalPonto(t) { return String(t || '').toUpperCase().replace('-', '.'); }
+function mensagemPadrao(op) {
+    const U = v => String(v || '').trim().toUpperCase();
+    const hora = (h, suf) => { const n = normalizarHora(h); return n ? n + suf : ''; };
+    if (op.tipo === 'TRIPULACAO') {
+        const titulo = op.qtdEmbarque && op.qtdDesembarque
+            ? `Embarque de ${String(+op.qtdEmbarque).padStart(2, '0')} e Desembarque de ${formatarQtdTripulantes(op.qtdDesembarque)}`
+            : `${op.movimento || 'Embarque'} ${formatarQtdTripulantes(op.quantidade)}`;
+        const l = [titulo.charAt(0).toUpperCase() + titulo.slice(1), ''];
+        if (op.responsavel) l.push(`Motorista: ${U(op.responsavel)}`);
+        if (op.empresa) l.push(`Empresa: ${U(op.empresa)}`);
+        if (op.veiculo) l.push(`Veículo: ${U(op.veiculo)}`);
+        if (op.placa) l.push(`Placa: ${U(op.placa)}`);
+        if (op.agente) l.push(`Agente: ${U(op.agente)}`);
+        l.push(`Navio: ${U(op.navio)}`, `Terminal: ${terminalPonto(op.terminal)}`);
+        if (op.horaInicial) l.push(`Entrada na portaria: ${hora(op.horaInicial, 'Hs')}`);
+        if (op.horaFinal) l.push(`Saída na portaria: ${hora(op.horaFinal, 'Hs')}`);
+        if (op.horaRetorno) l.push(`Retorno: ${hora(op.horaRetorno, 'Hs')}`);
+        if (op.observacoes) l.push(`Observações: ${op.observacoes}`);
+        return l.join('\n');
+    }
+    const tipo = TIPOS_OPERACAO[op.tipo] || TIPOS_OPERACAO.OUTRA;
+    const provisao = ['RANCHO', 'MATERIAIS', 'DTA', 'AGUA'].includes(op.tipo);
+    const l = [`*${provisao ? 'ENTREGA DE PROVISÃO' : tipo.assunto}*`, `*Tipo:* ${U(tipo.tipo)}`, `*Terminal:* ${terminalPonto(op.terminal)}`, `*Navio:* ${U(op.navio)}`];
+    if (op.empresa) l.push(`*Empresa:* ${U(op.empresa)}`);
+    if (op.responsavel) l.push(`*Motoristas:* ${U(op.responsavel)}`);
+    if (op.agente) l.push(`*Agente:* ${U(op.agente)}`);
+    if (op.ajudante) l.push(`*Ajudantes:* ${U(op.ajudante)}`);
+    if (op.aBordo) l.push(`*A bordo:* ${U(op.aBordo)}`);
+    if (op.berco) l.push(`*Berço:* ${U(op.berco)}`);
+    if (op.bordo) l.push(`*Bordo:* ${op.bordo === 'E' ? 'ESTIBORDO' : op.bordo === 'B' ? 'BOMBORDO' : U(op.bordo)}`);
+    if (op.veiculo) l.push(`*Veículo:* ${U(op.veiculo)}`);
+    if (op.placa) l.push(`*Placa:* ${U(op.placa)}`);
+    if (op.horaInicial) l.push(`*Entrada Portaria:* ${hora(op.horaInicial, 'H')}`);
+    if (op.horaFinal) l.push(`*Saída Portaria:* ${hora(op.horaFinal, 'H')}`);
+    if (op.observacoes) l.push(`*Observações:* ${op.observacoes}`);
+    return l.join('\n');
 }
 
 function ehMensagemDeSaida(texto) {
@@ -998,6 +1099,6 @@ module.exports = {
     fichaVazia, naviosDeTexto, adicionarLinhaNavio, ehRelatorioDeTurno, lerRelatorio, fichaHerdada,
     formatarRelatorio, conferirFicha, formatarPassagemEscala, textoAviso,
     lerMensagemPadrao, classificarMensagem, extrairCampos, rascunhosOperacao, atividadeDasOperacoes,
-    tipoOperacaoDoTexto, movimentoDoTexto, resumoNavio, minutaEmail, numeroKm, navioConhecido, terminalDoNavio,
+    tipoOperacaoDoTexto, movimentoDoTexto, resumoNavio, minutaEmail, mensagemPadrao, manobraDoTexto, numeroKm, navioConhecido, terminalDoNavio,
     formatarQtdTripulantes, ehSemAlteracao, separarNomes, juntarNomes, nomeProprio, lerEquipesComPipe, nomeNavioLimpo, chaveNavio, acharNavio, trocarLinhaNavio
 };

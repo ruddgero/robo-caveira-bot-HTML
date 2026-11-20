@@ -7,11 +7,13 @@ const store = require('./store');
 const R = require('./relatorio');
 const usuarios = require('./usuarios');
 const email = require('./email');
+const NV = require('./navios');
 const { agora, novoId, semAcento, chaveTurno, normalizarHora, normalizarPlaca, lerPlacas, placasEmComum, normalizarTerminal, limparMarcador } = require('./util');
 
 const LIMITE_ENTRADA = 400;
 const LIMITE_RELATORIOS = 10;
 const DOZE_HORAS = 12 * 3600 * 1000;
+const SIMULACAO = process.env.CAVEIRA_SIMULACAO === '1';   // teste com conversa exportada: processa mensagens antigas
 
 const CONFIG_PADRAO = {
     grupoPublicacao: '',
@@ -23,6 +25,7 @@ const CONFIG_PADRAO = {
     emailPadrao: '',
     emailDiretoOficial: false,      // true = envia direto para a lista oficial (cópia para o líder)
     minutaNoWhatsapp: true,         // se o e-mail não puder sair, manda a minuta no WhatsApp do líder
+    modoTeste: false,               // true = publica relatório/planilha no WhatsApp do próprio líder (não vai para o grupo)
     vtrModelo: 'L200',
     vtrPlaca: 'TDG-8C89',
     atividadesBase: [
@@ -36,7 +39,8 @@ const CONFIG_PADRAO = {
 const estado = {
     config: null, ficha: null, versao: 0,
     entrada: [], relatorios: [], operacoes: [], pendencias: [],
-    escala: null, plantao: {}, auditoria: [], equipes: [], historico: []
+    escala: null, plantao: {}, auditoria: [], equipes: [], historico: [],
+    estadias: [], planilhas: []
 };
 
 const handlers = { alerta: null, plantaoMudou: null, minutaWhatsapp: null };
@@ -69,6 +73,8 @@ async function carregar() {
     estado.plantao = await store.get('plantao', {}) || {};
     estado.auditoria = await store.get('auditoria', []) || [];
     estado.equipes = await store.get('equipes', []) || [];
+    estado.estadias = await store.get('estadias', []) || [];
+    estado.planilhas = await store.get('planilhas', []) || [];
     estado.historico = await store.listarRelatorios();
     await deduplicarHistorico();
     estado.relatorios = await store.get('relatorios_us', null);
@@ -364,9 +370,40 @@ async function herdarDoHistorico(id, usuario) {
 // =====================================================================
 // Publicação: guarda no histórico e prepara o próximo turno
 // =====================================================================
+// =====================================================================
+// Planilha de controle de navios (T-ORE / T-OIL): só com o que foi validado no relatório publicado
+// =====================================================================
+function montarPlanilha(f, estadias) {
+    const ops = estado.operacoes.filter(o => o.fichaId === f.id);
+    const linhas = NV.atualizarEstadias(estadias, f, ops);
+    const t = agora();
+    return { id: novoId(), fichaId: f.id, turno: f.turno, data: f.data, criadoEm: t.iso, geradoEm: `${t.data} ${t.hora}`, linhas, resumo: NV.resumoTurno(linhas, ops) };
+}
+// Prévia (não grava nada): como ficaria a planilha se o turno fosse publicado agora
+function previaPlanilha() {
+    return montarPlanilha(estado.ficha, JSON.parse(JSON.stringify(estado.estadias)));
+}
+async function registrarPlanilha(f) {
+    const pub = montarPlanilha(f, estado.estadias);
+    estado.planilhas = [pub, ...estado.planilhas.filter(p => p.fichaId !== f.id)].slice(0, 120);
+    // estadias encerradas há mais de 120 dias saem da memória (a planilha do departamento é o arquivo oficial)
+    const limite = Date.now() - 120 * 864e5;
+    estado.estadias = estado.estadias.filter(e => !e.desatracacao || new Date(e.atualizadoEm || 0).getTime() > limite);
+    await store.set('estadias', estado.estadias);
+    await store.set('planilhas', estado.planilhas);
+    return pub;
+}
+function planilhaDoTurno(fichaId) { return estado.planilhas.find(p => p.fichaId === fichaId) || null; }
+function planilhaPorTurno(turno, data) { return estado.planilhas.find(p => p.turno === turno && p.data === data) || null; }
+function arquivoPlanilha(pub) {
+    const { gerarXlsx } = require('./xlsx');
+    return { nome: `Planilha_Navios_${pub.turno}_${String(pub.data).replace(/\//g, '-')}.xlsx`, dados: gerarXlsx(NV.abasPlanilha(pub)) };
+}
+
 async function aposPublicar(texto, usuario, { passarOps = [] } = {}) {
     const { rel } = await arquivarRelatorio({ texto, autor: usuario.nome, origem: 'publicado' });
     const f = estado.ficha;
+    try { await registrarPlanilha(f); } catch (e) { console.error('⚠️  [PLANILHA] ', e.message); }
     const ops = operacoesDaFicha(f.id);
     await arquivarFichaAtual();
 
@@ -378,7 +415,9 @@ async function aposPublicar(texto, usuario, { passarOps = [] } = {}) {
     nova.sistemas = { ...nova.sistemas, cftv: f.sistemas?.cftv || '', ca: f.sistemas?.ca || '✓ S/A' };
     // navios continuam; as linhas das operações deste turno não se repetem
     const linhasOps = new Set(ops.map(o => o.linhaNavio?.linha).filter(Boolean));
-    const copiar = lista => (lista || []).map(n => ({ ...n, id: novoId(), linhas: (n.linhas || []).filter(l => !linhasOps.has(l)) })).filter(n => n.linhas.length);
+    // navio que desatracou neste turno sai do próximo relatório
+    const saiu = n => (n.linhas || []).some(l => { const m = NV.lerManobra(l, f); return m && m.tipo === 'DESATRACACAO'; });
+    const copiar = lista => (lista || []).filter(n => !saiu(n)).map(n => ({ ...n, id: novoId(), linhas: (n.linhas || []).filter(l => !linhasOps.has(l)) })).filter(n => n.linhas.length);
     nova.navios = { tore: copiar(f.navios?.tore), toil: copiar(f.navios?.toil) };
     // quem assumiu agora sai no próximo
     const lista = f.equipes?.assumindoLista?.length ? f.equipes.assumindoLista : R.separarNomes(f.equipes?.assumindo);
@@ -418,6 +457,9 @@ function naviosConhecidos() {
             if (n.navio && !lista.some(x => R.chaveNavio(x.nome) === R.chaveNavio(n.navio))) lista.push({ nome: n.navio, terminal: term });
         }
     }
+    // navios atracados (estadias abertas) e das operações recentes: o terminal deles já é conhecido
+    for (const e of estado.estadias || []) if (!e.desatracacao && !lista.some(x => R.chaveNavio(x.nome) === R.chaveNavio(e.navio))) lista.push({ nome: e.navio, terminal: e.terminal });
+    for (const o of estado.operacoes || []) if (o.navio && o.terminal && !lista.some(x => R.chaveNavio(x.nome) === R.chaveNavio(o.navio))) lista.push({ nome: o.navio, terminal: o.terminal });
     for (const n of estado.config.navios || []) if (!lista.some(x => R.chaveNavio(x.nome) === R.chaveNavio(n.nome))) lista.push(n);
     return lista;
 }
@@ -687,7 +729,7 @@ async function excluirPendencia(id, usuario) {
 // Operações de bordo + e-mail para o líder de plantão
 // =====================================================================
 const CAMPOS_OPERACAO = ['tipo', 'navio', 'terminal', 'empresa', 'responsavel', 'agente', 'ajudante', 'aBordo', 'veiculo', 'placa', 'quantidade',
-    'movimento', 'horaInicial', 'horaFinal', 'horaRetorno', 'autoridades', 'autorizadoTerminal', 'observacoes', 'status', 'conferir', 'alertas'];
+    'movimento', 'qtdEmbarque', 'qtdDesembarque', 'berco', 'bordo', 'horaInicial', 'horaFinal', 'horaRetorno', 'autoridades', 'autorizadoTerminal', 'observacoes', 'status', 'conferir', 'alertas'];
 
 function limparOperacao(d) {
     const o = {};
@@ -899,6 +941,7 @@ async function receberMensagem(msg) {
         texto: msg.texto.trim(), ts: msg.timestamp || Date.now(), data: t.data, hora: t.hora,
         fromMe: !!msg.fromMe, sugestao: c.sugestao, urgente: c.urgente, campos: c.campos,
         rascunhos: c.rascunhos, estruturada: c.estruturada, atividade: c.atividade || '',
+        padronizada: padronizar(c),
         status: c.ruido ? 'ignorado' : 'pendente', destino: null, editado: !!msg.editaId
     };
     estado.entrada.push(item);
@@ -912,10 +955,15 @@ async function receberMensagem(msg) {
     salvarEntradaDepois();
 
     // Automação: só para mensagens recentes (inclui as que chegaram com o robô fora do ar)
-    const recente = Date.now() - item.ts < DOZE_HORAS;
+    const recente = SIMULACAO || Date.now() - item.ts < DOZE_HORAS;
     if (recente) await processarAutomatico(item).catch(e => console.error('⚠️  Automação:', e.message));
 
     if (item.urgente && Date.now() - item.ts < 30 * 60 * 1000 && handlers.alerta && estado.config.alertasAtivos) handlers.alerta(item);
+}
+
+// Informação do grupo reescrita no modelo padrão (uma mensagem por navio)
+function padronizar(c) {
+    return c.sugestao === 'OPERACAO' ? (c.rascunhos || []).filter(r => r.navio).map(R.mensagemPadrao).join('\n\n') : '';
 }
 
 // ---------------------------------------------------------------------
@@ -964,14 +1012,14 @@ async function mensagemEditada(item, textoNovo) {
     const t = agora(new Date(item.ts || Date.now()));
     const c = R.classificarMensagem(textoNovo, naviosConhecidos(), t.hora);
     item.textoOriginal = item.textoOriginal || item.texto;
-    Object.assign(item, { texto: textoNovo.trim(), editado: agora().iso, campos: c.campos, urgente: c.urgente, rascunhos: c.rascunhos, estruturada: c.estruturada, atividade: c.atividade || '', sugestao: c.sugestao });
+    Object.assign(item, { texto: textoNovo.trim(), editado: agora().iso, campos: c.campos, urgente: c.urgente, rascunhos: c.rascunhos, estruturada: c.estruturada, atividade: c.atividade || '', sugestao: c.sugestao, padronizada: padronizar(c) });
 
     const ops = (item.opIds || []).map(id => estado.operacoes.find(o => o.id === id)).filter(Boolean);
     if (!ops.length) {
         // ainda não tinha virado operação: reavalia do zero
         if (item.status !== 'usado') {
             item.status = c.ruido ? 'ignorado' : 'pendente'; item.destino = null; item.duplicataDe = null;
-            if (Date.now() - item.ts < DOZE_HORAS) await processarAutomatico(item).catch(e => console.error('⚠️  Automação:', e.message));
+            if (SIMULACAO || Date.now() - item.ts < DOZE_HORAS) await processarAutomatico(item).catch(e => console.error('⚠️  Automação:', e.message));
         }
         salvarEntradaDepois();
         return;
@@ -1018,11 +1066,51 @@ function operacaoParecida(r, item) {
         if (o.origem?.entradaId === item.id) return false;
         if (o.fichaId !== ficha.id && o.horaFinal) return false;
         if (!o.navio || !r.navio || R.chaveNavio(o.navio) !== R.chaveNavio(r.navio) || o.tipo !== r.tipo) return false;
-        if (r.tipo === 'TRIPULACAO' && (o.movimento !== r.movimento || (o.quantidade || '') !== (r.quantidade || ''))) return false;
+        if (r.tipo === 'TRIPULACAO' && o.movimento !== r.movimento) return false;
+        // placas diferentes = veículos diferentes = operações diferentes; mesma placa = mesma operação (correção)
         if (r.placa && o.placa) return mesmaPlaca(o.placa, r.placa);
+        if (r.tipo === 'TRIPULACAO' && (o.quantidade || '') !== (r.quantidade || '')) return false;
         const a = minutos(o.horaInicial), b = minutos(r.horaInicial);
         return a !== null && b !== null && Math.abs(a - b) <= 30;
     });
+}
+
+// A versão mais recente da mensagem substitui a operação já registrada
+async function substituirPelaUltima(o, r, item) {
+    const novos = limparOperacao({ ...r, horaFinal: r.horaFinal || o.horaFinal || '' });
+    registrarHistorico(o, novos, `Mensagem mais recente no grupo (${item.autor || ''} ${item.hora || ''})`.trim());
+    Object.assign(o, novos);
+    await alterarFicha(f => linhaDoNavio(f, o));
+    // a mensagem antiga deixa de valer
+    const antiga = estado.entrada.find(e => e.id === o.origem?.entradaId);
+    if (antiga && antiga.id !== item.id) {
+        antiga.opIds = (antiga.opIds || []).filter(id => id !== o.id);
+        antiga.destino = `Substituída pela mensagem de ${item.hora || ''}h`;
+    }
+    o.origem = { ...(o.origem || {}), entradaId: item.id, autor: item.autor, anteriores: [...(o.origem?.anteriores || []), o.origem?.entradaId].filter(Boolean) };
+    item.opIds = [...new Set([...(item.opIds || []), o.id])];
+    await salvarOperacoes();
+    auditar(null, 'Operação atualizada pela mensagem mais recente', `${o.navio} · ${R.TIPOS_OPERACAO[o.tipo]?.rotulo}`);
+}
+
+// Coloca a manobra no navio: a manobra realizada substitui a previsão/“em manobra” do mesmo tipo
+function aplicarManobra(f, mb) {
+    const chave = mb.terminal === 'T-OIL' ? 'toil' : 'tore';
+    f.navios = f.navios || { tore: [], toil: [] };
+    f.navios[chave] = f.navios[chave] || [];
+    let n = f.navios[chave].find(x => R.chaveNavio(x.navio) === R.chaveNavio(mb.navio));
+    if (!n) { n = { id: novoId(), navio: mb.navio, linhas: [] }; f.navios[chave].push(n); }
+    const nl = l => semAcento(l).toLowerCase();
+    const desatr = /DESATRACACAO|MANOBRA_DES/.test(mb.tipo);
+    n.linhas = (n.linhas || []).filter(l => {
+        const x = nl(l);
+        if (desatr && /previsao de desatracacao|em manobra de desatracacao/.test(x) && mb.tipo !== 'PREV_DESATRACACAO') return false;
+        if (!desatr && /previsao de atracacao|em manobra de atracacao|^em manobra/.test(x) && ['ATRACACAO', 'MANOBRA'].includes(mb.tipo)) return false;
+        if (mb.tipo.startsWith('PREV') && x.startsWith(nl(mb.linha).split(' em ')[0].split(' às ')[0])) return false;   // previsão nova substitui a antiga
+        if (mb.tipo === 'MANOBRA' && /^em manobra de atracacao/.test(x)) return false;
+        return true;
+    });
+    if (!n.linhas.includes(mb.linha)) n.linhas.push(mb.linha);
 }
 
 async function processarAutomatico(item) {
@@ -1064,20 +1152,20 @@ async function processarAutomatico(item) {
 
         const abertas = estado.operacoes.filter(o => !o.horaFinal);
         const criar = [];
-        let saidas = 0;
+        let saidas = 0, substituidas = 0;
         for (const r of item.rascunhos) {
             const aberta = r.placa && abertas.find(o => mesmaPlaca(o.placa, r.placa) && mesmoNavio(o.navio, r.navio));
             if (aberta && (r.horaFinal || ehSaida)) {
                 await registrarSaida(aberta.id, r.horaFinal || item.campos?.hora || item.hora, null);
                 saidas++;
             } else if (!ehSaida || r.horaFinal) {
+                // mesma operação mandada de novo (reenviada/corrigida): vale a ÚLTIMA versão.
+                // A operação existente é atualizada (o valor antigo fica no histórico) — não vira duas.
                 const igual = operacaoParecida(r, item);
                 if (igual) {
-                    item.status = 'pendente';
-                    item.duplicataDe = igual.id;
-                    item.destino = `⚠️ Possível duplicidade: já existe ${R.TIPOS_OPERACAO[igual.tipo]?.rotulo || 'operação'} no ${igual.navio}${igual.horaInicial ? ' (' + igual.horaInicial + 'h)' : ''} — conferir`;
-                    salvarEntradaDepois();
-                    return;
+                    await substituirPelaUltima(igual, r, item);
+                    substituidas++;
+                    continue;
                 }
                 criar.push(r);
             }
@@ -1086,11 +1174,29 @@ async function processarAutomatico(item) {
             const novas = await registrarOperacoes(criar, { entradaId: item.id, autor: item.autor });
             item.opIds = [...(item.opIds || []), ...novas.map(o => o.id)];
         }
-        if (criar.length || saidas) {
+        if (criar.length || saidas || substituidas) {
             item.status = 'usado';
-            item.destino = [criar.length ? `${criar.length > 1 ? criar.length + ' operações' : 'Operação'} de bordo` : '', saidas ? 'saída registrada' : ''].filter(Boolean).join(' + ') + ' (automático)';
+            item.destino = [criar.length ? `${criar.length > 1 ? criar.length + ' operações' : 'Operação'} de bordo` : '', saidas ? 'saída registrada' : '',
+                substituidas ? 'versão mais recente substituiu a anterior' : ''].filter(Boolean).join(' + ') + ' (automático)';
             salvarEntradaDepois();
         }
+        return;
+    }
+    // manobra informada no grupo → linha padronizada no navio (seção 6)
+    if (item.sugestao === 'NAVIO') {
+        const mb = R.manobraDoTexto(item.texto, naviosConhecidos());
+        if (!mb) return;
+        const falta = [!mb.navio && 'navio', !mb.terminal && 'terminal', ['ATRACACAO', 'DESATRACACAO'].includes(mb.tipo) && !mb.hora && 'horário'].filter(Boolean);
+        if (falta.length) {
+            item.status = 'pendente';
+            item.destino = `⚠️ A confirmar: manobra sem ${falta.join(' / ')} identificado`;
+            salvarEntradaDepois();
+            return;
+        }
+        await alterarFicha(f => aplicarManobra(f, mb));
+        item.status = 'usado';
+        item.destino = `Manobra registrada: ${mb.navio} · ${mb.linha} (automático)`;
+        salvarEntradaDepois();
         return;
     }
     if ((item.sugestao === 'SAIDA' || ehSaida) && item.campos?.placa) {
@@ -1220,5 +1326,6 @@ module.exports = {
     criarPendencia, atualizarPendencia, editarPendencia, concluirPendencia, reabrirPendencia, excluirPendencia,
     registrarOperacoes, registrarSaida, atualizarOperacao, excluirOperacao, enviarEmailOperacao, marcarEmailOperacao, destinatarioEmail,
     receberMensagem, atualizarItemEntrada,
+    previaPlanilha, planilhaDoTurno, planilhaPorTurno, arquivoPlanilha,
     iniciarEscala, continuarEscala, construirPassagem, salvarPassagem, restaurarPassagem, textoPassagem
 };
