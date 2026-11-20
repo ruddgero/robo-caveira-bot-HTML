@@ -8,6 +8,7 @@ const R = require('./relatorio');
 const usuarios = require('./usuarios');
 const email = require('./email');
 const NV = require('./navios');
+const ORG = require('./organograma');
 const { agora, novoId, semAcento, chaveTurno, normalizarHora, normalizarPlaca, lerPlacas, placasEmComum, normalizarTerminal, limparMarcador } = require('./util');
 
 const LIMITE_ENTRADA = 400;
@@ -40,7 +41,7 @@ const estado = {
     config: null, ficha: null, versao: 0,
     entrada: [], relatorios: [], operacoes: [], pendencias: [],
     escala: null, plantao: {}, auditoria: [], equipes: [], historico: [],
-    estadias: [], planilhas: [], sugestoes: []
+    estadias: [], planilhas: [], sugestoes: [], organograma: null
 };
 
 const handlers = { alerta: null, plantaoMudou: null, minutaWhatsapp: null };
@@ -76,6 +77,11 @@ async function carregar() {
     estado.estadias = await store.get('estadias', []) || [];
     estado.planilhas = await store.get('planilhas', []) || [];
     estado.sugestoes = await store.get('sugestoes_pendencia', []) || [];
+    estado.organograma = await store.get('organograma', null);
+    if (!estado.organograma) {
+        estado.organograma = { equipes: ORG.quadroInicial(), substituicoes: [], escala: ORG.ESCALA_PADRAO };
+        await store.set('organograma', estado.organograma);
+    }
     estado.historico = await store.listarRelatorios();
     await deduplicarHistorico();
     estado.relatorios = await store.get('relatorios_us', null);
@@ -197,13 +203,7 @@ async function assumirPlantao(usuario) {
         await store.set('escala', estado.escala);
     }
     await store.set('plantao', estado.plantao);
-    const eq = equipeDoUsuario(usuario);
-    if (eq && estado.ficha.equipes?.modo !== 'MANUAL') {
-        await alterarFicha(f => {
-            f.equipes = { ...(f.equipes || {}), modo: 'EQUIPES', saindoEquipeId: eq.id, saindoLista: [...eq.membros], saindo: R.juntarNomes(eq.membros) };
-            if (/conforme/i.test(f.equipes.assumindo || '')) Object.assign(f.equipes, { assumindo: '', assumindoLista: [], assumindoEquipeId: null });
-        });
-    }
+    if (estado.ficha.equipes?.modo !== 'MANUAL') await alterarFicha(f => preencherEquipes(f, { lider: usuario }));
     auditar(usuario, 'Assumiu o plantão', `${estado.ficha.turno} ${estado.ficha.data}`);
     if (handlers.plantaoMudou) handlers.plantaoMudou(usuario.id);
     return estado.plantao;
@@ -252,6 +252,92 @@ async function salvarEquipe(dados, usuario) {
     auditar(usuario, 'Salvou equipe', `${nome}: ${membros.join(', ')}`);
     return eq;
 }
+// ---------------------------------------------------------------------
+// Organograma + escala 4×4: item 8 preenchido sozinho (equipe de serviço / equipe que assume)
+// ---------------------------------------------------------------------
+function escalaDoTurno(f = estado.ficha) {
+    const esc = estado.organograma?.escala;
+    const prox = ORG.proximoTurno(f.turno, f.data);
+    return { saindo: ORG.equipeDoTurno(f.turno, f.data, esc), assumindo: ORG.equipeDoTurno(prox.turno, prox.data, esc), proximo: prox };
+}
+// saindo = quem está de serviço; assumindo = equipe do próximo turno (substituições por período já aplicadas)
+function preencherEquipes(f, { lider = null, forcar = false } = {}) {
+    if (!estado.organograma || f.equipes?.modo === 'MANUAL') return f;
+    const org = estado.organograma;
+    const esc = escalaDoTurno(f);
+    const e = f.equipes = { ...(f.equipes || {}) };
+    const vazio = l => !(l || []).length || /conforme/i.test(R.juntarNomes(l));
+    if (forcar || vazio(e.saindoLista)) {
+        const id = (forcar && e.saindoEquipeId) || esc.saindo;   // respeita a equipe escolhida pelo líder
+        const q = id && ORG.equipeEfetiva(org, id, f.data);
+        if (q) Object.assign(e, { saindoEquipeId: q.id, saindoLista: [...q.nomes] });
+    } else if (!e.saindoEquipeId && esc.saindo) e.saindoEquipeId = esc.saindo;
+    // líder que assumiu o plantão e não é o líder da equipe da escala: está cobrindo o líder neste turno
+    const pl = lider && ORG.pessoaPorNome(org, lider.nome);
+    if (pl?.cargo === 'LIDER' && e.saindoLista?.length && !e.saindoLista.some(n => semAcento(n).toLowerCase() === semAcento(pl.nome).toLowerCase())) {
+        const q = ORG.equipeEfetiva(org, e.saindoEquipeId, f.data);
+        const lidEsc = q?.membros.find(m => m.cargo === 'LIDER');
+        e.saindoLista = e.saindoLista.map(n => (lidEsc && n === lidEsc.nome ? pl.nome : n));
+        if (!e.saindoLista.includes(pl.nome)) e.saindoLista = [pl.nome, ...e.saindoLista];
+    }
+    if (forcar || vazio(e.assumindoLista)) {
+        const id = (forcar && e.assumindoEquipeId) || esc.assumindo;
+        const q = id && ORG.equipeEfetiva(org, id, esc.proximo.data);
+        if (q) Object.assign(e, { assumindoEquipeId: q.id, assumindoLista: [...q.nomes] });
+    }
+    e.modo = 'EQUIPES';
+    e.saindo = R.juntarNomes(e.saindoLista || []) || e.saindo || 'Conforme escala';
+    e.assumindo = R.juntarNomes(e.assumindoLista || []) || e.assumindo || 'Conforme escala';
+    return f;
+}
+
+function organogramaParaTela() {
+    const org = estado.organograma, f = estado.ficha;
+    const esc = escalaDoTurno(f);
+    const nome = id => ORG.pessoa(org, id)?.nome || '?';
+    return {
+        equipes: org.equipes.map(e => ({ ...e, efetiva: ORG.equipeEfetiva(org, e.id, f.data) })),
+        substituicoes: (org.substituicoes || []).filter(x => ORG.diaNum(x.ate) >= ORG.diaNum(f.data) - 1)
+            .map(x => ({ ...x, titular: nome(x.titularId), substituto: nome(x.substitutoId) })).sort((a, b) => ORG.diaNum(a.de) - ORG.diaNum(b.de)),
+        escala: { ...esc, atual: { turno: f.turno, data: f.data }, dias: ORG.proximosDias(f.data, 8, org.escala), ordem: org.escala.ordem }
+    };
+}
+async function salvarOrganograma(usuario, acao, detalhe) {
+    await store.set('organograma', estado.organograma);
+    auditar(usuario, acao, detalhe);
+    // substituições por período valem na hora para o item 8 do turno (se ninguém digitou à mão)
+    await alterarFicha(f => preencherEquipes(f, { forcar: f.equipes?.modo !== 'MANUAL' && f.equipes?.automatico !== false }));
+}
+async function criarSubstituicao(dados, usuario) {
+    const s = ORG.novaSubstituicao(estado.organograma, dados, usuario);
+    await salvarOrganograma(usuario, 'Registrou substituição', `${ORG.pessoa(estado.organograma, s.substitutoId)?.nome} cobre ${ORG.pessoa(estado.organograma, s.titularId)?.nome} (${s.de}–${s.ate}, ${s.motivo})`);
+    return s;
+}
+async function excluirSubstituicao(id, usuario) {
+    estado.organograma.substituicoes = (estado.organograma.substituicoes || []).filter(x => x.id !== id);
+    await salvarOrganograma(usuario, 'Cancelou substituição', id);
+}
+async function salvarPessoa(dados, usuario) {
+    const org = estado.organograma;
+    const nome = R.nomeProprio(dados.nome || '');
+    if (nome.length < 3) throw erro('Informe o nome completo.');
+    const cargo = dados.cargo === 'LIDER' ? 'LIDER' : 'OPERADOR';
+    const eq = org.equipes.find(e => e.id === dados.equipeId);
+    if (!eq) throw erro('Escolha a equipe.');
+    let p = null;
+    for (const e of org.equipes) { const i = e.membros.findIndex(m => m.id === dados.id); if (i >= 0) { p = e.membros.splice(i, 1)[0]; break; } }
+    p = { ...(p || { id: novoId() }), nome, cargo, base: String(dados.base || '').trim() || 'Campos', funcao: String(dados.funcao || '').trim() || ORG.CARGOS[cargo] };
+    eq.membros.push(p);
+    await salvarOrganograma(usuario, 'Atualizou o organograma', `${nome} · ${eq.nome}`);
+    return p;
+}
+async function excluirPessoa(id, usuario) {
+    const org = estado.organograma;
+    for (const e of org.equipes) e.membros = e.membros.filter(m => m.id !== id);
+    org.substituicoes = (org.substituicoes || []).filter(x => x.titularId !== id && x.substitutoId !== id);
+    await salvarOrganograma(usuario, 'Removeu colaborador do organograma', id);
+}
+
 async function excluirEquipe(id, usuario) {
     const eq = estado.equipes.find(e => e.id === id);
     if (!eq) throw erro('Equipe não encontrada.', 404);
@@ -427,6 +513,7 @@ async function aposPublicar(texto, usuario, { passarOps = [] } = {}) {
     nova.equipes = lista.length
         ? { modo: 'EQUIPES', saindo: R.juntarNomes(lista), saindoLista: [...lista], saindoEquipeId: f.equipes?.assumindoEquipeId || null, assumindo: '', assumindoLista: [], assumindoEquipeId: null }
         : { modo: 'ESCALA', saindo: 'Conforme escala', assumindo: 'Conforme escala', saindoLista: [], assumindoLista: [] };
+    preencherEquipes(nova);
     nova.anterior = { assumindo: f.equipes?.assumindo || '', kmFinal: km, turno: f.turno, data: f.data };
     nova.herdadoDe = { publicado: true, relatorioId: rel?.id || null, autor: usuario.nome, data: f.data, turno: f.turno, capturadoEm: agora().iso, encontrados: [], faltando: [] };
 
@@ -475,6 +562,7 @@ function nomesDaEquipe() {
     const add = n => { const nome = R.nomeProprio(n); const k = semAcento(nome).toLowerCase(); if (nome.length >= 2 && !ocultos.has(k) && !mapa.has(k)) mapa.set(k, nome); };
     (cfg.equipe || []).forEach(add);
     for (const e of estado.equipes || []) (e.membros || []).forEach(add);
+    for (const e of estado.organograma?.equipes || []) e.membros.forEach(m => add(m.nome));
     const f = estado.ficha || {};
     [f.equipes?.saindo, f.equipes?.assumindo, f.anterior?.assumindo].forEach(t => R.separarNomes(t).forEach(add));
     for (const r of estado.relatorios || []) [r.dados?.equipes?.saindo, r.dados?.equipes?.assumindo].forEach(t => R.separarNomes(t).forEach(add));
@@ -536,7 +624,7 @@ async function herdar(relatorioId, usuario) {
     const rel = relatorioId ? estado.relatorios.find(r => r.id === relatorioId) : estado.relatorios[0];
     if (!rel) throw erro('Nenhum relatório da equipe anterior foi capturado. Use "Colar relatório".', 404);
     await arquivarFichaAtual();
-    const nova = R.fichaHerdada(rel, estado.ficha, estado.config);
+    const nova = preencherEquipes(R.fichaHerdada(rel, estado.ficha, estado.config));
     // avisos do relatório recebido viram pendências (sem duplicar os que já estão abertos)
     for (const av of rel.dados.avisos || []) {
         if (!(av.titulo || av.texto)) continue;
@@ -556,6 +644,7 @@ async function novaFichaEmBranco(usuario) {
     nova.vtr.kmInicial = nova.vtr.kmFinal = estado.ficha?.vtr?.kmFinal ?? null;
     nova.navios = JSON.parse(JSON.stringify(estado.ficha?.navios || { tore: [], toil: [] }));
     nova.anterior = { assumindo: estado.ficha?.equipes?.assumindo || '', kmFinal: estado.ficha?.vtr?.kmFinal ?? null, turno: estado.ficha?.turno || '', data: estado.ficha?.data || '' };
+    preencherEquipes(nova);
     auditar(usuario, 'Começou turno em branco');
     return salvarFicha(nova, undefined, { substituir: true });
 }
@@ -1558,6 +1647,7 @@ module.exports = {
     salvarConfig, liderDePlantao, assumirPlantao, nomesDaEquipe, adicionarNomeEquipe, removerNomeEquipe,
     salvarFicha, herdar, novaFichaEmBranco, marcarPublicado, textoRelatorio, conferencia, avisosAbertos, operacoesDaFicha,
     registrarRelatorio, dispensarRelatorioPendente, aposPublicar, equipeDoUsuario, salvarEquipe, excluirEquipe,
+    organogramaParaTela, criarSubstituicao, excluirSubstituicao, salvarPessoa, excluirPessoa, escalaDoTurno, preencherEquipes,
     arquivarRelatorio, historicoOrdenado, importarMensagens, herdarDoHistorico,
     criarPendencia, atualizarPendencia, editarPendencia, concluirPendencia, reabrirPendencia, excluirPendencia,
     registrarOperacoes, registrarSaida, atualizarOperacao, excluirOperacao, enviarEmailOperacao, marcarEmailOperacao, destinatarioEmail,

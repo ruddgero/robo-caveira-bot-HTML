@@ -229,6 +229,24 @@ assert.strictEqual(NU.separarTitulo('CÂMERA DA FILTRAGEM: A PTA SERÁ DA EMPRES
 assert.strictEqual(NU.maiusculaInicial('contatar o Alex. aguardando a TI\nsegunda linha'), 'Contatar o Alex. Aguardando a TI\nSegunda linha');
 assert.deepStrictEqual(NU.separarTitulo('dock station', 'consultar o e-mail'), { titulo: 'DOCK STATION', texto: 'Consultar o e-mail' });
 
+// ---- Escala 4×4 (Amarela → Azul → Verde → Branca) e substituições
+const ORG = require('./organograma');
+assert.strictEqual(ORG.equipeDoTurno('DIURNO', '19/11/2026'), 'AZUL');
+assert.strictEqual(ORG.equipeDoTurno('NOTURNO', '19/11/2026'), 'AMARELA');
+assert.strictEqual(ORG.equipeDoTurno('DIURNO', '20/11/2026'), 'AZUL');
+assert.strictEqual(ORG.equipeDoTurno('DIURNO', '21/11/2026'), 'VERDE');
+assert.strictEqual(ORG.equipeDoTurno('NOTURNO', '21/11/2026'), 'AZUL');
+assert.strictEqual(ORG.equipeDoTurno('DIURNO', '23/11/2026'), 'BRANCA');
+assert.strictEqual(ORG.equipeDoTurno('DIURNO', '27/11/2026'), 'AZUL');
+const org = { equipes: ORG.quadroInicial(), substituicoes: [] };
+const felipe = ORG.pessoaPorNome(org, 'Felipe Furtado'), marcos = ORG.pessoaPorNome(org, 'Marcos Duarte'), wallace = ORG.pessoaPorNome(org, 'Wallace Chagas');
+assert.throws(() => ORG.novaSubstituicao(org, { titularId: felipe.id, substitutoId: wallace.id, de: '01/12/2026', ate: '15/12/2026' }), /operador cobre só operador/);
+ORG.novaSubstituicao(org, { titularId: felipe.id, substitutoId: marcos.id, de: '01/12/2026', ate: '15/12/2026', motivo: 'Férias' });
+assert.deepStrictEqual(ORG.equipeEfetiva(org, 'AZUL', '05/12/2026').nomes, ['Ruddgero Ribeiro', 'Marcos Duarte', 'Laís Campos']);
+assert.deepStrictEqual(ORG.equipeEfetiva(org, 'AZUL', '16/12/2026').nomes, ['Ruddgero Ribeiro', 'Felipe Furtado', 'Laís Campos']);
+const ops = ORG.opcoesSubstituto(org, 'Ewerton Brito', '05/12/2026').opcoes;
+assert.ok(ops.every(o => o.cargo === 'OPERADOR') && !ops.some(o => o.nome === 'Mariana Freitas' || o.nome === 'Felipe Furtado'));
+
 // ---- Outras classificações
 const s = m => R.classificarMensagem(m).sugestao;
 assert.strictEqual(s('bom dia a todos'), 'IGNORAR');

@@ -55,6 +55,11 @@ Entrada na portaria: 14:50Hs
   Se a mensagem disser que foi resolvido ("reparada", "operacional"…), aparece **💡 Parece resolvido** com a tratativa já preenchida.
 - **💡 Sugestões do robô**: atividade com "favor acompanhar", "aguardando", "próxima semana"… que ainda não tem pendência. `✓ Criar` em um toque.
 
+## Equipes, escala 4×4 e férias
+- O item 8 já vem preenchido pela escala (Amarela → Azul → Verde → Branca): **equipe saindo** = de serviço, **assumindo** = próximo turno.
+- Toque num nome para **substituir**: aparecem só pessoas do mesmo cargo (feristas primeiro, depois quem está de folga). **Só este turno** ou **Por período (férias)**.
+- **☰ › Organograma, escala e férias**: próximos 8 dias da escala, férias/substituições e o quadro operacional.
+
 ## Errou a mensagem?
 - **Apague e mande de novo** ou **edite** no grupo: o robô sempre fica com a **última versão**.
 - O que o robô não tiver certeza vai para **⚠️ A confirmar** (terminal diferente do navio atracado, nome parecido, sem horário…). Toque e confirme.
