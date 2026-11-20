@@ -220,6 +220,12 @@ const porto = lin.find(l => l.valores.navio === 'PORTO');
 assert.ok(porto.valores.desatracHora === '12:25' && porto.valores.embarque === 13 && porto.valores.desembarque === 14 && porto.parcial);
 assert.strictEqual(NV.atualizarEstadias(estadias, fichaT, [{ id: 'x1', ...em, data: '19/11/2026' }]).length, 0, 'o mesmo turno de novo não soma duas vezes');
 
+// ---- Pendências: título curto, descrição com o resto
+const NU = require('./nucleo');
+assert.deepStrictEqual(NU.separarTitulo('DOCK STATION: Consultar o e-mail encaminhado', ''), { titulo: 'DOCK STATION', texto: 'Consultar o e-mail encaminhado' });
+assert.deepStrictEqual(NU.separarTitulo('DOCK STATION:', ''), { titulo: 'DOCK STATION', texto: '' });
+assert.strictEqual(NU.separarTitulo('CÂMERA DA FILTRAGEM: A PTA SERÁ DA EMPRESA RIP E O TIME DA DIGITAL ACOMPANHA', '').texto, 'A PTA será da empresa RIP e o time da digital acompanha');
+
 // ---- Outras classificações
 const s = m => R.classificarMensagem(m).sugestao;
 assert.strictEqual(s('bom dia a todos'), 'IGNORAR');

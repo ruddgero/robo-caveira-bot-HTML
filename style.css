@@ -331,3 +331,16 @@ html, body { overflow-x: clip; }
 .progresso-etapas > div { height: 100%; background: var(--verde); }
 .check.feito { text-decoration: line-through; color: var(--mudo); }
 .contadores { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+
+/* v5.1 · cartão limpo da pendência + dica ao passar o mouse */
+.pend-cartao { position: relative; display: grid; gap: 6px; width: 100%; padding: 11px 12px; border-radius: 12px; border: 1px solid var(--borda); background: var(--fundo); text-align: left; cursor: pointer; color: inherit; font: inherit; }
+.pend-cartao:hover, .pend-cartao:focus-visible { border-color: #33456b; }
+.pend-cartao.concluida { opacity: .7; }
+.pend-titulo { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pend-resumo { font-size: 12.5px; color: var(--mudo); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.corta { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 60%; }
+.pend-cartao .dica { display: none; position: absolute; left: 0; right: 0; top: calc(100% + 6px); z-index: 30; padding: 12px; border-radius: 12px; border: 1px solid #33456b; background: #0b1324; box-shadow: 0 12px 30px rgba(0,0,0,.45); gap: 6px; white-space: normal; pointer-events: none; }
+.pend-cartao .dica-texto { font-size: 13px; white-space: pre-wrap; }
+@media (hover: hover) and (pointer: fine) {
+  .pend-cartao:hover .dica { display: grid; }
+}
