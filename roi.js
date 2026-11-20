@@ -18,7 +18,7 @@ const GRUPOS_ROI = {
 const MAX_FOTOS = 8;
 const CONTROLE_INICIAL = { 2026: 30 };     // último número do controle anual entregue pela equipe (030/2026)
 
-const estado = { rois: [], controle: { ...CONTROLE_INICIAL }, carregado: false };
+const estado = { rois: [], controle: { ...CONTROLE_INICIAL }, locais: {}, carregado: false };   // locais: grafia → nome confirmado
 let marca = 0;
 const nucleo = () => require('./nucleo');   // carregado sob demanda (evita dependência circular)
 
@@ -120,6 +120,7 @@ function agruparLocais(lista) {
 async function carregar() {
     estado.rois = await store.get('rois', []) || [];
     estado.controle = { ...CONTROLE_INICIAL, ...(await store.get('rois_controle', {}) || {}) };
+    estado.locais = await store.get('rois_locais', {}) || {};
     estado.carregado = true;
     marca++;
 }
@@ -570,7 +571,136 @@ function detalhe(id) {
     return { ...r, grupo: GRUPOS_ROI[r.tipo] || '', linhaItem7: r.numero ? linhaItem7(r) : '', linhaControle: r.numero ? linhaControle(r) : [] };
 }
 
+
+// ------------------------- Indicador de ocorrências -------------------------
+const MESES = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
+const limparLocal = l => limpo(l).replace(/\s+/g, ' ');
+
+// grafia → nome do local no indicador: grafias parecidas juntas, complemento junto do local principal
+// ("Portaria Principal (Saída de veículos)" → "Portaria Principal") e, por cima, o que o admin confirmou.
+function mapaDeLocais(rois = estado.rois) {
+    const grupos = agruparLocais(rois.map(r => r.local));
+    const ordem = grupos.slice().sort((a, b) => a.nome.length - b.nome.length);
+    const destino = new Map(grupos.map(g => [g, g]));
+    for (const g of grupos) {
+        const k = chaveLocal(g.nome);
+        const base = ordem.find(b => b !== g && chaveLocal(b.nome).length >= 6 && k.startsWith(chaveLocal(b.nome) + ' ')
+            && /^\s*[(\-–,:]/.test(g.nome.slice(b.nome.length)));
+        if (base) destino.set(g, destino.get(base));
+    }
+    const mapa = new Map();
+    for (const g of grupos) for (const v of g.variantes) mapa.set(v, destino.get(g).nome);
+    for (const [v, nome] of Object.entries(estado.locais || {})) if (nome) mapa.set(v, nome);
+    return mapa;
+}
+
+function listaDeLocais() {
+    const mapa = mapaDeLocais();
+    const validos = estado.rois.filter(r => r.status === 'registrado');
+    const porNome = new Map();
+    for (const r of validos) {
+        const v = limparLocal(r.local); if (!v) continue;
+        const nome = mapa.get(v) || v;
+        const g = porNome.get(nome) || { nome, total: 0, variantes: {} };
+        g.total++; g.variantes[v] = (g.variantes[v] || 0) + 1;
+        porNome.set(nome, g);
+    }
+    return [...porNome.values()].map(g => ({ ...g, variantes: Object.entries(g.variantes).map(([nome, total]) => ({ nome, total, confirmado: !!estado.locais[nome] })) }))
+        .sort((a, b) => b.total - a.total);
+}
+
+// renomear um local do indicador (mesmo nome de outro = juntar). O texto do ROI não muda.
+async function renomearLocal(variantes, nome, u) {
+    for (const v of variantes || []) {
+        const k = limparLocal(v); if (!k) continue;
+        if (limpo(nome)) estado.locais[k] = limparLocal(nome); else delete estado.locais[k];
+    }
+    await store.set('rois_locais', estado.locais);
+    marca++;
+    nucleo().auditar(u, 'Indicador: local ajustado', `${(variantes || []).join(' | ')} → ${nome || '(automático)'}`);
+    return listaDeLocais();
+}
+
+function mesAnoDe(r) {
+    const m = String(r.data || '').match(/^\d{2}\/(\d{2})\/(\d{4})$/);
+    return m ? { mes: +m[1], ano: +m[2] } : { mes: 0, ano: r.ano };
+}
+const contarTipos = lista => Object.fromEntries(Object.keys(GRUPOS_ROI).map(g => [g, lista.filter(r => r.tipo === g).length]).filter(([, n]) => n));
+const pct = (a, b) => (b ? Math.round(a / b * 100) : 0);
+const fmt1 = n => n.toFixed(1).replace('.', ',');
+
+function indicadorOcorrencias({ ano, mes } = {}) {
+    const hoje = agora().data, [dHoje, mHoje, aHoje] = hoje.split('/').map(Number);
+    const validos = estado.rois.filter(r => r.status === 'registrado').map(r => ({ ...r, ...mesAnoDe(r) }));
+    const anos = [...new Set(validos.map(r => r.ano))].sort((a, b) => b - a);
+    ano = +ano || (anos.includes(aHoje) ? aHoje : anos[0] || aHoje);
+    mes = +mes || 0;
+    const mapa = mapaDeLocais();
+    const localDe = r => mapa.get(limparLocal(r.local)) || limparLocal(r.local) || '(sem local)';
+    const doAno = validos.filter(r => r.ano === ano);
+    const escopo = mes ? doAno.filter(r => r.mes === mes) : doAno;
+    const anoCorrente = ano === aHoje;
+
+    // comparação com o mesmo período do ano anterior
+    const limiteMes = mes || (anoCorrente ? mHoje : 12);
+    const noPeriodo = r => (mes ? r.mes === mes : r.mes <= limiteMes) && (!anoCorrente || mes || r.mes < mHoje || (+String(r.data).slice(0, 2) <= dHoje));
+    const anterior = validos.filter(r => r.ano === ano - 1 && noPeriodo(r)).length;
+
+    // mês de referência × média dos 3 meses anteriores
+    const refMes = mes || (anoCorrente ? mHoje : 12);
+    const contaMes = (a, m) => validos.filter(r => r.ano === a && r.mes === m).length;
+    const tres = [1, 2, 3].map(k => { const d = new Date(Date.UTC(ano, refMes - 1 - k, 1)); return contaMes(d.getUTCFullYear(), d.getUTCMonth() + 1); });
+    const media = tres.reduce((a, b) => a + b, 0) / 3;
+    const noMes = contaMes(ano, refMes);
+    const parcial = anoCorrente && refMes === mHoje;
+
+    const meses = Array.from({ length: anoCorrente ? mHoje : 12 }, (_, i) => {
+        const lista = doAno.filter(r => r.mes === i + 1);
+        return { mes: i + 1, nome: MESES[i].slice(0, 3), total: lista.length, porTipo: contarTipos(lista), simulados: lista.filter(r => r.simulado).length };
+    });
+    const tipos = contarTipos(escopo);
+    const locaisMap = new Map();
+    for (const r of escopo) { const n = localDe(r); const l = locaisMap.get(n) || []; l.push(r); locaisMap.set(n, l); }
+    const locais = [...locaisMap].map(([nome, l]) => ({ nome, total: l.length, porTipo: contarTipos(l), simulados: l.filter(r => r.simulado).length }))
+        .sort((a, b) => b.total - a.total || a.nome.localeCompare(b.nome));
+    const porAno = anos.slice().sort().map(a => {
+        const l = validos.filter(r => r.ano === a);
+        return { ano: a, total: l.length, porTipo: contarTipos(l), simulados: l.filter(r => r.simulado).length, parcial: a === aHoje };
+    });
+    const simulados = escopo.filter(r => r.simulado);
+
+    // análises em frases
+    const frases = [];
+    const total = escopo.length;
+    const periodo = mes ? `de ${MESES[mes - 1].toLowerCase()}` : 'do ano';
+    const topTipo = Object.entries(tipos).sort((a, b) => b[1] - a[1])[0];
+    if (topTipo) frases.push(`${GRUPOS_ROI[topTipo[0]]} (${topTipo[0]}) responde por ${pct(topTipo[1], total)}% dos ROIs ${periodo} (${topTipo[1]} de ${total}).`);
+    if (locais[0] && total > 1) {
+        const l = locais[0], unico = Object.keys(l.porTipo).length === 1 ? Object.keys(l.porTipo)[0] : '';
+        frases.push(`${l.nome} concentra ${l.total} dos ${total} ROIs (${pct(l.total, total)}%)${unico && l.total > 1 ? `, todos de ${GRUPOS_ROI[unico].toLowerCase()}` : ''}.`);
+    }
+    const nomeRef = MESES[refMes - 1];
+    if (!mes || mes === refMes) {
+        const comp = noMes > media + 0.05 ? 'acima' : noMes < media - 0.05 ? 'abaixo' : 'igual';
+        frases.push(`${nomeRef} ${parcial ? 'tem' : 'teve'} ${noMes} ROI${noMes === 1 ? '' : 's'}${parcial ? ' até agora' : ''}, ${comp === 'igual' ? 'igual à' : comp + ' da'} média dos últimos 3 meses (${fmt1(media)}).`);
+    }
+    if (!mes) {
+        const pico = meses.slice().sort((a, b) => b.total - a.total)[0];
+        if (pico && pico.total) frases.push(`${MESES[pico.mes - 1]} foi o mês com mais registros (${pico.total}).`);
+    }
+    if (simulados.length) frases.push(`${simulados.length} dos ${total} ROIs ${periodo} são simulados (contam no total).`);
+    if (!total) frases.push(`Nenhum ROI registrado ${periodo}.`);
+
+    return {
+        ano, mes, anos, hoje, grupos: GRUPOS_ROI, total, anterior, anoAnterior: ano - 1, parcialAno: anoCorrente && !mes,
+        mesRef: { mes: refMes, nome: nomeRef, total: noMes, media: Math.round(media * 10) / 10, parcial },
+        tipos, simulados: simulados.length, meses, locais, porAno, frases,
+        lista: escopo.sort((a, b) => b.ano - a.ano || b.seq - a.seq).slice(0, 200).map(r => ({ id: r.id, numero: r.numero, tipo: r.tipo, data: r.data, local: localDe(r), simulado: !!r.simulado, descricao: r.descricao || r.oque || '' }))
+    };
+}
+
 module.exports = {
+    indicadorOcorrencias, listaDeLocais, renomearLocal, mapaDeLocais,
     GRUPOS_ROI, MAX_FOTOS, estado, carregar, marcaRois, listar, detalhe, criar, editar, registrar, cancelar,
     adicionarFoto, removerFoto, lerFoto, importarControle, lerControle, resumoGeral, locaisConhecidos, proximoNumero,
     xlsxDoRoi, xlsxControle, montarXlsxRoi, linhaItem7, linhaControle, codigoDoTipo, adivinharTipo, agruparLocais, lerNumero, numeroRoi

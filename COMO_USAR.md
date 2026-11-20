@@ -68,6 +68,12 @@ Entrada na portaria: 14:50Hs
 - Depois de registrado: **⬇️ Excel** (mesmo modelo, com a aba Evidências Fotográficas), **🖨️ PDF**, **Salvar correção** (o número não muda e a correção fica no histórico) ou **Cancelar ROI** (com motivo; o número fica reservado).
 - **⬇️ Controle AAAA (Excel)**: a planilha anual de controle, nas mesmas colunas da equipe. O administrador traz os anos anteriores em **📥 Importar controle anual**.
 
+## Indicadores › Ocorrências
+- Total do período comparado com o **mesmo período do ano anterior**, o mês atual (parcial) contra a **média dos últimos 3 meses**, tipo mais frequente e simulados (contam no total, com o selo **SIMULADO**).
+- Gráficos por mês, por local e por ano: **passe o mouse ou toque na barra** para ver os tipos e as quantidades. Filtro por ano e mês. Sem metas e sem separação por equipe ou turno.
+- **Leitura do período**: as análises em frases são geradas sozinhas.
+- **📍 Locais** (admin): grafias parecidas e locais com complemento já vêm juntos; para juntar dois locais, dê o mesmo nome aos dois. O texto do ROI não muda.
+
 ## Errou a mensagem?
 - **Apague e mande de novo** ou **edite** no grupo: o robô sempre fica com a **última versão**.
 - O que o robô não tiver certeza vai para **⚠️ A confirmar** (terminal diferente do navio atracado, nome parecido, sem horário…). Toque e confirme.
