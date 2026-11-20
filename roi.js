@@ -566,6 +566,21 @@ function xlsxControle(ano) {
     return { nome: `Relatorio_de_Ocorrencias_Internas_${ano}.xlsx`, dados: gerarXlsx([{ nome: `ROI ${ano}`, cabecalho: true, larguras: [30, 11, 14, 30, 22, 20, 60, 16, 16, 20], linhas }]) };
 }
 
+// Controle de todos os anos: uma aba por ano (serve também para importar de novo)
+function xlsxControleTodos() {
+    const anos = [...new Set(estado.rois.filter(r => r.status !== 'rascunho' && r.ano).map(r => r.ano))].sort();
+    const abas = anos.map(ano => {
+        const doAno = estado.rois.filter(r => r.ano === ano && r.status !== 'rascunho').sort((a, b) => a.seq - b.seq);
+        return { nome: `ROI ${ano}`, cabecalho: true, larguras: [30, 11, 14, 30, 22, 20, 60, 16, 16, 20], linhas: [CABECALHO_CONTROLE, ...doAno.map(r => {
+            const l = linhaControle(r);
+            if (r.status === 'cancelado') l[6] = `CANCELADO — ${r.motivoCancelamento || ''}`;
+            return l;
+        })] };
+    });
+    if (!abas.length) abas.push({ nome: 'ROI', cabecalho: true, linhas: [CABECALHO_CONTROLE] });
+    return { nome: `Controle_ROI_${anos[0] || ''}${anos.length > 1 ? '-' + anos[anos.length - 1] : ''}.xlsx`, dados: gerarXlsx(abas) };
+}
+
 function detalhe(id) {
     const r = roi(id);
     return { ...r, grupo: GRUPOS_ROI[r.tipo] || '', linhaItem7: r.numero ? linhaItem7(r) : '', linhaControle: r.numero ? linhaControle(r) : [] };
@@ -632,7 +647,7 @@ const fmt1 = n => n.toFixed(1).replace('.', ',');
 function indicadorOcorrencias({ ano, mes } = {}) {
     const hoje = agora().data, [dHoje, mHoje, aHoje] = hoje.split('/').map(Number);
     const validos = estado.rois.filter(r => r.status === 'registrado').map(r => ({ ...r, ...mesAnoDe(r) }));
-    const anos = [...new Set(validos.map(r => r.ano))].sort((a, b) => b - a);
+    const anos = [...new Set([...validos.map(r => r.ano), aHoje])].sort((a, b) => b - a);
     ano = +ano || (anos.includes(aHoje) ? aHoje : anos[0] || aHoje);
     mes = +mes || 0;
     const mapa = mapaDeLocais();
@@ -703,5 +718,5 @@ module.exports = {
     indicadorOcorrencias, listaDeLocais, renomearLocal, mapaDeLocais,
     GRUPOS_ROI, MAX_FOTOS, estado, carregar, marcaRois, listar, detalhe, criar, editar, registrar, cancelar,
     adicionarFoto, removerFoto, lerFoto, importarControle, lerControle, resumoGeral, locaisConhecidos, proximoNumero,
-    xlsxDoRoi, xlsxControle, montarXlsxRoi, linhaItem7, linhaControle, codigoDoTipo, adivinharTipo, agruparLocais, lerNumero, numeroRoi
+    xlsxDoRoi, xlsxControle, xlsxControleTodos, montarXlsxRoi, linhaItem7, linhaControle, codigoDoTipo, adivinharTipo, agruparLocais, lerNumero, numeroRoi
 };

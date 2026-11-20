@@ -98,7 +98,7 @@ function servirArquivo(req, res, caminhoUrl) {
         res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' }); return res.end('Não encontrado');
     }
     const ext = path.extname(arquivo);
-    res.writeHead(200, { 'Content-Type': TIPOS[ext] || 'application/octet-stream', 'Cache-Control': ext === '.html' || rel === '/sw.js' ? 'no-cache' : 'public, max-age=120' });
+    res.writeHead(200, { 'Content-Type': TIPOS[ext] || 'application/octet-stream', 'Cache-Control': ['.html', '.js', '.css', '.json'].includes(ext) ? 'no-cache' : 'public, max-age=120' });
     fs.createReadStream(arquivo).pipe(res);
 }
 
@@ -204,7 +204,8 @@ rota('GET', '/api/estado', async (req, res, { u }) => {
         pendentesEntrada: e.entrada.filter(i => i.status === 'pendente').length,
         urgentes: e.entrada.filter(i => i.status === 'pendente' && i.urgente).length,
         pendenciasAbertas: e.pendencias.filter(p => p.status === 'ABERTA').length,
-        marcas: marcas()
+        marcas: marcas(),
+        versao: require('./package.json').version
     };
 });
 
@@ -463,7 +464,7 @@ rota('POST', '/api/operacoes/:id/marcar', async (req, res, { corpo, params, u })
 rota('GET', '/api/roi', async () => ({ rois: ROI.listar(), proximo: ROI.proximoNumero(), grupos: ROI.GRUPOS_ROI, locais: ROI.locaisConhecidos(), maxFotos: ROI.MAX_FOTOS }));
 rota('GET', '/api/roi/resumo', async () => ROI.resumoGeral());
 rota('GET', '/api/roi/controle/:ano/xlsx', async (req, res, { params }) => {
-    const arq = ROI.xlsxControle(+params.ano);
+    const arq = params.ano === 'todos' ? ROI.xlsxControleTodos() : ROI.xlsxControle(+params.ano);
     return { __arquivo: true, tipo: XLSX, nome: arq.nome, dados: arq.dados };
 });
 rota('POST', '/api/roi/importar', async (req, res, { corpo, u }) => {
