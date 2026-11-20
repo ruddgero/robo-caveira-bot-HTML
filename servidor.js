@@ -126,7 +126,7 @@ function marcas() {
     const e = nucleo.estado;
     return {
         ficha: e.versao,
-        pendencias: `${e.pendencias.length}:${e.pendencias.reduce((s, p) => s + (p.historico?.length || 0), 0)}:${e.pendencias.filter(p => p.status === 'ABERTA').length}`,
+        pendencias: `${e.pendencias.length}:${e.pendencias.reduce((s, p) => s + (p.historico?.length || 0) + (p.etapas || []).filter(x => x.feito).length, 0)}:${e.pendencias.filter(p => p.status === 'ABERTA').length}:${e.sugestoes.length}:${e.pendencias.map(p => (p.responsavel || '') + (p.prazo || '')).join('').length}`,
         operacoes: `${e.operacoes.length}:${e.operacoes.filter(o => o.horaFinal).length}:${e.operacoes.filter(o => o.email?.enviadoEm || o.email?.erro).length}:${e.operacoes.reduce((s, o) => s + (o.historico?.length || 0) + (o.conferir?.length || 0) + (o.horaRetorno ? 1 : 0), 0)}`,
         relatorios: `${e.relatorios[0]?.id || ''}:${e.relatorios[0]?.herdadoEm || ''}:${e.plantao.relatorioPendenteId || ''}`,
         historico: e.historico.length,
@@ -219,7 +219,8 @@ rota('GET', '/api/central', async () => {
         relatorioPendente: resumoRelatorio(e.relatorios.find(r => r.id === e.plantao.relatorioPendenteId)),
         escala: e.escala ? { id: e.escala.id, dataInicio: e.escala.dataInicio, iniciadaPor: e.escala.iniciadaPor } : null,
         emailAtivo: email.configurado(),
-        destinatario: nucleo.destinatarioEmail()
+        destinatario: nucleo.destinatarioEmail(),
+        sugestoes: e.sugestoes
     };
 });
 
@@ -379,6 +380,9 @@ rota('POST', '/api/relatorios', async (req, res, { corpo, u }) => {
 // --- Entrada
 rota('GET', '/api/entrada', async () => ({ itens: nucleo.estado.entrada.slice().reverse() }));
 rota('POST', '/api/entrada/:id', async (req, res, { corpo, params }) => ({ item: await nucleo.atualizarItemEntrada(params.id, corpo) }));
+rota('POST', '/api/entrada/:id/confirmar', async (req, res, { corpo, params, u }) => ({ item: await nucleo.confirmarEntrada(params.id, corpo.escolhas || {}, u) }), { perfis: LIDERES });
+rota('POST', '/api/sugestoes/:id/aceitar', async (req, res, { corpo, params, u }) => ({ pendencia: pendenciaParaTela(await nucleo.aceitarSugestao(params.id, corpo || {}, u)) }));
+rota('POST', '/api/sugestoes/:id/descartar', async (req, res, { params, u }) => { await nucleo.descartarSugestao(params.id, u); return { ok: true }; });
 
 // --- Pendências
 rota('GET', '/api/pendencias', async () => ({ pendencias: nucleo.estado.pendencias.map(pendenciaParaTela) }));

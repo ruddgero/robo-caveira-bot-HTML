@@ -40,7 +40,7 @@ const estado = {
     config: null, ficha: null, versao: 0,
     entrada: [], relatorios: [], operacoes: [], pendencias: [],
     escala: null, plantao: {}, auditoria: [], equipes: [], historico: [],
-    estadias: [], planilhas: []
+    estadias: [], planilhas: [], sugestoes: []
 };
 
 const handlers = { alerta: null, plantaoMudou: null, minutaWhatsapp: null };
@@ -75,6 +75,7 @@ async function carregar() {
     estado.equipes = await store.get('equipes', []) || [];
     estado.estadias = await store.get('estadias', []) || [];
     estado.planilhas = await store.get('planilhas', []) || [];
+    estado.sugestoes = await store.get('sugestoes_pendencia', []) || [];
     estado.historico = await store.listarRelatorios();
     await deduplicarHistorico();
     estado.relatorios = await store.get('relatorios_us', null);
@@ -404,6 +405,7 @@ async function aposPublicar(texto, usuario, { passarOps = [] } = {}) {
     const { rel } = await arquivarRelatorio({ texto, autor: usuario.nome, origem: 'publicado' });
     const f = estado.ficha;
     try { await registrarPlanilha(f); } catch (e) { console.error('⚠️  [PLANILHA] ', e.message); }
+    try { await pendenciasDasAtividades(f); } catch (e) { console.error('⚠️  [PENDÊNCIAS] ', e.message); }
     const ops = operacoesDaFicha(f.id);
     await arquivarFichaAtual();
 
@@ -629,11 +631,19 @@ async function dispensarRelatorioPendente(usuario) {
 // =====================================================================
 // Pendências (avisos e Digital) com histórico e tratativas
 // =====================================================================
-function novaPendencia({ tipo, titulo, texto }, usuario, origem = '', ficha = estado.ficha) {
+const TIPOS_PENDENCIA = ['AVISO', 'DIGITAL', 'PROJETO'];
+function limparEtapas(etapas) {
+    return (Array.isArray(etapas) ? etapas : String(etapas || '').split('\n'))
+        .map(e => (typeof e === 'string' ? { texto: e } : e))
+        .map(e => ({ id: e.id || novoId(), texto: String(e.texto || '').trim(), prazo: String(e.prazo || '').trim(), feito: !!e.feito, feitoEm: e.feitoEm || null }))
+        .filter(e => e.texto);
+}
+function novaPendencia({ tipo, titulo, texto, responsavel, prazo, etapas }, usuario, origem = '', ficha = estado.ficha) {
     const t = agora();
     return {
-        id: novoId(), tipo: tipo === 'DIGITAL' ? 'DIGITAL' : 'AVISO',
+        id: novoId(), tipo: TIPOS_PENDENCIA.includes(tipo) ? tipo : 'AVISO',
         titulo: String(titulo || '').trim().toUpperCase(), texto: String(texto || '').trim(),
+        responsavel: String(responsavel || '').trim(), prazo: String(prazo || '').trim(), etapas: limparEtapas(etapas),
         status: 'ABERTA', origem, criadoEm: t.iso, criadoPor: quem(usuario),
         turno: ficha?.turno || '', data: ficha?.data || t.data,
         historico: [{ tipo: 'CRIACAO', em: t.iso, data: t.data.slice(0, 5), hora: t.hora, por: usuario ? usuario.nome : 'Robô', texto: origem }]
@@ -652,7 +662,7 @@ async function criarPendencia(dados, usuario, origem = 'Registrada manualmente')
     if (!p.titulo) p.titulo = p.texto.split('\n')[0].slice(0, 60).toUpperCase();
     estado.pendencias.push(p);
     await salvarPendencias();
-    auditar(usuario, `Criou ${p.tipo === 'DIGITAL' ? 'pendência da Digital' : 'aviso'}`, p.titulo);
+    auditar(usuario, `Criou ${p.tipo === 'DIGITAL' ? 'pendência da Digital' : p.tipo === 'PROJETO' ? 'projeto' : 'aviso'}`, p.titulo);
     return p;
 }
 
@@ -662,24 +672,40 @@ function pendencia(id) {
     return p;
 }
 
-async function atualizarPendencia(id, texto, usuario) {
+async function atualizarPendencia(id, texto, usuario, { origem = '' } = {}) {
     const p = pendencia(id);
     if (!String(texto || '').trim()) throw erro('Escreva a atualização.');
     const t = agora();
-    p.historico.push({ tipo: 'ATUALIZACAO', em: t.iso, data: t.data.slice(0, 5), hora: t.hora, por: usuario.nome, texto: texto.trim() });
+    p.historico.push({ tipo: 'ATUALIZACAO', em: t.iso, data: t.data.slice(0, 5), hora: t.hora, por: usuario?.nome || 'Robô', texto: texto.trim(), ...(origem ? { origem } : {}) });
     await salvarPendencias();
     auditar(usuario, 'Atualizou pendência', p.titulo);
     return p;
 }
 
-async function editarPendencia(id, { titulo, texto, tipo, tratativa }, usuario) {
+async function editarPendencia(id, { titulo, texto, tipo, tratativa, responsavel, prazo, etapas }, usuario) {
     const p = pendencia(id);
+    if (responsavel !== undefined) p.responsavel = String(responsavel || '').trim();
+    if (prazo !== undefined) p.prazo = String(prazo || '').trim();
+    if (etapas !== undefined) {
+        const novas = limparEtapas(etapas);
+        const t = agora();
+        // etapa marcada como feita entra no histórico do projeto
+        for (const e of novas) {
+            const antes = (p.etapas || []).find(x => x.id === e.id);
+            if (e.feito && !antes?.feito) {
+                e.feitoEm = t.iso;
+                p.historico.push({ tipo: 'ATUALIZACAO', em: t.iso, data: t.data.slice(0, 5), hora: t.hora, por: usuario?.nome || 'Robô', texto: `Etapa concluída: ${e.texto}` });
+            }
+            if (!antes && (p.etapas || []).length) p.historico.push({ tipo: 'ATUALIZACAO', em: t.iso, data: t.data.slice(0, 5), hora: t.hora, por: usuario?.nome || 'Robô', texto: `Nova etapa: ${e.texto}${e.prazo ? ' (prazo ' + e.prazo + ')' : ''}` });
+        }
+        p.etapas = novas;
+    }
     if (titulo !== undefined) {
         if (!String(titulo).trim()) throw erro('O título não pode ficar vazio.');
         p.titulo = String(titulo).trim().toUpperCase();
     }
     if (texto !== undefined) p.texto = String(texto).trim();
-    if (tipo === 'AVISO' || tipo === 'DIGITAL') p.tipo = tipo;
+    if (TIPOS_PENDENCIA.includes(tipo)) p.tipo = tipo;
     if (tratativa !== undefined && p.status === 'CONCLUIDA') {
         if (!String(tratativa).trim()) throw erro('Informe como foi resolvido.');
         p.tratativa = String(tratativa).trim();
@@ -700,6 +726,7 @@ async function concluirPendencia(id, { tratativa, registrarAtividade }, usuario)
     p.concluidoEm = t.iso;
     p.concluidoPor = quem(usuario);
     p.historico.push({ tipo: 'CONCLUSAO', em: t.iso, data: t.data.slice(0, 5), hora: t.hora, por: usuario.nome, texto: p.tratativa });
+    p.sugestaoConclusao = null;
     await salvarPendencias();
     if (registrarAtividade) {
         await alterarFicha(f => f.atividades.push({ id: novoId(), texto: `${t.hora}h ${p.titulo}: ${p.tratativa}` }));
@@ -723,6 +750,90 @@ async function excluirPendencia(id, usuario) {
     estado.pendencias = estado.pendencias.filter(x => x.id !== id);
     await salvarPendencias();
     auditar(usuario, 'Excluiu pendência', p.titulo);
+}
+
+// =====================================================================
+// Pendências que se atualizam sozinhas (atividades do relatório e mensagens do grupo)
+// =====================================================================
+const PALAVRAS_VAZIAS = new Set(['para', 'com', 'pela', 'pelo', 'sobre', 'entre', 'apos', 'ainda', 'sera', 'foram', 'esta', 'estao', 'mais', 'muito', 'todas', 'todos',
+    'realizado', 'realizada', 'realizados', 'realizadas', 'equipe', 'turno', 'conjunto', 'verificacao', 'informou', 'segue', 'favor', 'acompanhar', 'atividade', 'atividades',
+    'pendencia', 'aviso', 'gentileza', 'hoje', 'amanha', 'semana', 'proxima', 'dia', 'feito', 'ficou', 'fica', 'nao', 'sim', 'uma', 'umas', 'dos', 'das', 'que', 'tem']);
+function palavrasChave(t) {
+    return [...new Set(semAcento(t).toLowerCase().replace(/[^a-z0-9 ]/g, ' ').split(/\s+/)
+        .filter(w => (w.length >= 4 || /\d/.test(w)) && !PALAVRAS_VAZIAS.has(w)).map(w => w.replace(/s$/, '')))];
+}
+// Pendência aberta que fala do mesmo assunto (título + descrição)
+function pendenciaDoAssunto(texto) {
+    const alvo = new Set(palavrasChave(texto));
+    let melhor = null, nota = 0;
+    for (const p of estado.pendencias.filter(x => x.status === 'ABERTA')) {
+        const tit = palavrasChave(p.titulo);
+        if (!tit.length) continue;
+        const emComum = tit.filter(w => alvo.has(w)).length;
+        const desc = palavrasChave(p.texto).filter(w => alvo.has(w)).length;
+        const n = emComum / tit.length + Math.min(desc, 4) * 0.05;
+        if (emComum >= Math.min(2, tit.length) && emComum / tit.length >= 0.5 && n > nota) { nota = n; melhor = p; }
+    }
+    return melhor;
+}
+const RE_RESOLVIDO = /\b(reparad[oa]s?|resolvid[oa]s?|normalizad[oa]s?|conclu[ií]d[oa]s?|sanad[oa]s?|instalad[oa]s?|substitu[ií]d[oa]s?|liberad[oa]s?|operacional|funcionando|restabelecid[oa]s?|corrigid[oa]s?)\b/i;
+const RE_ACOMPANHAR = /favor acompanhar|acompanhar|aguardando|aguarda|pr[oó]xima semana|pr[oó]ximos passos|definir[aá]|ir[aá] (marcar|agendar|enviar|retornar|verificar)|pendente|em andamento|previs[aã]o de retorno|agendad[oa]/i;
+
+function registrarNoHistorico(p, texto, por, origem) {
+    const limpo = String(texto || '').trim();
+    if (!limpo || p.historico.some(h => h.texto === limpo)) return false;
+    const t = agora();
+    p.historico.push({ tipo: 'ATUALIZACAO', em: t.iso, data: t.data.slice(0, 5), hora: t.hora, por, texto: limpo, origem });
+    // texto diz que foi resolvido: sugere concluir (a baixa só sai com a tratativa confirmada pelo líder)
+    if (RE_RESOLVIDO.test(semAcento(limpo)) || RE_RESOLVIDO.test(limpo)) p.sugestaoConclusao = { texto: limpo, por, em: t.iso };
+    return true;
+}
+
+// Ao publicar: atividades do turno atualizam as pendências do mesmo assunto; as que pedem acompanhamento viram sugestão
+async function pendenciasDasAtividades(f) {
+    const base = new Set((estado.config.atividadesBase || []).map(x => semAcento(x).toLowerCase()));
+    let mudou = false;
+    for (const a of f.atividades || []) {
+        const texto = limparMarcador(a.texto || '');
+        if (!texto || base.has(semAcento(texto).toLowerCase()) || (a.opIds || []).length) continue;
+        const p = pendenciaDoAssunto(texto);
+        if (p) { if (registrarNoHistorico(p, texto, `Relatório ${f.turno} ${f.data}`, 'relatorio')) mudou = true; continue; }
+        if (RE_ACOMPANHAR.test(texto) && !estado.sugestoes.some(s => s.texto === texto)) {
+            estado.sugestoes.push({ id: novoId(), texto, tipo: R.classificarMensagem(texto).sugestao === 'DIGITAL' ? 'DIGITAL' : 'AVISO',
+                titulo: texto.split(/[:.;–-]/)[0].slice(0, 60).toUpperCase(), origem: `Atividade do relatório ${f.turno} ${f.data}`, criadoEm: agora().iso });
+        }
+    }
+    estado.sugestoes = estado.sugestoes.slice(-40);
+    if (mudou) await salvarPendencias();
+    await store.set('sugestoes_pendencia', estado.sugestoes);
+}
+
+async function aceitarSugestao(id, dados, usuario) {
+    const s = estado.sugestoes.find(x => x.id === id);
+    if (!s) throw erro('Sugestão não encontrada.', 404);
+    const p = await criarPendencia({ tipo: dados.tipo || s.tipo, titulo: dados.titulo || s.titulo, texto: dados.texto || s.texto, responsavel: dados.responsavel, prazo: dados.prazo }, usuario, s.origem);
+    estado.sugestoes = estado.sugestoes.filter(x => x.id !== id);
+    await store.set('sugestoes_pendencia', estado.sugestoes);
+    return p;
+}
+async function descartarSugestao(id, usuario) {
+    estado.sugestoes = estado.sugestoes.filter(x => x.id !== id);
+    await store.set('sugestoes_pendencia', estado.sugestoes);
+    auditar(usuario, 'Descartou sugestão de pendência');
+}
+
+// Mensagem do grupo sobre um assunto que já tem pendência: entra no histórico dela
+async function mensagemNaPendencia(item) {
+    if (!['DIGITAL', 'AVISO', 'ATIVIDADE', 'OCORRENCIA'].includes(item.sugestao) || item.urgente) return false;
+    const p = pendenciaDoAssunto(item.texto);
+    if (!p) return false;
+    if (!registrarNoHistorico(p, item.texto, `${item.autor || 'Grupo'} (grupo)`, 'grupo')) return false;
+    await salvarPendencias();
+    item.status = 'usado';
+    item.destino = `Atualizou a pendência: ${p.titulo}${p.sugestaoConclusao ? ' · sugere concluir' : ''}`;
+    item.pendenciaId = p.id;
+    salvarEntradaDepois();
+    return true;
 }
 
 // =====================================================================
@@ -832,6 +943,9 @@ async function registrarOperacoes(rascunhos, { atividadeTexto = '', entradaId = 
         }
     });
     for (const o of novas) o.atividadeId = atividadeId;
+    // a mensagem do grupo sabe quais operações gerou (para apagar/editar depois)
+    const item = entradaId ? estado.entrada.find(e => e.id === entradaId) : null;
+    if (item) { item.opIds = [...new Set([...(item.opIds || []), ...novas.map(o => o.id)])]; salvarEntradaDepois(); }
     await salvarOperacoes();
     auditar(usuario, usuario ? 'Registrou operação de bordo' : 'Registrou operação automaticamente', novas.map(o => `${R.TIPOS_OPERACAO[o.tipo]?.rotulo} · ${o.navio}`).join(' | '));
     for (const o of novas) if (o.horaFinal) enviarEmailOperacao(o, { usuario }).catch(() => {});
@@ -1044,7 +1158,7 @@ async function mensagemEditada(item, textoNovo) {
     // a edição acrescentou navios: cria as operações novas
     if (rasc.length > ops.length) {
         const novas = await registrarOperacoes(rasc.slice(ops.length), { entradaId: item.id, autor: item.autor });
-        item.opIds = [...item.opIds, ...novas.map(o => o.id)];
+        item.opIds = [...new Set([...item.opIds, ...novas.map(o => o.id)])];
     }
     const base = String(item.destino || 'Operação de bordo').replace(/ · editada no grupo.*$/, '');
     item.destino = `${base} · editada no grupo${alteradas ? ` (${alteradas} operação(ões) corrigida(s))` : ''}`;
@@ -1073,6 +1187,48 @@ function operacaoParecida(r, item) {
         const a = minutos(o.horaInicial), b = minutos(r.horaInicial);
         return a !== null && b !== null && Math.abs(a - b) <= 30;
     });
+}
+
+// "A confirmar" resolvido pelo líder (botões de um toque ou formulário curto)
+async function confirmarEntrada(id, escolhas = {}, usuario) {
+    const item = estado.entrada.find(e => e.id === id);
+    if (!item) throw erro('Mensagem não encontrada.', 404);
+    const esc = {};
+    for (const k of ['terminal', 'navio', 'horaInicial', 'hora']) if (escolhas[k]) esc[k] = String(escolhas[k]).trim();
+    if (esc.terminal) esc.terminal = normalizarTerminal(esc.terminal) || esc.terminal.toUpperCase();
+    if (item.sugestao === 'NAVIO') {
+        const mb = R.manobraDoTexto(item.texto, naviosConhecidos());
+        if (!mb) throw erro('Não encontrei a manobra nesta mensagem. Use "Outro destino".');
+        if (esc.terminal) mb.terminal = esc.terminal;
+        if (esc.navio) mb.navio = esc.navio.toUpperCase();
+        if (esc.hora) mb.hora = normalizarHora(esc.hora);
+        if (!mb.navio || !mb.terminal) throw erro('Informe o navio e o terminal.');
+        mb.linha = R.linhaManobra(mb);
+        await alterarFicha(f => aplicarManobra(f, mb));
+        item.destino = `Manobra registrada: ${mb.navio} · ${mb.linha} (confirmado por ${usuario.nome})`;
+    } else {
+        const rasc = (item.rascunhos || []).filter(r => r.navio || esc.navio).map(r => ({
+            ...r, ...(esc.terminal ? { terminal: esc.terminal } : {}), ...(esc.navio ? { navio: esc.navio.toUpperCase() } : {}),
+            ...(esc.horaInicial ? { horaInicial: normalizarHora(esc.horaInicial) } : {}), conferir: [], escolhas: []
+        }));
+        if (!rasc.length) throw erro('Nada para confirmar nesta mensagem. Use "Outro destino".');
+        if (rasc.some(r => !r.terminal)) throw erro('Escolha o terminal.');
+        const criar = [];
+        for (const r of rasc) {
+            const igual = operacaoParecida(r, item);
+            if (igual) await substituirPelaUltima(igual, r, item); else criar.push(r);
+        }
+        if (criar.length) {
+            const novas = await registrarOperacoes(criar, { entradaId: item.id, autor: item.autor, usuario });
+            item.opIds = [...new Set([...(item.opIds || []), ...novas.map(o => o.id)])];
+        }
+        item.destino = `Operação confirmada por ${usuario.nome}`;
+    }
+    item.status = 'usado';
+    item.escolhas = [];
+    salvarEntradaDepois();
+    auditar(usuario, 'Confirmou mensagem do grupo', item.destino);
+    return item;
 }
 
 // A versão mais recente da mensagem substitui a operação já registrada
@@ -1172,7 +1328,7 @@ async function processarAutomatico(item) {
         }
         if (criar.length) {
             const novas = await registrarOperacoes(criar, { entradaId: item.id, autor: item.autor });
-            item.opIds = [...(item.opIds || []), ...novas.map(o => o.id)];
+            item.opIds = [...new Set([...(item.opIds || []), ...novas.map(o => o.id)])];
         }
         if (criar.length || saidas || substituidas) {
             item.status = 'usado';
@@ -1190,6 +1346,7 @@ async function processarAutomatico(item) {
         if (falta.length) {
             item.status = 'pendente';
             item.destino = `⚠️ A confirmar: manobra sem ${falta.join(' / ')} identificado`;
+            item.escolhas = !mb.terminal && mb.navio && !falta.includes('horário') ? [{ campo: 'terminal', rotulo: 'Terminal', opcoes: ['T-ORE', 'T-OIL'] }] : [];
             salvarEntradaDepois();
             return;
         }
@@ -1199,6 +1356,7 @@ async function processarAutomatico(item) {
         salvarEntradaDepois();
         return;
     }
+    if (await mensagemNaPendencia(item)) return;
     if ((item.sugestao === 'SAIDA' || ehSaida) && item.campos?.placa) {
         const abertas = estado.operacoes.filter(o => !o.horaFinal && mesmaPlaca(o.placa, item.campos.placa));
         if (abertas.length) {
@@ -1327,5 +1485,6 @@ module.exports = {
     registrarOperacoes, registrarSaida, atualizarOperacao, excluirOperacao, enviarEmailOperacao, marcarEmailOperacao, destinatarioEmail,
     receberMensagem, atualizarItemEntrada,
     previaPlanilha, planilhaDoTurno, planilhaPorTurno, arquivoPlanilha,
+    aceitarSugestao, descartarSugestao, confirmarEntrada, pendenciaDoAssunto,
     iniciarEscala, continuarEscala, construirPassagem, salvarPassagem, restaurarPassagem, textoPassagem
 };
