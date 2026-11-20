@@ -225,6 +225,9 @@ const NU = require('./nucleo');
 assert.deepStrictEqual(NU.separarTitulo('DOCK STATION: Consultar o e-mail encaminhado', ''), { titulo: 'DOCK STATION', texto: 'Consultar o e-mail encaminhado' });
 assert.deepStrictEqual(NU.separarTitulo('DOCK STATION:', ''), { titulo: 'DOCK STATION', texto: '' });
 assert.strictEqual(NU.separarTitulo('CÂMERA DA FILTRAGEM: A PTA SERÁ DA EMPRESA RIP E O TIME DA DIGITAL ACOMPANHA', '').texto, 'A PTA será da empresa RIP e o time da digital acompanha');
+// padrão de escrita: título em caixa alta, demais textos com a primeira letra de cada frase/linha em maiúscula
+assert.strictEqual(NU.maiusculaInicial('contatar o Alex. aguardando a TI\nsegunda linha'), 'Contatar o Alex. Aguardando a TI\nSegunda linha');
+assert.deepStrictEqual(NU.separarTitulo('dock station', 'consultar o e-mail'), { titulo: 'DOCK STATION', texto: 'Consultar o e-mail' });
 
 // ---- Outras classificações
 const s = m => R.classificarMensagem(m).sugestao;

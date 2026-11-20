@@ -641,6 +641,14 @@ function fraseLegivel(t) {
     return min.replace(/[\wÀ-ÿ-]+/g, w => (SIGLAS.has(w.toUpperCase()) ? w.toUpperCase() : w));
 }
 
+// Padrão de escrita das pendências: TÍTULO EM CAIXA ALTA; demais textos com a primeira letra de cada frase/linha em maiúscula
+function maiusculaInicial(t) {
+    const txt = fraseLegivel(String(t || '').trim());
+    return txt.split('\n').map(l => l.trim()).filter(Boolean)
+        .map(l => l.replace(/(^|[.!?]\s+)([a-zà-ÿ])/g, (_, a, c) => a + c.toUpperCase()))
+        .join('\n');
+}
+
 // "DOCK STATION: Consultar o e-mail…" → título "DOCK STATION"; o resto vai para a descrição (nada se perde)
 function separarTitulo(titulo, texto) {
     let t = String(titulo || '').replace(/\s+/g, ' ').trim();
@@ -655,7 +663,7 @@ function separarTitulo(titulo, texto) {
         if (!semAcento(d).toUpperCase().includes(semAcento(t).toUpperCase().slice(0, 40))) d = d ? `${t}\n${d}` : t;
         t = t.slice(0, 60).replace(/\s+\S*$/, '');
     }
-    return { titulo: t.replace(/[\s:;.,\-–]+$/, '').toUpperCase(), texto: d };
+    return { titulo: t.replace(/[\s:;.,\-–]+$/, '').toUpperCase(), texto: maiusculaInicial(d) };
 }
 const chavePendencia = titulo => semAcento(separarTitulo(titulo).titulo).toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 40);
 
@@ -665,6 +673,12 @@ function arrumarPendencias() {
     for (const p of estado.pendencias) {
         const { titulo, texto } = separarTitulo(p.titulo, p.texto);
         if (titulo !== p.titulo || texto !== p.texto) { p.titulo = titulo; p.texto = texto; mudou = true; }
+        const antes = JSON.stringify([p.tratativa, p.responsavel, p.etapas, p.historico]);
+        if (p.tratativa) p.tratativa = maiusculaInicial(p.tratativa);
+        if (p.responsavel) p.responsavel = maiusculaInicial(p.responsavel);
+        for (const e of p.etapas || []) e.texto = maiusculaInicial(e.texto);
+        for (const h of p.historico || []) if (h.texto) h.texto = maiusculaInicial(h.texto);
+        if (antes !== JSON.stringify([p.tratativa, p.responsavel, p.etapas, p.historico])) mudou = true;
     }
     const abertas = new Map();
     for (const p of [...estado.pendencias].sort((a, b) => String(a.criadoEm).localeCompare(String(b.criadoEm)))) {
@@ -689,7 +703,7 @@ function arrumarPendencias() {
 function limparEtapas(etapas) {
     return (Array.isArray(etapas) ? etapas : String(etapas || '').split('\n'))
         .map(e => (typeof e === 'string' ? { texto: e } : e))
-        .map(e => ({ id: e.id || novoId(), texto: String(e.texto || '').trim(), prazo: String(e.prazo || '').trim(), feito: !!e.feito, feitoEm: e.feitoEm || null }))
+        .map(e => ({ id: e.id || novoId(), texto: maiusculaInicial(e.texto), prazo: String(e.prazo || '').trim(), feito: !!e.feito, feitoEm: e.feitoEm || null }))
         .filter(e => e.texto);
 }
 function novaPendencia({ tipo, titulo, texto, responsavel, prazo, etapas }, usuario, origem = '', ficha = estado.ficha) {
@@ -698,7 +712,7 @@ function novaPendencia({ tipo, titulo, texto, responsavel, prazo, etapas }, usua
     return {
         id: novoId(), tipo: TIPOS_PENDENCIA.includes(tipo) ? tipo : 'AVISO',
         titulo: sep.titulo, texto: sep.texto,
-        responsavel: String(responsavel || '').trim(), prazo: String(prazo || '').trim(), etapas: limparEtapas(etapas),
+        responsavel: maiusculaInicial(responsavel), prazo: String(prazo || '').trim(), etapas: limparEtapas(etapas),
         status: 'ABERTA', origem, criadoEm: t.iso, criadoPor: quem(usuario),
         turno: ficha?.turno || '', data: ficha?.data || t.data,
         historico: [{ tipo: 'CRIACAO', em: t.iso, data: t.data.slice(0, 5), hora: t.hora, por: usuario ? usuario.nome : 'Robô', texto: origem }]
@@ -740,7 +754,7 @@ async function atualizarPendencia(id, texto, usuario, { origem = '' } = {}) {
     const p = pendencia(id);
     if (!String(texto || '').trim()) throw erro('Escreva a atualização.');
     const t = agora();
-    p.historico.push({ tipo: 'ATUALIZACAO', em: t.iso, data: t.data.slice(0, 5), hora: t.hora, por: usuario?.nome || 'Robô', texto: texto.trim(), ...(origem ? { origem } : {}) });
+    p.historico.push({ tipo: 'ATUALIZACAO', em: t.iso, data: t.data.slice(0, 5), hora: t.hora, por: usuario?.nome || 'Robô', texto: maiusculaInicial(texto), ...(origem ? { origem } : {}) });
     await salvarPendencias();
     auditar(usuario, 'Atualizou pendência', p.titulo);
     return p;
@@ -748,7 +762,7 @@ async function atualizarPendencia(id, texto, usuario, { origem = '' } = {}) {
 
 async function editarPendencia(id, { titulo, texto, tipo, tratativa, responsavel, prazo, etapas }, usuario) {
     const p = pendencia(id);
-    if (responsavel !== undefined) p.responsavel = String(responsavel || '').trim();
+    if (responsavel !== undefined) p.responsavel = maiusculaInicial(responsavel);
     if (prazo !== undefined) p.prazo = String(prazo || '').trim();
     if (etapas !== undefined) {
         const novas = limparEtapas(etapas);
@@ -768,11 +782,11 @@ async function editarPendencia(id, { titulo, texto, tipo, tratativa, responsavel
         if (!String(titulo).trim()) throw erro('O título não pode ficar vazio.');
         p.titulo = String(titulo).trim().toUpperCase();
     }
-    if (texto !== undefined) p.texto = String(texto).trim();
+    if (texto !== undefined) p.texto = maiusculaInicial(texto);
     if (TIPOS_PENDENCIA.includes(tipo)) p.tipo = tipo;
     if (tratativa !== undefined && p.status === 'CONCLUIDA') {
         if (!String(tratativa).trim()) throw erro('Informe como foi resolvido.');
-        p.tratativa = String(tratativa).trim();
+        p.tratativa = maiusculaInicial(tratativa);
         const ult = [...p.historico].reverse().find(h => h.tipo === 'CONCLUSAO');
         if (ult) ult.texto = p.tratativa;
     }
@@ -786,7 +800,7 @@ async function concluirPendencia(id, { tratativa, registrarAtividade }, usuario)
     if (!String(tratativa || '').trim()) throw erro('Descreva a tratativa (o que foi feito).');
     const t = agora();
     p.status = 'CONCLUIDA';
-    p.tratativa = tratativa.trim();
+    p.tratativa = maiusculaInicial(tratativa);
     p.concluidoEm = t.iso;
     p.concluidoPor = quem(usuario);
     p.historico.push({ tipo: 'CONCLUSAO', em: t.iso, data: t.data.slice(0, 5), hora: t.hora, por: usuario.nome, texto: p.tratativa });
@@ -844,7 +858,7 @@ const RE_RESOLVIDO = /\b(reparad[oa]s?|resolvid[oa]s?|normalizad[oa]s?|conclu[i�
 const RE_ACOMPANHAR = /favor acompanhar|acompanhar|aguardando|aguarda|pr[oó]xima semana|pr[oó]ximos passos|definir[aá]|ir[aá] (marcar|agendar|enviar|retornar|verificar)|pendente|em andamento|previs[aã]o de retorno|agendad[oa]/i;
 
 function registrarNoHistorico(p, texto, por, origem) {
-    const limpo = String(texto || '').trim();
+    const limpo = maiusculaInicial(texto);
     if (!limpo || p.historico.some(h => h.texto === limpo)) return false;
     const t = agora();
     p.historico.push({ tipo: 'ATUALIZACAO', em: t.iso, data: t.data.slice(0, 5), hora: t.hora, por, texto: limpo, origem });
@@ -863,7 +877,7 @@ async function pendenciasDasAtividades(f) {
         const p = pendenciaDoAssunto(texto);
         if (p) { if (registrarNoHistorico(p, texto, `Relatório ${f.turno} ${f.data}`, 'relatorio')) mudou = true; continue; }
         if (RE_ACOMPANHAR.test(texto) && !estado.sugestoes.some(s => s.texto === texto)) {
-            estado.sugestoes.push({ id: novoId(), texto, tipo: R.classificarMensagem(texto).sugestao === 'DIGITAL' ? 'DIGITAL' : 'AVISO',
+            estado.sugestoes.push({ id: novoId(), texto: maiusculaInicial(texto), tipo: R.classificarMensagem(texto).sugestao === 'DIGITAL' ? 'DIGITAL' : 'AVISO',
                 titulo: texto.split(/[:.;–-]/)[0].slice(0, 60).toUpperCase(), origem: `Atividade do relatório ${f.turno} ${f.data}`, criadoEm: agora().iso });
         }
     }
@@ -1549,6 +1563,6 @@ module.exports = {
     registrarOperacoes, registrarSaida, atualizarOperacao, excluirOperacao, enviarEmailOperacao, marcarEmailOperacao, destinatarioEmail,
     receberMensagem, atualizarItemEntrada,
     previaPlanilha, planilhaDoTurno, planilhaPorTurno, arquivoPlanilha,
-    aceitarSugestao, descartarSugestao, confirmarEntrada, pendenciaDoAssunto, separarTitulo, arrumarPendencias,
+    aceitarSugestao, descartarSugestao, confirmarEntrada, pendenciaDoAssunto, separarTitulo, arrumarPendencias, maiusculaInicial,
     iniciarEscala, continuarEscala, construirPassagem, salvarPassagem, restaurarPassagem, textoPassagem
 };
