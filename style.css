@@ -411,3 +411,11 @@ html, body { overflow-x: clip; }
 .ind-local b { text-align: right; }
 .ind-trilho { display: flex; }
 .ind-frase { margin: 0; padding: 2px 0 2px 10px; border-left: 2px solid var(--primario); font-size: 14px; }
+.ind-cartoes { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
+.ind-cartao { display: grid; gap: 8px; text-align: left; padding: 16px; border-radius: var(--raio); border: 1px solid var(--borda); background: var(--superficie); color: var(--texto); font: inherit; cursor: pointer; }
+.ind-cartao:hover { border-color: var(--primario); }
+.ind-cartao-num { display: flex; align-items: baseline; gap: 8px; }
+.ind-cartao-num b { font-size: 30px; font-weight: 700; }
+.ind-cartao-num span { color: var(--mudo); font-size: 13px; }
+.ind-mini { display: flex; align-items: flex-end; gap: 3px; height: 44px; }
+.ind-mini span { flex: 1; background: #e87ba4; border-radius: 3px 3px 0 0; }

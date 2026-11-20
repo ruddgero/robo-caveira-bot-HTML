@@ -439,6 +439,7 @@ function trocarAba(nome) {
 
 document.querySelectorAll('.abas button').forEach(b => b.addEventListener('click', () => {
   const g = b.dataset.grupo;
+  if (g === 'painel') S.indVista = 'inicio';
   trocarAba(S.ultimaAba[g] || GRUPOS[g][0]);
 }));
 $('#btn-menu').addEventListener('click', abrirMenu);
@@ -454,6 +455,14 @@ async function atualizarEstado() {
   try {
     const ant = S.estado;
     S.estado = await api('GET', '/api/estado');
+    // versão nova publicada: recarrega sozinho (sem perder o que está sendo digitado)
+    S.versaoApp = S.versaoApp || S.estado.versao;
+    if (S.estado.versao && S.estado.versao !== S.versaoApp && !S.versaoAvisada) {
+      S.versaoAvisada = true;
+      const recarregar = () => { if (!S.sujo && !modalAberto()) location.reload(); else setTimeout(recarregar, 5000); };
+      aviso(`Nova versão ${S.estado.versao} — atualizando…`);
+      setTimeout(recarregar, 1500);
+    }
     S.usuario = S.estado.usuario;
     desenharTopo();
     const m = S.estado.marcas, a = ant?.marcas || {};
@@ -461,7 +470,7 @@ async function atualizarEstado() {
 
     if (m.relatorios !== a.relatorios && ant) aviso('📑 Relatório da equipe anterior atualizado');
     if (m.historico !== a.historico && ant) { S.historico = null; if (S.aba === 'historico' && livre) desenharHistorico(); }
-    if (m.rois !== a.rois && ant) { S.roi = null; S.ind = null; if (S.aba === 'roi' && livre) desenharROI(); if (S.aba === 'painel' && livre) desenharPainelGerencial(); }
+    if (m.rois !== a.rois && ant) { S.roi = null; S.ind = null; S.indResumo = null; if (S.aba === 'roi' && livre) desenharROI(); if (S.aba === 'painel' && livre) desenharPainelGerencial(); }
     if (m.pendencias !== a.pendencias || m.operacoes !== a.operacoes || m.relatorios !== a.relatorios || m.plantao !== a.plantao || m.ficha !== a.ficha) {
       await carregarCentral();
       if (['central', 'pendencias', 'emails'].includes(S.aba) && livre) redesenharAba();
@@ -2241,6 +2250,7 @@ const COR_TIPO = { G1: '#2a78d6', G2: '#eb6834', G3: '#1baf7a', G4: '#eda100', G
 const MESES_ABREV = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
 
 function desenharPainelGerencial() {
+  if (S.indVista !== 'ocorrencias') return desenharInicioIndicadores();
   const c = $('#aba-painel');
   if (!S.ind || S.ind.__ano !== S.indAno || S.ind.__mes !== S.indMes) {
     if (!S.ind) c.replaceChildren(el('div', { class: 'vazio' }, 'Carregando indicadores…'));
@@ -2311,11 +2321,11 @@ function desenharPainelGerencial() {
     `${a.ano}${a.parcial ? ' (até hoje)' : ''} · ${a.total} ROIs`, linhasTipos(a.porTipo, a.simulados))));
 
   const legenda = el('div', { class: 'ind-legenda' }, Object.keys(G).map(g => el('span', {}, el('i', { style: `background:${COR_TIPO[g]}` }), nomeTipo(g))));
-  const C = S.central, ops = C?.operacoes || [];
 
   c.replaceChildren(
     dica,
     el('section', { class: 'cartao' },
+      el('button', { class: 'btn fantasma pequeno', style: 'justify-self:start', onclick: () => { S.indVista = 'inicio'; desenharPainelGerencial(); } }, '‹ Indicadores'),
       el('div', { class: 'cartao-topo' }, el('h2', { text: '📊 Indicadores › Ocorrências' }),
         ehAdmin() ? el('button', { class: 'btn pequeno', onclick: abrirLocaisIndicador }, '📍 Locais') : null),
       el('div', { class: 'grade-2' }, el('label', { class: 'campo' }, 'Ano', selAno), el('label', { class: 'campo' }, 'Mês', selMes)),
@@ -2335,14 +2345,39 @@ function desenharPainelGerencial() {
         el('span', { class: 'ic', style: `color:${COR_TIPO[r.tipo] || 'inherit'}`, text: '●' }),
         el('span', { style: 'min-width:0' }, el('div', { class: 'tit' }, `ROI ${r.numero} · ${r.tipo}`, ' ', r.simulado ? el('span', { class: 'etiqueta simulado', text: 'SIMULADO' }) : null),
           el('div', { class: 'sub', text: [r.data, r.local, r.descricao.length > 90 ? r.descricao.slice(0, 87) + '…' : r.descricao].filter(Boolean).join(' · ') })),
-        el('span'))))),
-    el('section', { class: 'cartao' }, el('h3', { text: 'Turno atual' }),
-      el('div', { class: 'contadores' },
-        el('div', { class: 'contador' }, el('strong', { text: String(ops.length) }), el('span', { text: 'Operações de bordo' })),
-        el('div', { class: 'contador' }, el('strong', { text: String(ops.filter(o => !o.horaFinal).length) }), el('span', { text: 'Sem saída' })),
-        el('div', { class: 'contador' }, el('strong', { text: String((C?.pendencias || []).filter(p => p.status === 'ABERTA').length) }), el('span', { text: 'Pendências abertas' }))))
+        el('span')))))
   );
   c.onclick = esconder;
+}
+
+
+// Tela inicial de Indicadores: um cartão por indicador (toque para abrir)
+function desenharInicioIndicadores() {
+  const c = $('#aba-painel');
+  if (!S.indResumo) {
+    c.replaceChildren(el('div', { class: 'vazio' }, 'Carregando indicadores…'));
+    api('GET', '/api/indicadores/ocorrencias').then(d => { S.indResumo = d; if (S.aba === 'painel' && S.indVista !== 'ocorrencias') desenharInicioIndicadores(); }).catch(e => aviso(e.message, true));
+    return;
+  }
+  const d = S.indResumo;
+  const variacao = d.anterior ? Math.round((d.total - d.anterior) / d.anterior * 100) : null;
+  const maxMes = Math.max(1, ...d.meses.map(m => m.total));
+  const abrir = () => { S.indVista = 'ocorrencias'; S.indAno = d.ano; S.indMes = 0; desenharPainelGerencial(); };
+  c.replaceChildren(
+    el('section', { class: 'cartao' }, el('h2', { text: '📊 Indicadores' }),
+      el('p', { class: 'mudo pequeno', style: 'margin:0', text: 'Toque num indicador para ver os detalhes.' })),
+    el('div', { class: 'ind-cartoes' },
+      el('button', { class: 'ind-cartao', onclick: abrir },
+        el('div', { class: 'cartao-topo' }, el('strong', { text: '🚨 Ocorrências (ROI)' }), el('span', { class: 'mudo pequeno', text: 'Abrir ›' })),
+        d.total || d.anterior ? [
+          el('div', { class: 'ind-cartao-num' }, el('b', { text: String(d.total) }), el('span', { text: `ROIs em ${d.ano}${d.parcialAno ? ` até ${d.hoje.slice(0, 5)}` : ''}` })),
+          el('div', { class: 'mudo pequeno', text: [variacao === null ? '' : `${d.anterior} no mesmo período de ${d.anoAnterior} (${variacao > 0 ? '+' : ''}${variacao}%)`,
+            `${d.mesRef.nome}${d.mesRef.parcial ? ' (parcial)' : ''}: ${d.mesRef.total} · média 3 meses: ${String(d.mesRef.media.toFixed(1)).replace('.', ',')}`].filter(Boolean).join(' · ') }),
+          el('div', { class: 'ind-mini' }, d.meses.map(m => el('span', { title: `${MESES_ABREV[m.mes - 1]}: ${m.total}`, style: `height:${Math.max(4, m.total / maxMes * 100)}%${m.total ? '' : ';opacity:.25'}` }))),
+          d.frases[0] ? el('div', { class: 'pequeno', text: d.frases[0] }) : null
+        ] : el('div', { class: 'mudo pequeno', text: 'Sem ROIs ainda. Importe o controle em Plantão › ROI › 📥 Importar controle anual.' }))),
+    el('p', { class: 'mudo pequeno', style: 'margin:0;text-align:center', text: 'Os próximos indicadores do projeto entram aqui.' })
+  );
 }
 
 // Admin: conferir/ajustar os locais do indicador (o texto do ROI não muda)
@@ -2838,6 +2873,7 @@ function desenharROI() {
         el('button', { class: 'btn primario', onclick: () => novoRoi() }, '+ Novo ROI')),
       el('div', { class: 'linha', style: 'gap:8px;flex-wrap:wrap' },
         S.anoRoi ? el('button', { class: 'btn pequeno', onclick: () => baixarArquivo(`/api/roi/controle/${S.anoRoi}/xlsx`, `ROI_${S.anoRoi}.xlsx`) }, `⬇️ Controle ${S.anoRoi} (Excel)`) : null,
+        el('button', { class: 'btn pequeno', onclick: () => baixarArquivo('/api/roi/controle/todos/xlsx', 'Controle_ROI.xlsx') }, '⬇️ Controle de todos os anos'),
         ehAdmin() ? el('button', { class: 'btn pequeno', onclick: importarControleRoi }, '📥 Importar controle anual') : null),
       el('div', { class: 'filtros' }, filtros.map(([v, t]) => el('button', { class: 'filtro' + (S.filtroRoi === v ? ' ativo' : ''), onclick: () => { S.filtroRoi = v; desenharROI(); } }, t))),
       el('div', { class: 'grade-2' }, busca, selAno)),
@@ -3117,6 +3153,6 @@ function importarControleRoi() {
         el('details', {}, el('summary', { text: `Locais encontrados (${g.locais.length}) — grafias parecidas foram juntadas` }),
           ...g.locais.map(l => el('div', { class: 'pequeno', text: `${l.nome} · ${l.total}${l.variantes.length > 1 ? `  (${l.variantes.join(' | ')})` : ''}` })))));
     } catch (_) {}
-    S.roi = null; if (S.aba === 'roi') desenharROI();
+    S.roi = null; S.ind = null; S.indResumo = null; if (S.aba === 'roi') desenharROI();
   });
 }

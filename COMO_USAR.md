@@ -66,7 +66,12 @@ Entrada na portaria: 14:50Hs
 - **Fotos** (até 8, com legenda): **📷 Tirar foto** (câmera) ou **🖼️ Escolher da galeria**.
 - **Registrar ROI** (líder): recebe o número automático (continua o controle: o próximo é **031/2026**; recomeça em 001 a cada ano) e o item 7 do relatório ganha só a linha: *Foi registrado o ROI Nº 031/2026 (G1 – Acidentes) – Canteiro das Contratadas.* O resto do relatório não muda.
 - Depois de registrado: **⬇️ Excel** (mesmo modelo, com a aba Evidências Fotográficas), **🖨️ PDF**, **Salvar correção** (o número não muda e a correção fica no histórico) ou **Cancelar ROI** (com motivo; o número fica reservado).
+- **⬇️ Controle de todos os anos**: uma aba por ano, no mesmo formato — serve também para importar de novo.
 - **⬇️ Controle AAAA (Excel)**: a planilha anual de controle, nas mesmas colunas da equipe. O administrador traz os anos anteriores em **📥 Importar controle anual**.
+
+## Indicadores
+- A aba abre com um cartão por indicador (hoje: **Ocorrências (ROI)**). Toque no cartão para ver os detalhes; **‹ Indicadores** volta.
+- Quando sai versão nova, o app se atualiza sozinho (a versão aparece no menu ☰).
 
 ## Indicadores › Ocorrências
 - Total do período comparado com o **mesmo período do ano anterior**, o mês atual (parcial) contra a **média dos últimos 3 meses**, tipo mais frequente e simulados (contam no total, com o selo **SIMULADO**).
