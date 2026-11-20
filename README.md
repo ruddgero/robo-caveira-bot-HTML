@@ -91,6 +91,19 @@ Sem essas variáveis, tudo funciona, mas o e-mail não sai sozinho. Use **Copiar
 
 ---
 
+## 🚢 Planilha de navios (T-ORE / T-OIL)
+Ao publicar o relatório, o robô gera a planilha do turno no mesmo layout das planilhas do departamento e manda no WhatsApp do líder (e no e-mail dele, se configurado). Usa só o que foi validado no relatório: manobras do item 6 e operações do turno. DTA conta como Peça; caixa de mar (T-ORE) por berço Leste/Oeste e bordo E/B. Prévia a qualquer momento em **Relatório › 🚢 Planilha navios**.
+
+## 🧪 Testar com a conversa real do grupo
+WhatsApp › grupo › ⋮ › Mais › **Exportar conversa** › Sem mídia. Depois:
+```
+npm run teste-grupo -- "Conversa do WhatsApp com EQUIPE AZUL.txt"
+```
+Roda tudo numa pasta separada (não mexe nos dados reais) e grava em `saida_teste/` o resumo, o item 6 e a planilha de cada turno.
+Guia de uso para as equipes: **COMO_USAR.md**.
+
+---
+
 ## 🛠️ Problemas comuns
 | Sintoma | O que fazer |
 |---|---|

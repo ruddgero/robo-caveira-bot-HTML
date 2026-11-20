@@ -862,6 +862,7 @@ function abrirOperacao(o) {
       }
     } }, 'Excluir'),
     el('button', { class: 'btn', onclick: () => abrirFormOperacao(o) }, 'Editar'),
+    el('button', { class: 'btn', onclick: async () => { await copiar(o.mensagemPadrao || ''); aviso('Mensagem padrão copiada ✓'); } }, '💬 Mensagem padrão'),
     el('button', { class: 'btn', onclick: () => copiarEmailOperacao(o) }, '📋 Copiar e-mail'),
     el('button', { class: 'btn', onclick: () => abrirEmail(o) }, '✉️ Ver e-mail'),
     o.horaFinal ? null : el('button', { class: 'btn verde', onclick: () => registrarSaida(o) }, '🏁 Registrar saída')
@@ -1002,6 +1003,14 @@ function abrirFormOperacao(op = {}, ctx = {}) {
   const [cVei, iVei] = L('Veículo', 'veiculo', 'CAMINHÃO, VAN…');
   const [cPla, iPla] = L('Placa(s)', 'placa', 'ABC-1D23 / XYZ-9K76');
   const [cQtd, iQtd] = L('Quantos tripulantes', 'quantidade', '03');
+  const [cQE, iQE] = L('Embarque (qtd)', 'qtdEmbarque', '13');
+  const [cQD, iQD] = L('Desembarque (qtd)', 'qtdDesembarque', '14');
+  const berco = el('select', {}, ['', 'LESTE', 'OESTE'].map(t => el('option', { value: t, text: t || '—' })));
+  berco.value = v.berco || '';
+  const bordo = el('select', {}, [['', '—'], ['E', 'Estibordo (E)'], ['B', 'Bombordo (B)']].map(([k, t]) => el('option', { value: k, text: t })));
+  bordo.value = v.bordo || '';
+  const caixaMar = el('div', { class: 'grade-2' }, el('label', { class: 'campo' }, 'Caixa de mar · berço', berco), el('label', { class: 'campo' }, 'Bordo', bordo));
+  const ambosQtd = el('div', { class: 'grade-2' }, cQE, cQD);
   const [cHi, iHi] = L('Horário inicial', 'horaInicial', 'HH:MM');
   const [cHf, iHf] = L('Horário final (saída)', 'horaFinal', 'vazio = em andamento');
   const [cRet, iRet] = L('Retorno dos tripulantes', 'horaRetorno', 'vazio = não retornaram');
@@ -1009,14 +1018,16 @@ function abrirFormOperacao(op = {}, ctx = {}) {
   let autoridadePadrao = tipos[tipo.value]?.autoridade || '';
   const [cObs, iObs] = campoTexto('Observações', v.observacoes, { linhas: 2, placeholder: 'S/A' });
 
-  const tripulacao = el('div', {}, el('div', { class: 'grade-2' }, cQtd, el('label', { class: 'campo' }, 'Movimento', movimento)), cRet);
+  const tripulacao = el('div', {}, el('div', { class: 'grade-2' }, cQtd, el('label', { class: 'campo' }, 'Movimento', movimento)), ambosQtd, cRet);
   const ajustar = () => {
     tripulacao.hidden = tipo.value !== 'TRIPULACAO';
+    ambosQtd.hidden = movimento.value !== 'Embarque e Desembarque';
+    caixaMar.hidden = tipo.value !== 'MERGULHO';
     const nova = tipos[tipo.value]?.autoridade || '';
     if (!autoridade.value.trim() || autoridade.value === autoridadePadrao) autoridade.value = nova;
     autoridadePadrao = nova; autoridade.placeholder = nova;
   };
-  tipo.addEventListener('change', ajustar); ajustar();
+  tipo.addEventListener('change', ajustar); movimento.addEventListener('change', ajustar); ajustar();
 
   // operações de bordo vão só para o navio (seção 6) e para o e-mail — nunca para as Atividades (seção 4)
   const extras = [];
@@ -1025,6 +1036,8 @@ function abrirFormOperacao(op = {}, ctx = {}) {
 
   const dadosForm = () => ({
     tipo: tipo.value, terminal: terminal.value, quantidade: iQtd.value, movimento: movimento.value,
+    qtdEmbarque: movimento.value === 'Embarque e Desembarque' ? iQE.value : '', qtdDesembarque: movimento.value === 'Embarque e Desembarque' ? iQD.value : '',
+    berco: tipo.value === 'MERGULHO' ? berco.value : '', bordo: tipo.value === 'MERGULHO' ? bordo.value : '',
     empresa: iEmp.value, responsavel: iResp.value, agente: iAge.value, ajudante: iAju.value, aBordo: iBor.value, veiculo: iVei.value, placa: iPla.value,
     horaInicial: iHi.value, horaFinal: iHf.value, horaRetorno: iRet.value, autoridades: autoridade.value, observacoes: iObs.value
   });
@@ -1039,18 +1052,31 @@ function abrirFormOperacao(op = {}, ctx = {}) {
     } catch (e) { aviso(e.message, true); }
   };
 
+  // gera a mensagem no padrão do grupo (o robô lê este formato sem erro)
+  const copiarMensagemDoForm = async () => {
+    try {
+      const navios = iNavio.value.split('\n').map(x => x.trim()).filter(Boolean);
+      if (!navios.length) return aviso('Informe o navio.', true);
+      const ms = [];
+      for (const n of navios) ms.push((await api('POST', '/api/operacoes/minuta', { ...dadosForm(), navio: n })).mensagem);
+      await copiar(ms.join('\n\n'));
+      aviso('Mensagem copiada ✓ Cole no grupo.');
+    } catch (e) { aviso(e.message, true); }
+  };
+
   abrirModal(editando ? 'Editar operação de bordo' : '✉️ Operação de bordo', [
     ctx.citacao || null,
     ...avisosConferir.map(t => el('div', { class: 'citacao', style: 'border-left-color:var(--vermelho)', text: '⚠️ ' + t })),
     ...avisosInfo.map(t => el('p', { class: 'mudo pequeno', style: 'margin:0', text: 'ℹ️ ' + t })),
     el('div', { class: 'grade-2' }, el('label', { class: 'campo' }, 'Tipo', tipo), el('label', { class: 'campo' }, 'Terminal', terminal)),
-    cNavio, tripulacao,
+    cNavio, tripulacao, caixaMar,
     el('div', { class: 'grade-2' }, cHi, cHf),
     cEmp, el('div', { class: 'grade-2' }, cResp, cAge), el('div', { class: 'grade-2' }, cAju, cBor),
     el('div', { class: 'grade-2' }, cVei, cPla),
     el('label', { class: 'campo' }, 'Autorizado por (Autoridades)', autoridade),
     cObs, ...extras,
-    el('div', { class: 'linha' }, el('button', { class: 'btn pequeno', onclick: copiarDoForm }, '📋 Copiar e-mail agora')),
+    el('div', { class: 'linha' }, el('button', { class: 'btn pequeno', onclick: copiarDoForm }, '📋 Copiar e-mail agora'),
+      el('button', { class: 'btn pequeno', onclick: copiarMensagemDoForm }, '💬 Copiar mensagem para o grupo')),
     el('p', { class: 'mudo pequeno', style: 'margin:0', text: 'O e-mail sai sozinho quando houver horário de saída. Enquanto isso, você pode copiar e enviar manualmente.' })
   ], botoesSalvar(async () => {
     const dados = dadosForm();
@@ -1123,6 +1149,8 @@ function cartaoMensagem(item) {
   } else {
     acoes.push(el('button', { class: 'btn pequeno', onclick: () => marcarItem(item, 'pendente') }, 'Restaurar'));
   }
+  // mensagem do grupo convertida para o modelo padrão
+  if (item.padronizada && !item.apagado) acoes.unshift(el('button', { class: 'btn fantasma pequeno', onclick: async () => { await copiar(item.padronizada); aviso('Mensagem no padrão copiada ✓'); } }, '💬 Padrão'));
   return el('article', { class: `msg${item.urgente && item.status === 'pendente' ? ' urgente' : ''}${item.status !== 'pendente' ? ' tratada' : ''}` },
     el('div', { class: 'msg-topo' },
       el('span', {}, el('strong', { text: item.autor || 'Sem nome' }), item.grupoNome ? ` · ${item.grupoNome}` : ''),
@@ -1617,6 +1645,7 @@ function desenharRelatorio() {
       el('button', { class: 'btn', onclick: abrirPrevia }, '👁 Prévia'),
       el('button', { class: 'btn', onclick: exportarPdf }, '📄 PDF'),
       el('button', { class: 'btn', onclick: async () => { await salvarAgora(); baixarArquivo('/api/ficha/xlsx', 'Relatorio.xlsx'); } }, '📊 Excel'),
+      el('button', { class: 'btn', title: 'Prévia da planilha T-ORE / T-OIL deste turno', onclick: async () => { await salvarAgora(); baixarArquivo('/api/planilha-navios/previa', 'Planilha_Navios_PREVIA.xlsx'); } }, '🚢 Planilha navios'),
       ehLider() ? el('button', { class: 'btn primario', onclick: publicar }, '🚀 Publicar') : null)
   ];
   if (ehDesktop()) c.replaceChildren(el('div', { class: 'rel-desktop' }, el('div', { class: 'aba' }, ...blocos), painelPreviaViva()));
@@ -1643,6 +1672,7 @@ async function abrirPrevia() {
       el('button', { class: 'btn', onclick: () => baixar(nome, t.simples) }, '💾 .txt'),
       el('button', { class: 'btn', onclick: () => imprimir(`CCOS — Relatório do Turno ${f.turno} · ${f.data}`, t.simples, f.equipes) }, '📄 PDF'),
       el('button', { class: 'btn', onclick: () => baixarArquivo('/api/ficha/xlsx', 'Relatorio.xlsx') }, '📊 Excel'),
+      el('button', { class: 'btn', onclick: () => baixarArquivo('/api/planilha-navios/previa', 'Planilha_Navios_PREVIA.xlsx') }, '🚢 Planilha navios'),
       ehLider() ? el('button', { class: 'btn primario', onclick: () => { fecharModal(); publicar(); } }, '🚀 Publicar') : null
     ]);
   } catch (e) { aviso(e.message, true); }
@@ -1693,7 +1723,7 @@ async function publicar() {
     const f = S.ficha;
     const conectado = S.estado?.whatsapp?.meu?.estado === 'CONECTADO';
     const nomeGrupo = S.config?.nomesGrupos?.[S.config?.grupoPublicacao] || '';
-    const problema = !deplantao() ? 'Para publicar, assuma o plantão (aba Plantão › Turno).' : !conectado ? 'Seu WhatsApp não está conectado (Menu › Meu perfil).' : !S.config?.grupoPublicacao ? 'O administrador ainda não escolheu o grupo de publicação.' : '';
+    const problema = !deplantao() ? 'Para publicar, assuma o plantão (aba Plantão › Turno).' : !conectado ? 'Seu WhatsApp não está conectado (Menu › Meu perfil).' : (!S.config?.grupoPublicacao && !S.config?.modoTeste) ? 'O administrador ainda não escolheu o grupo de publicação.' : '';
     if (problema) {
       return abrirModal('Não dá para publicar agora', [el('p', { text: problema }), el('p', { class: 'mudo', text: 'Você pode copiar o texto e colar no grupo.' })], [
         el('button', { class: 'btn primario', onclick: () => { copiar(t.whatsapp); fecharModal(); } }, '📋 Copiar texto')]);
@@ -1715,7 +1745,8 @@ async function publicar() {
     abrirModal('🚀 Fechar o turno e publicar', [
       el('div', { class: 'citacao' },
         el('div', {}, el('strong', { text: `RELATÓRIO DO TURNO – ${f.turno} · ${f.data}` })),
-        el('div', { class: 'mudo pequeno', text: `Destino: ${nomeGrupo || 'grupo de publicação'} · pelo seu WhatsApp` }),
+        el('div', { class: 'mudo pequeno', text: S.config?.modoTeste ? '🧪 MODO TESTE: vai só para o SEU WhatsApp (não vai para o grupo)' : `Destino: ${nomeGrupo || 'grupo de publicação'} · pelo seu WhatsApp` }),
+        el('div', { class: 'mudo pequeno', text: '🚢 A planilha de navios (T-ORE / T-OIL) do turno chega no seu WhatsApp depois da publicação.' }),
         el('div', { class: 'mudo pequeno', text: `Equipe saindo: ${f.equipes?.saindo || 'Conforme escala'} · Equipe assumindo: ${f.equipes?.assumindo || 'Conforme escala'}` })),
       t.conferencia?.length ? el('div', { class: 'alertas' }, el('strong', { text: 'Confira antes de publicar:' }), t.conferencia.map(a => el('div', { text: '• ' + a }))) : null,
       abertas.length ? el('div', { style: 'display:grid;gap:8px' },
@@ -1731,7 +1762,7 @@ async function publicar() {
         try {
           const r = await api('POST', '/api/ficha/publicar', { anexarTxt: anexo.checked, passarOps: [...passar] });
           fecharModal();
-          aviso(`Relatório publicado ✓ · próximo turno ${r.proximo?.turno || ''} ${r.proximo?.data || ''} preparado`);
+          aviso(`${r.teste ? '🧪 Teste enviado ao seu WhatsApp' : 'Relatório publicado ✓'}${r.planilha ? ' · planilha de navios enviada' : ''} · próximo turno ${r.proximo?.turno || ''} ${r.proximo?.data || ''} preparado`);
           S.historico = null;
           await recarregarTudo();
           trocarAba('central');
@@ -1810,6 +1841,7 @@ async function abrirRelatorioHist(h) {
       el('button', { class: 'btn', onclick: () => copiar(atual()) }, '📋 Copiar'),
       el('button', { class: 'btn', onclick: () => imprimir(`CCOS — Relatório do Turno ${r.turno} · ${r.data}`, simples(), null) }, '📄 PDF'),
       el('button', { class: 'btn', onclick: () => baixarArquivo(`/api/relatorios-hist/${encodeURIComponent(r.id)}/xlsx`, 'Relatorio.xlsx') }, '📊 Excel'),
+      r.turno && r.data ? el('button', { class: 'btn', onclick: () => baixarArquivo(`/api/planilha-navios/${r.turno}/${String(r.data).replace(/\//g, '-')}`, 'Planilha_Navios.xlsx') }, '🚢 Planilha navios') : null,
       ehLider() ? el('button', { class: 'btn primario', onclick: async () => {
         if (!await confirmar('Começar o turno a partir deste relatório?', `O turno atual vai para os rascunhos arquivados e o novo herda KM, navios, avisos e equipes de ${r.turno} ${r.data}.`, 'Herdar')) return;
         try { await api('POST', `/api/relatorios-hist/${encodeURIComponent(r.id)}/herdar`); aviso('Turno preparado ✓'); await recarregarTudo(); trocarAba('central'); } catch (e) { aviso(e.message, true); }
@@ -2270,7 +2302,9 @@ async function abrirConfig() {
   abrirPainel('⚙️ Configurações', [
     el('section', { class: 'cartao' }, el('h2', { text: 'Publicação' }),
       el('label', { class: 'campo' }, 'Grupo onde o relatório é publicado', pub),
-      el('p', { class: 'mudo pequeno', style: 'margin:0', text: 'A lista mostra os grupos escolhidos pelos líderes em "Meu perfil". Publica pelo WhatsApp de quem está de plantão.' })),
+      el('p', { class: 'mudo pequeno', style: 'margin:0', text: 'A lista mostra os grupos escolhidos pelos líderes em "Meu perfil". Publica pelo WhatsApp de quem está de plantão.' }),
+      el('label', { class: 'check' }, el('input', { type: 'checkbox', checked: !!cfg.modoTeste, onchange: e => { cfg.modoTeste = e.target.checked; } }),
+        '🧪 Modo teste: publicar relatório e passagem só no meu WhatsApp (não vai para o grupo)')),
     el('section', { class: 'cartao' }, el('h2', { text: 'E-mails de bordo' }), emailInfo,
       L('Encaminhar para (lista oficial, separe por ;)', 'emailDestinatarios', { placeholder: 'operacoes@ferroport.com.br; supervisao@ferroport.com.br' }),
       L('Cópia (Cc)', 'emailCopia'),

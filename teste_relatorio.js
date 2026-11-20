@@ -185,6 +185,41 @@ const parecido = R.classificarMensagem('*ENTREGA DE PROVISÃO*\nTipo: Rancho\nTe
 assert.strictEqual(parecido.navio, 'NISSOS NIKOURIA');
 assert.ok(parecido.conferir.some(t => t.includes('parecido')));
 
+// ---- Mensagem padrão: o robô lê 100% a mensagem que ele mesmo gera
+for (const r of [em, ra]) {
+    const volta = R.classificarMensagem(R.mensagemPadrao(r), NAVIOS_TURNO, '16:00').rascunhos[0];
+    for (const k of ['tipo', 'navio', 'terminal', 'empresa', 'responsavel', 'agente', 'ajudante', 'aBordo', 'veiculo', 'placa', 'quantidade', 'movimento', 'horaInicial'])
+        assert.strictEqual(volta[k] || '', r[k] || '', `mensagem padrão perdeu ${k}`);
+}
+assert.ok(R.mensagemPadrao(ra).startsWith('*ENTREGA DE PROVISÃO*\n*Tipo:* RANCHO\n*Terminal:* T.ORE'));
+
+// ---- Embarque e desembarque na mesma mensagem: duas quantidades
+const ed = R.classificarMensagem('AMETISTA BRASIL – T-OIL. Realizado embarque de 13 e desembarque de 14 tripulantes, van placa ABC1D23 às 15:00', NAVIOS_TURNO).rascunhos[0];
+assert.strictEqual(ed.movimento, 'Embarque e Desembarque');
+assert.strictEqual(ed.qtdEmbarque, '13'); assert.strictEqual(ed.qtdDesembarque, '14');
+assert.strictEqual(R.resumoNavio(ed), 'Embarque de 13 e desembarque de 14 tripulantes. Em andamento.');
+
+// ---- Manobras do grupo → linha padronizada
+assert.strictEqual(R.manobraDoTexto('Martha Oldendorff atracado às 10:42 T-ORE').linha, 'Atracado às 10:42.');
+assert.strictEqual(R.manobraDoTexto('Previsão de desatracação do Ametista Brasil às 20:00').navio, 'AMETISTA BRASIL');
+assert.strictEqual(R.manobraDoTexto('Previsão de desatracação do Ametista Brasil às 20:00').tipo, 'PREV_DESATRACACAO');
+assert.strictEqual(R.manobraDoTexto('Bom dia a todos'), null);
+
+// ---- Planilha de navios
+const NV = require('./navios');
+assert.deepStrictEqual(NV.lerManobra('Atracado às 01:15.', { turno: 'NOTURNO', data: '19/11/2026' }), { tipo: 'ATRACACAO', data: '20/11/2026', hora: '01:15' });
+assert.strictEqual(NV.lerManobra('Previsão de desatracação em 19/11 às 20:00.', {}), null);
+assert.strictEqual(NV.contribuicao({ tipo: 'DTA' }).peca, 1, 'DTA entra como Peça');
+assert.deepStrictEqual(NV.contribuicao({ tipo: 'MERGULHO', berco: 'OESTE', bordo: 'B' }).caixa, { LE: 0, LB: 0, OE: 0, OB: 1 });
+const estadias = [];
+const fichaT = { turno: 'DIURNO', data: '19/11/2026', navios: { tore: [{ navio: 'MARTHA OLDENDORFF', linhas: ['Atracado às 10:42.'] }], toil: [{ navio: 'PORTO', linhas: ['Previsão de desatracação em 19/11 às 11:30; desatracado às 12:25.'] }] } };
+const lin = NV.atualizarEstadias(estadias, fichaT, [{ id: 'x1', ...em, data: '19/11/2026' }, { id: 'x2', ...ed, navio: 'PORTO', terminal: 'T-OIL' }]);
+const martha = lin.find(l => l.valores.navio === 'MARTHA OLDENDORFF');
+assert.ok(martha.nova && martha.valores.atracHora === '10:42' && martha.valores.embarque === 1);
+const porto = lin.find(l => l.valores.navio === 'PORTO');
+assert.ok(porto.valores.desatracHora === '12:25' && porto.valores.embarque === 13 && porto.valores.desembarque === 14 && porto.parcial);
+assert.strictEqual(NV.atualizarEstadias(estadias, fichaT, [{ id: 'x1', ...em, data: '19/11/2026' }]).length, 0, 'o mesmo turno de novo não soma duas vezes');
+
 // ---- Outras classificações
 const s = m => R.classificarMensagem(m).sugestao;
 assert.strictEqual(s('bom dia a todos'), 'IGNORAR');

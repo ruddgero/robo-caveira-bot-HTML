@@ -63,18 +63,66 @@ function coluna(i) {
 // estilos: 0 normal (quebra linha), 1 negrito, 2 título grande, 3 cabeçalho com fundo
 const ESTILOS = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+<numFmts count="2"><numFmt numFmtId="164" formatCode="dd/mm/yyyy"/><numFmt numFmtId="165" formatCode="hh:mm"/></numFmts>
 <fonts count="3"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="14"/><name val="Calibri"/></font></fonts>
-<fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FFDCE6F2"/><bgColor indexed="64"/></patternFill></fill></fills>
-<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>
+<fills count="5"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FFDCE6F2"/><bgColor indexed="64"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFFFFF00"/><bgColor indexed="64"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFC3EAB0"/><bgColor indexed="64"/></patternFill></fill></fills>
+<borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border><border><left style="thin"><color auto="1"/></left><right style="thin"><color auto="1"/></right><top style="thin"><color auto="1"/></top><bottom style="thin"><color auto="1"/></bottom><diagonal/></border></borders>
 <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
-<cellXfs count="4">
+<cellXfs count="17">
 <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyAlignment="1"><alignment vertical="top" wrapText="1"/></xf>
 <xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1"><alignment vertical="top" wrapText="1"/></xf>
 <xf numFmtId="0" fontId="2" fillId="0" borderId="0" xfId="0" applyFont="1"/>
 <xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1" applyAlignment="1"><alignment vertical="top" wrapText="1"/></xf>
+<xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
+<xf numFmtId="164" fontId="0" fillId="0" borderId="1" xfId="0" applyNumberFormat="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
+<xf numFmtId="165" fontId="0" fillId="0" borderId="1" xfId="0" applyNumberFormat="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
+<xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyAlignment="1"><alignment horizontal="left" vertical="center" wrapText="1"/></xf>
+<xf numFmtId="0" fontId="0" fillId="3" borderId="1" xfId="0" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
+<xf numFmtId="164" fontId="0" fillId="3" borderId="1" xfId="0" applyNumberFormat="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
+<xf numFmtId="165" fontId="0" fillId="3" borderId="1" xfId="0" applyNumberFormat="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
+<xf numFmtId="0" fontId="0" fillId="3" borderId="1" xfId="0" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="left" vertical="center" wrapText="1"/></xf>
+<xf numFmtId="0" fontId="1" fillId="4" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>
+<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyAlignment="1"><alignment vertical="center" wrapText="1"/></xf>
+<xf numFmtId="0" fontId="1" fillId="0" borderId="1" xfId="0" applyFont="1" applyBorder="1" applyAlignment="1"><alignment vertical="center"/></xf>
+<xf numFmtId="0" fontId="1" fillId="3" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment vertical="center"/></xf>
+<xf numFmtId="0" fontId="2" fillId="0" borderId="0" xfId="0" applyFont="1"/>
 </cellXfs>
 <cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
 </styleSheet>`;
+
+// Estilos nomeados do modo "celulas" (planilha de navios). "Am" = fundo amarelo (mudou no turno).
+const ESTILO = { num: 4, data: 5, hora: 6, esq: 7, numAm: 8, dataAm: 9, horaAm: 10, esqAm: 11, cab: 12, nota: 13, info: 14, infoNova: 15, titulo: 16 };
+function indiceColuna(letras) { let n = 0; for (const ch of letras) n = n * 26 + (ch.charCodeAt(0) - 64); return n; }
+function partesRef(ref) { const m = ref.match(/^([A-Z]+)(\d+)$/); return { col: m[1], lin: +m[2] }; }
+
+// Modo células: [["B7", valor, "estilo"], ...] + mesclagens ("B7:H7") + larguras por letra.
+// Células cobertas por uma mesclagem recebem borda/fundo da primeira célula (fica igual à planilha do departamento ao colar).
+function planilhaCelulas({ celulas, merges = [], larguras = {} }) {
+    const mapa = new Map();
+    for (const [ref, v, est] of celulas) mapa.set(ref, { v, s: ESTILO[est] ?? 0 });
+    for (const m of merges) {
+        const [a, b] = m.split(':').map(partesRef);
+        const base = mapa.get(`${a.col}${a.lin}`);
+        for (let l = a.lin; l <= b.lin; l++) for (let c = indiceColuna(a.col); c <= indiceColuna(b.col); c++) {
+            const ref = `${coluna(c - 1)}${l}`;
+            if (!mapa.has(ref)) mapa.set(ref, { v: null, s: base?.s ?? 0 });
+        }
+    }
+    const porLinha = new Map();
+    for (const [ref, cel] of mapa) { const { col, lin } = partesRef(ref); if (!porLinha.has(lin)) porLinha.set(lin, []); porLinha.get(lin).push({ ref, c: indiceColuna(col), ...cel }); }
+    const rows = [...porLinha.keys()].sort((a, b) => a - b).map(lin => {
+        const cels = porLinha.get(lin).sort((a, b) => a.c - b.c).map(({ ref, v, s }) => {
+            if (v === null || v === undefined || v === '') return `<c r="${ref}" s="${s}"/>`;
+            if (typeof v === 'number' && isFinite(v)) return `<c r="${ref}" s="${s}"><v>${v}</v></c>`;
+            return `<c r="${ref}" s="${s}" t="inlineStr"><is><t xml:space="preserve">${esc(v)}</t></is></c>`;
+        }).join('');
+        return `<row r="${lin}"${lin === 2 ? ' ht="30" customHeight="1"' : ''}>${cels}</row>`;
+    }).join('');
+    const cols = Object.entries(larguras).map(([l, w]) => [indiceColuna(l), w]).sort((a, b) => a[0] - b[0])
+        .map(([i, w]) => `<col min="${i}" max="${i}" width="${w}" customWidth="1"/>`).join('');
+    return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">${cols ? `<cols>${cols}</cols>` : ''}<sheetData>${rows}</sheetData>${merges.length ? `<mergeCells count="${merges.length}">${merges.map(m => `<mergeCell ref="${m}"/>`).join('')}</mergeCells>` : ''}</worksheet>`;
+}
 
 function planilha({ linhas, larguras = [], cabecalho = false }) {
     const cols = larguras.length ? `<cols>${larguras.map((w, i) => `<col min="${i + 1}" max="${i + 1}" width="${w}" customWidth="1"/>`).join('')}</cols>` : '';
@@ -106,7 +154,7 @@ function gerarXlsx(abas) {
         { nome: 'xl/_rels/workbook.xml.rels', dados: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${abas.map((_, i) => `<Relationship Id="rId${i + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${i + 1}.xml"/>`).join('')}<Relationship Id="rId${abas.length + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>` },
         { nome: 'xl/styles.xml', dados: ESTILOS },
-        ...abas.map((a, i) => ({ nome: `xl/worksheets/sheet${i + 1}.xml`, dados: planilha(a) }))
+        ...abas.map((a, i) => ({ nome: `xl/worksheets/sheet${i + 1}.xml`, dados: a.celulas ? planilhaCelulas(a) : planilha(a) }))
     ];
     return zip(arquivos);
 }

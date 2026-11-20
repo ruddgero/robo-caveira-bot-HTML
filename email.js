@@ -33,10 +33,11 @@ function iniciar() {
 function configurado() { return !!transporte; }
 function motivoIndisponivel() { return motivo; }
 
-async function enviar({ para, cc, assunto, corpo, responderPara }) {
+async function enviar({ para, cc, assunto, corpo, responderPara, anexos }) {
     if (!transporte) throw new Error(motivo);
     if (!para) throw new Error('Sem destinatário (líder de plantão sem e-mail).');
-    await transporte.sendMail({ from: remetente, to: para, cc: cc || undefined, replyTo: responderPara || undefined, subject: assunto, text: corpo });
+    await transporte.sendMail({ from: remetente, to: para, cc: cc || undefined, replyTo: responderPara || undefined, subject: assunto, text: corpo,
+        attachments: (anexos || []).map(a => ({ filename: a.nome, content: a.dados })) });
 }
 
 module.exports = { iniciar, configurado, motivoIndisponivel, enviar };
