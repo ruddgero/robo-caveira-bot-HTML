@@ -82,6 +82,12 @@ Entrada na portaria: 14:50Hs
 - **🖨️ Resumo para a gerência**: uma página (PDF) com os números, as frases, os tipos, os pontos críticos, a reincidência e as empresas do recorte escolhido.
 - **📍 Locais** (admin): grafias parecidas e locais com complemento já vêm juntos; para juntar dois locais, dê o mesmo nome aos dois. O texto do ROI não muda.
 
+## Padrão do relatório (o robô arruma sozinho)
+- **Item 5:** avisos do mesmo assunto com títulos diferentes viram um só (vale o texto mais recente; do antigo só fica o que o novo não diz). Nomes de pessoas e empresas ficam com inicial maiúscula; registros internos do robô não aparecem no relatório.
+- **Item 6:** "Destracado" → "Desatracado."; "Saida de seis tripulantes a passeio. Até o presente momento não retornaram" → "Saída a passeio de 06 tripulantes. Não retornaram até o presente momento."
+- **Item 4:** "Vide e-mail" → "Detalhes no e-mail encaminhado."
+- **Antes de publicar** o robô avisa: KM final igual ao inicial, data já passada dentro de um aviso, previsão de manobra com horário vencido e linha solta no texto.
+
 ## Errou a mensagem?
 - **Apague e mande de novo** ou **edite** no grupo: o robô sempre fica com a **última versão**.
 - O que o robô não tiver certeza vai para **⚠️ A confirmar** (terminal diferente do navio atracado, nome parecido, sem horário…). Toque e confirme.

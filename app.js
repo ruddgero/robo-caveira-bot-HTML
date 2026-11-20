@@ -848,7 +848,7 @@ function pedirHora(titulo, fn, msg) {
 // Passar o mouse mostra tudo; tocar/clicar abre a pendência, onde ficam as ações (atualizar, dar baixa, corrigir).
 const ROTULO_TIPO = { AVISO: '📌 Aviso', DIGITAL: '🛠️ Digital', PROJETO: '📐 Projeto' };
 function cartaoPendenciaRapida(p) {
-  const ult = [...(p.historico || [])].reverse().find(h => h.tipo !== 'CRIACAO');
+  const ult = [...(p.historico || [])].reverse().find(h => h.tipo !== 'CRIACAO' && h.tipo !== 'SISTEMA');
   const etapas = p.etapas || [];
   const feitas = etapas.filter(e => e.feito).length;
   const proxima = etapas.find(e => !e.feito);
@@ -961,7 +961,7 @@ function novaPendencia(tipo, inicial = {}, entradaId = null, sugestaoId = null) 
 function abrirPendencia(p) {
   const aberta = p.status === 'ABERTA';
   const linhaTempo = el('div', { class: 'linha-tempo' }, [...p.historico].reverse().map(h => el('div', { class: `evento ${h.tipo}` },
-    el('div', { class: 'meta', text: `${h.data} ${h.hora}h · ${h.por} · ${h.tipo === 'CRIACAO' ? 'criou' : h.tipo === 'CONCLUSAO' ? 'deu baixa' : h.origem === 'grupo' ? 'mensagem do grupo' : h.origem === 'relatorio' ? 'atividade do relatório' : 'atualizou'}` }),
+    el('div', { class: 'meta', text: `${h.data} ${h.hora}h · ${h.por} · ${h.tipo === 'CRIACAO' ? 'criou' : h.tipo === 'CONCLUSAO' ? 'deu baixa' : h.tipo === 'SISTEMA' ? 'robô (junção)' : h.origem === 'grupo' ? 'mensagem do grupo' : h.origem === 'relatorio' ? 'atividade do relatório' : 'atualizou'}` }),
     h.texto ? el('div', { text: h.texto }) : null)));
   const acao = async (fn, msg) => { try { await fn(); fecharModal(); aviso(msg); await recarregarTudo(); } catch (e) { aviso(e.message, true); } };
 
