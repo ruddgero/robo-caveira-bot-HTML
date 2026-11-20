@@ -162,6 +162,18 @@ async function carregar() {
         if (JSON.stringify(estado.ficha.navios) !== antes) { await store.set('ficha', estado.ficha); await store.set('operacoes', estado.operacoes); console.log('🚢 [NAVIOS] Seção 6 organizada (um tópico por navio).'); }
     }
     if (arrumarPendencias()) { await store.set('pendencias', estado.pendencias); console.log('🧹 [PENDÊNCIAS] Títulos arrumados e repetidas juntadas.'); }
+    // mensagens recentes que hoje são reconhecidas como operação (ex.: saída a passeio sem a palavra "tripulantes"):
+    // atualiza a leitura para o "Usar de novo › Operação de bordo" já vir preenchido
+    const limite48h = Date.now() - 48 * 3600 * 1000;
+    let releu = 0;
+    for (const it of estado.entrada) {
+        if ((it.ts || 0) < limite48h || it.sugestao === 'OPERACAO' || !it.texto) continue;
+        const c = R.classificarMensagem(it.texto, naviosConhecidos(), it.hora);
+        if (c.sugestao !== 'OPERACAO') continue;
+        Object.assign(it, { sugestao: 'OPERACAO', rascunhos: c.rascunhos, campos: c.campos, estruturada: c.estruturada, padronizada: padronizar(c) });
+        releu++;
+    }
+    if (releu) { await store.set('entrada', estado.entrada); console.log(`🔁 [ENTRADA] ${releu} mensagem(ns) relida(s) como operação de bordo.`); }
     await require('./roi').carregar();   // ROIs (Relatório de Ocorrência Interna)
 }
 

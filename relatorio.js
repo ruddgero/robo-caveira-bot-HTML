@@ -723,6 +723,9 @@ const ROTULOS = [
     [/^(placa|placas)$/, 'placa'],
     [/^(entrada|entrada (na |da )?portaria|horario (inicial|de entrada)|hora (inicial|de entrada|entrada)|inicio|chegada)$/, 'horaInicial'],
     [/^(saida|saida (na |da )?portaria|horario (final|de saida)|hora (final|de saida|saida)|termino)$/, 'horaFinal'],
+    // "ENTRADA PELO CAIS DO PIER AS: 14:50", "ENTROU ÀS", "SAÍDA PELO GATE ÀS"
+    [/^(entrada|entrou|chegada|chegou)\b.*\b(as|a|horario|hora)$/, 'horaInicial'],
+    [/^(saida|saiu)\b.*\b(as|horario|hora)$/, 'horaFinal'],
     [/^(quantidade|quantos|qtd|qtde|tripulantes|n de tripulantes|quantidade de tripulantes|qtd de tripulantes)$/, 'quantidade'],
     [/^(movimento|embarque ou desembarque|movimentacao|tipo de movimentacao|tipo de movimento)$/, 'movimento'],
     [/^(embarque|embarques|qtd embarque|qtd de embarque|quantidade de embarque)$/, 'qtdEmbarque'],
@@ -809,7 +812,7 @@ function lerMensagemPadrao(textoOriginal) {
 const RE_RUIDO = /^(bom dia|boa tarde|boa noite|ok|okay|blz|beleza|valeu|vlw|obrigad[oa]|grato|ciente|recebido|show|top|joia|tmj|positivo|copiado|qsl|sim|nao|opa|ola|oi|bom plantao|boa folga|bom descanso|amem|kkk+|rs+|ha(ha)+)(\s+(a todos|pessoal|equipe|galera|irmao|chefe))?[\s!.,]*$/;
 const RE_URGENTE = /\b(acidente|incendio|fogo|ferid[oa]s?|ambulancia|vazamento|invasao|socorrid[oa]|alagamento|sinistro|colisao|obito|afogamento|explosao|disparo|arma de fogo|emergencia)\b/;
 const RE_OCORRENCIA = /\b(avaria|danificad[oa]|quebr(ou|ado|ada)|furto|roubo|arrombamento|apreensao|inconformidade|irregularidade|recusad[oa]|barrad[oa]|sem autorizacao|nao autorizad[oa]|arriada)\b/;
-const RE_OPERACAO = /\b(rancho|provis(ao|oes)|tripulantes?|tripulacao|residuos?|agua potavel|bunker|combustivel|dta|pecas de bordo|sobressalentes|k9|mergulho|lacre|deslacracao)\b/;
+const RE_OPERACAO = /\b(passeio|shore leave|atendimento medico|rancho|provis(ao|oes)|tripulantes?|tripulacao|residuos?|agua potavel|bunker|combustivel|dta|pecas de bordo|sobressalentes|k9|mergulho|lacre|deslacracao)\b/;
 const RE_DIGITAL = /\b(digital|spda|dps|cftv|cameras?|fibra|nobreak|postes?|filtragem)\b/;
 const RE_NAVIO = /\b(atracad[oa]|desatracad[oa]|atracacao|desatracacao|fundead[oa]|fundeio|pratico|eta|etb|etd|amarrad[oa]|em manobra)\b/;
 const RE_AVISO = /\b(acompanhar|atentar|programad[oa] para|aguardando|pendente|previsto para|prevista para|amanha|verificar)\b/;
@@ -911,6 +914,8 @@ function rascunhosOperacao(textoOriginal, horaMensagem, navios = NAVIOS_PADRAO) 
         const terminal = terminalEscrito || conhecido?.terminal || '';
         if (!terminal) { conferir.push('Terminal não informado — confirmar'); escolhas.push({ campo: 'terminal', rotulo: 'Terminal', opcoes: ['T-ORE', 'T-OIL'] }); }
         if (!nomeFinal) conferir.push('Navio não informado — confirmar');
+        // tripulantes sem quantidade (ex.: van que entra para a saída a passeio): registra mesmo assim e avisa
+        if (tipo === 'TRIPULACAO' && !qtd && !qE && !qD) alertas.push('Quantidade de tripulantes não informada — completar na operação');
         return {
             tipo,
             navio: nomeFinal,
