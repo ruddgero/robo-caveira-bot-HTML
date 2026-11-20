@@ -841,12 +841,20 @@ function abrirOperacao(o) {
   const linhas = [
     ['Tipo', o.rotuloTipo], ['Navio', o.navio], ['Terminal', o.terminal],
     o.tipo === 'TRIPULACAO' ? ['Tripulantes', `${o.movimento || ''} · ${o.quantidade || '?'}`] : null,
-    ['Empresa', o.empresa], ['Motorista', o.responsavel], ['Ajudante', o.ajudante], ['Veículo', `${o.veiculo || ''} ${o.placa || ''}`.trim()],
+    o.tipo === 'TRIPULACAO' && /^Sa[ií]da/i.test(o.movimento || '') ? ['Retorno', o.horaRetorno ? o.horaRetorno + 'h' : 'não retornaram'] : null,
+    ['Empresa', o.empresa], ['Motorista(s)', o.responsavel], ['Agente', o.agente], ['Ajudante(s)', o.ajudante], ['A bordo', o.aBordo],
+    ['Veículo', `${o.veiculo || ''} ${o.placa || ''}`.trim()], ['Observações', o.observacoes],
     ['Entrada', o.horaInicial ? o.horaInicial + 'h' : '—'], ['Saída', o.horaFinal ? o.horaFinal + 'h' : 'aguardando']
   ].filter(x => x && x[1]);
   abrirModal(`${o.rotuloTipo} · ${o.navio || ''}`, [
+    ...(o.conferir || []).map(t => el('div', { class: 'citacao', style: 'border-left-color:var(--vermelho)', text: '⚠️ ' + t })),
+    ...(o.alertas || []).map(t => el('p', { class: 'mudo pequeno', style: 'margin:0', text: 'ℹ️ ' + t })),
+    o.email?.alteradoAposEnvio ? el('div', { class: 'citacao', text: '⚠️ A operação mudou depois que o e-mail foi enviado — reenviar a versão corrigida.' }) : null,
     el('div', { class: 'grade-2' }, linhas.map(([k, v]) => el('div', {}, el('div', { class: 'mudo pequeno', text: k }), el('div', { text: v })))),
-    o.origem?.autor ? el('p', { class: 'mudo pequeno', style: 'margin:0', text: `Informado por ${o.origem.autor} no grupo.` }) : null
+    o.origem?.autor ? el('p', { class: 'mudo pequeno', style: 'margin:0', text: `Informado por ${o.origem.autor} no grupo.` }) : null,
+    (o.historico || []).length ? el('details', {}, el('summary', { class: 'mudo pequeno', text: `Histórico de alterações (${o.historico.length})` }),
+      ...o.historico.map(h => el('p', { class: 'mudo pequeno', style: 'margin:4px 0', text: `${(h.em || '').slice(0, 16).replace('T', ' ')} · ${h.origem}: ` +
+        Object.entries(h.mudou || {}).map(([k, v]) => `${k} "${v.de}" → "${v.para}"`).join('; ') }))) : null
   ], [
     el('button', { class: 'btn fantasma pequeno', onclick: async () => {
       if (await confirmar('Excluir operação?', `${o.rotuloTipo} · ${o.navio}`, 'Excluir', true)) {
@@ -987,18 +995,21 @@ function abrirFormOperacao(op = {}, ctx = {}) {
   const naviosIniciais = ctx.navios || (v.navio ? [v.navio] : []);
   const [cNavio, iNavio] = editando ? L('Navio', 'navio') : campoTexto('Navio(s) — um por linha · cada navio gera o seu e-mail', naviosIniciais.join('\n'), { linhas: 2, placeholder: 'BARCELONA SPIRIT' });
   const [cEmp, iEmp] = L('Empresa / agência / fornecedor', 'empresa');
-  const [cResp, iResp] = L('Motorista / agente', 'responsavel');
-  const [cAju, iAju] = L('Ajudante', 'ajudante');
+  const [cResp, iResp] = L('Motorista(s)', 'responsavel', 'separe com /');
+  const [cAge, iAge] = L('Agente', 'agente');
+  const [cAju, iAju] = L('Ajudante(s)', 'ajudante', 'separe com vírgula');
+  const [cBor, iBor] = L('A bordo', 'aBordo', 'quem fica a bordo');
   const [cVei, iVei] = L('Veículo', 'veiculo', 'CAMINHÃO, VAN…');
-  const [cPla, iPla] = L('Placa', 'placa', 'ABC-1D23');
+  const [cPla, iPla] = L('Placa(s)', 'placa', 'ABC-1D23 / XYZ-9K76');
   const [cQtd, iQtd] = L('Quantos tripulantes', 'quantidade', '03');
   const [cHi, iHi] = L('Horário inicial', 'horaInicial', 'HH:MM');
   const [cHf, iHf] = L('Horário final (saída)', 'horaFinal', 'vazio = em andamento');
+  const [cRet, iRet] = L('Retorno dos tripulantes', 'horaRetorno', 'vazio = não retornaram');
   const autoridade = el('input', { type: 'text', value: v.autoridades || tipos[tipo.value]?.autoridade || '', placeholder: tipos[tipo.value]?.autoridade });
   let autoridadePadrao = tipos[tipo.value]?.autoridade || '';
   const [cObs, iObs] = campoTexto('Observações', v.observacoes, { linhas: 2, placeholder: 'S/A' });
 
-  const tripulacao = el('div', { class: 'grade-2' }, cQtd, el('label', { class: 'campo' }, 'Movimento', movimento));
+  const tripulacao = el('div', {}, el('div', { class: 'grade-2' }, cQtd, el('label', { class: 'campo' }, 'Movimento', movimento)), cRet);
   const ajustar = () => {
     tripulacao.hidden = tipo.value !== 'TRIPULACAO';
     const nova = tipos[tipo.value]?.autoridade || '';
@@ -1007,19 +1018,15 @@ function abrirFormOperacao(op = {}, ctx = {}) {
   };
   tipo.addEventListener('change', ajustar); ajustar();
 
-  let chkAtiv = null, txtAtiv = null;
+  // operações de bordo vão só para o navio (seção 6) e para o e-mail — nunca para as Atividades (seção 4)
   const extras = [];
-  if (ctx.item) {
-    chkAtiv = el('input', { type: 'checkbox', checked: true });
-    [, txtAtiv] = campoTexto('', ctx.atividade || ctx.item.texto, { linhas: 2 });
-    extras.push(el('label', { class: 'check' }, chkAtiv, 'Registrar também nas Atividades (seção 4)'), txtAtiv);
-    chkAtiv.addEventListener('change', () => { txtAtiv.hidden = !chkAtiv.checked; });
-  }
+  const avisosConferir = [...new Set([...(v.conferir || []), ...(ctx.item?.rascunhos || []).flatMap(r => r.conferir || [])])];
+  const avisosInfo = [...new Set([...(v.alertas || []), ...(ctx.item?.rascunhos || []).flatMap(r => r.alertas || [])])];
 
   const dadosForm = () => ({
     tipo: tipo.value, terminal: terminal.value, quantidade: iQtd.value, movimento: movimento.value,
-    empresa: iEmp.value, responsavel: iResp.value, ajudante: iAju.value, veiculo: iVei.value, placa: iPla.value,
-    horaInicial: iHi.value, horaFinal: iHf.value, autoridades: autoridade.value, observacoes: iObs.value
+    empresa: iEmp.value, responsavel: iResp.value, agente: iAge.value, ajudante: iAju.value, aBordo: iBor.value, veiculo: iVei.value, placa: iPla.value,
+    horaInicial: iHi.value, horaFinal: iHf.value, horaRetorno: iRet.value, autoridades: autoridade.value, observacoes: iObs.value
   });
   const copiarDoForm = async () => {
     try {
@@ -1034,10 +1041,12 @@ function abrirFormOperacao(op = {}, ctx = {}) {
 
   abrirModal(editando ? 'Editar operação de bordo' : '✉️ Operação de bordo', [
     ctx.citacao || null,
+    ...avisosConferir.map(t => el('div', { class: 'citacao', style: 'border-left-color:var(--vermelho)', text: '⚠️ ' + t })),
+    ...avisosInfo.map(t => el('p', { class: 'mudo pequeno', style: 'margin:0', text: 'ℹ️ ' + t })),
     el('div', { class: 'grade-2' }, el('label', { class: 'campo' }, 'Tipo', tipo), el('label', { class: 'campo' }, 'Terminal', terminal)),
     cNavio, tripulacao,
     el('div', { class: 'grade-2' }, cHi, cHf),
-    cEmp, el('div', { class: 'grade-2' }, cResp, cAju),
+    cEmp, el('div', { class: 'grade-2' }, cResp, cAge), el('div', { class: 'grade-2' }, cAju, cBor),
     el('div', { class: 'grade-2' }, cVei, cPla),
     el('label', { class: 'campo' }, 'Autorizado por (Autoridades)', autoridade),
     cObs, ...extras,
@@ -1052,7 +1061,7 @@ function abrirFormOperacao(op = {}, ctx = {}) {
       if (!navios.length) throw new Error('Informe o navio.');
       await api('POST', '/api/operacoes', {
         operacoes: navios.map(n => ({ ...dados, navio: n })),
-        atividadeTexto: chkAtiv?.checked ? txtAtiv.value.trim() : '',
+        atividadeTexto: '',
         entradaId: ctx.item?.id || null, autor: ctx.item?.autor || ''
       });
     }
@@ -1689,7 +1698,8 @@ async function publicar() {
       return abrirModal('Não dá para publicar agora', [el('p', { text: problema }), el('p', { class: 'mudo', text: 'Você pode copiar o texto e colar no grupo.' })], [
         el('button', { class: 'btn primario', onclick: () => { copiar(t.whatsapp); fecharModal(); } }, '📋 Copiar texto')]);
     }
-    const abertas = S.central.operacoes.filter(o => !o.horaFinal);
+    // em aberto: sem saída do veículo, ou tripulantes em saída a passeio/médico que não retornaram
+    const abertas = S.central.operacoes.filter(o => !o.horaFinal || (o.tipo === 'TRIPULACAO' && /^Sa[ií]da/i.test(o.movimento || '') && !o.horaRetorno && (!o.fichaId || o.fichaId === f.id)));
     const passar = new Set(abertas.map(o => o.id));
     const linhaOp = o => {
       const chk = el('input', { type: 'checkbox', checked: true, onchange: e => { e.target.checked ? passar.add(o.id) : passar.delete(o.id); } });
@@ -1697,7 +1707,7 @@ async function publicar() {
         el('div', {}, el('strong', { text: `${o.rotuloTipo} – ${o.navio || 'navio?'}` }),
           el('div', { class: 'mudo pequeno', text: `${o.terminal || ''}${o.placa ? ' · placa ' + o.placa : ''} · entrada ${o.horaInicial || '?'}` })),
         el('div', { class: 'linha' },
-          el('button', { class: 'btn verde pequeno', onclick: () => { fecharModal(); registrarSaida(o, null, publicar); } }, '🏁 Registrar saída agora'),
+          o.horaFinal ? null : el('button', { class: 'btn verde pequeno', onclick: () => { fecharModal(); registrarSaida(o, null, publicar); } }, '🏁 Registrar saída agora'),
           el('label', { class: 'check', style: 'margin:0' }, chk, 'Passar para o próximo turno')));
     };
     const prox = f.turno === 'DIURNO' ? `NOTURNO ${f.data}` : `DIURNO do dia seguinte`;

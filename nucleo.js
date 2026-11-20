@@ -7,7 +7,7 @@ const store = require('./store');
 const R = require('./relatorio');
 const usuarios = require('./usuarios');
 const email = require('./email');
-const { agora, novoId, semAcento, chaveTurno, normalizarHora, normalizarPlaca, normalizarTerminal, limparMarcador } = require('./util');
+const { agora, novoId, semAcento, chaveTurno, normalizarHora, normalizarPlaca, lerPlacas, placasEmComum, normalizarTerminal, limparMarcador } = require('./util');
 
 const LIMITE_ENTRADA = 400;
 const LIMITE_RELATORIOS = 10;
@@ -391,7 +391,8 @@ async function aposPublicar(texto, usuario, { passarOps = [] } = {}) {
     // operações sem saída que o líder decidiu passar adiante
     let passadas = 0;
     for (const o of ops) {
-        if (o.horaFinal || !passarOps.includes(o.id)) continue;
+        const semRetorno = o.tipo === 'TRIPULACAO' && /^Sa[ií]da/i.test(o.movimento || '') && !o.horaRetorno;
+        if ((o.horaFinal && !semRetorno) || !passarOps.includes(o.id)) continue;
         o.fichaId = nova.id;
         o.linhaNavio = null;
         if (o.navio && o.terminal) {
@@ -408,14 +409,16 @@ async function aposPublicar(texto, usuario, { passarOps = [] } = {}) {
 }
 
 // Navios conhecidos = cadastro + navios que já estão na seção 6 do turno
+// Os navios que estão na seção 6 do turno vêm primeiro: o terminal onde o navio está agora vale mais que o cadastro.
 function naviosConhecidos() {
-    const lista = [...(estado.config.navios || [])];
+    const lista = [];
     const f = estado.ficha || {};
     for (const [k, term] of [['tore', 'T-ORE'], ['toil', 'T-OIL']]) {
         for (const n of f.navios?.[k] || []) {
             if (n.navio && !lista.some(x => R.chaveNavio(x.nome) === R.chaveNavio(n.navio))) lista.push({ nome: n.navio, terminal: term });
         }
     }
+    for (const n of estado.config.navios || []) if (!lista.some(x => R.chaveNavio(x.nome) === R.chaveNavio(n.nome))) lista.push(n);
     return lista;
 }
 
@@ -683,8 +686,8 @@ async function excluirPendencia(id, usuario) {
 // =====================================================================
 // Operações de bordo + e-mail para o líder de plantão
 // =====================================================================
-const CAMPOS_OPERACAO = ['tipo', 'navio', 'terminal', 'empresa', 'responsavel', 'ajudante', 'veiculo', 'placa', 'quantidade',
-    'movimento', 'horaInicial', 'horaFinal', 'autoridades', 'autorizadoTerminal', 'observacoes', 'status'];
+const CAMPOS_OPERACAO = ['tipo', 'navio', 'terminal', 'empresa', 'responsavel', 'agente', 'ajudante', 'aBordo', 'veiculo', 'placa', 'quantidade',
+    'movimento', 'horaInicial', 'horaFinal', 'horaRetorno', 'autoridades', 'autorizadoTerminal', 'observacoes', 'status', 'conferir', 'alertas'];
 
 function limparOperacao(d) {
     const o = {};
@@ -692,10 +695,12 @@ function limparOperacao(d) {
     if (o.tipo && !R.TIPOS_OPERACAO[o.tipo]) o.tipo = R.tipoOperacaoDoTexto(o.tipo);
     if (o.navio !== undefined) o.navio = o.navio.toUpperCase();
     if (o.terminal !== undefined) o.terminal = normalizarTerminal(o.terminal) || o.terminal.toUpperCase();
-    if (o.placa !== undefined) o.placa = normalizarPlaca(o.placa) || o.placa.toUpperCase();
+    if (o.placa !== undefined) o.placa = lerPlacas(o.placa).texto || o.placa.toUpperCase();   // várias placas: nenhuma é descartada
     if (o.horaInicial !== undefined) o.horaInicial = normalizarHora(o.horaInicial);
     if (o.horaFinal !== undefined) o.horaFinal = normalizarHora(o.horaFinal);
-    for (const k of ['empresa', 'responsavel', 'ajudante', 'veiculo']) if (o[k] !== undefined) o[k] = o[k].toUpperCase();
+    if (o.horaRetorno !== undefined) o.horaRetorno = normalizarHora(o.horaRetorno);
+    for (const k of ['empresa', 'responsavel', 'agente', 'ajudante', 'aBordo', 'veiculo']) if (o[k] !== undefined) o[k] = o[k].toUpperCase();
+    for (const k of ['conferir', 'alertas']) if (o[k] !== undefined && !Array.isArray(o[k])) delete o[k];
     return o;
 }
 
@@ -759,7 +764,7 @@ function minutasPendentes() {
         .map(o => ({ id: o.id, navio: o.navio, tipo: o.tipo, status: o.email?.status || 'PENDENTE', ...R.minutaEmail(o) }));
 }
 
-// Cria uma operação por navio, a linha da seção 4 e as linhas da seção 6
+// Cria uma operação por navio e as linhas da seção 6 (operações de bordo não vão para a seção 4)
 async function registrarOperacoes(rascunhos, { atividadeTexto = '', entradaId = null, autor = '', usuario = null } = {}) {
     if (!rascunhos?.length) throw erro('Nenhuma operação informada.');
     const t = agora();
@@ -768,7 +773,7 @@ async function registrarOperacoes(rascunhos, { atividadeTexto = '', entradaId = 
         const o = limparOperacao({ autoridades: '', autorizadoTerminal: '', observacoes: '', status: 'Sem alteração', ...r });
         if (o.navio) {
             const conhecido = R.acharNavio(o.navio, naviosConhecidos());
-            o.navio = conhecido ? conhecido.nome : R.nomeNavioLimpo(o.navio);
+            o.navio = R.nomeNavioLimpo(conhecido ? conhecido.nome : o.navio);
             if (!o.terminal && conhecido) o.terminal = conhecido.terminal;
         }
         if (!o.autoridades) o.autoridades = (R.TIPOS_OPERACAO[o.tipo] || R.TIPOS_OPERACAO.OUTRA).autoridade;
@@ -818,16 +823,32 @@ async function registrarSaida(id, hora, usuario = null) {
 async function atualizarOperacao(id, dados, usuario) {
     const o = operacao(id);
     const tinhaSaida = !!o.horaFinal;
-    Object.assign(o, limparOperacao(dados));
+    const limpos = limparOperacao(dados);
+    registrarHistorico(o, limpos, usuario ? usuario.nome : 'Correção');
+    Object.assign(o, limpos);
     if (o.navio) {
         const conhecido = R.acharNavio(o.navio, naviosConhecidos());
-        o.navio = conhecido ? conhecido.nome : R.nomeNavioLimpo(o.navio);
+        o.navio = R.nomeNavioLimpo(conhecido ? conhecido.nome : o.navio);
     }
+    if (usuario && dados.conferir === undefined) o.conferir = [];   // o líder conferiu e salvou
     await alterarFicha(f => linhaDoNavio(f, o));
     await salvarOperacoes();
     auditar(usuario, 'Editou operação de bordo', `${o.navio} · ${R.TIPOS_OPERACAO[o.tipo]?.rotulo}`);
     if (!tinhaSaida && o.horaFinal) enviarEmailOperacao(o, { usuario }).catch(() => {});
     return o;
+}
+
+// Guarda o que mudou na operação (nada se perde: o valor antigo fica no histórico)
+function registrarHistorico(o, novos, origem) {
+    const mudou = {};
+    for (const [k, v] of Object.entries(novos)) {
+        if (['conferir', 'alertas'].includes(k)) continue;
+        if ((o[k] ?? '') !== (v ?? '')) mudou[k] = { de: o[k] ?? '', para: v ?? '' };
+    }
+    if (!Object.keys(mudou).length) return false;
+    o.historico = [...(o.historico || []), { em: agora().iso, origem, mudou }].slice(-30);
+    if (o.email?.enviadoEm) o.email.alteradoAposEnvio = agora().iso;   // e-mail já tinha saído: avisar para reenviar
+    return true;
 }
 
 async function excluirOperacao(id, usuario) {
@@ -852,7 +873,8 @@ async function marcarEmailOperacao(id, campo, usuario) {
 function salvarEntradaDepois() { salvarDepois('entrada', () => estado.entrada); }
 
 async function receberMensagem(msg) {
-    // msg: { id, editaId, chatId, grupoNome, autor, remetenteNumero, texto, timestamp, fromMe, historico }
+    // msg: { id, editaId, apagaId, chatId, grupoNome, autor, remetenteNumero, texto, timestamp, fromMe, historico }
+    if (msg.apagaId) return mensagemApagada(msg.apagaId);
     if (!msg.texto || !msg.texto.trim()) return;
     if (estado.entrada.some(e => e.id === msg.id)) return;
 
@@ -865,25 +887,19 @@ async function receberMensagem(msg) {
         return registrarRelatorio({ texto: msg.texto, autor: msg.autor, grupoNome: msg.grupoNome, chatId: msg.chatId, mensagemTs: msg.timestamp });
     }
 
-    const t = agora(new Date(msg.timestamp || Date.now()));
-    const c = R.classificarMensagem(msg.texto, naviosConhecidos(), t.hora);
-
     if (msg.editaId) {
         const original = estado.entrada.find(e => e.id === msg.editaId);
-        if (original) {
-            Object.assign(original, { texto: msg.texto.trim(), editado: true, campos: c.campos, urgente: c.urgente, rascunhos: c.rascunhos, atividade: c.atividade || '' });
-            if (original.status !== 'usado') { original.sugestao = c.sugestao; original.status = c.ruido ? 'ignorado' : 'pendente'; }
-            salvarEntradaDepois();
-            return;
-        }
+        if (original) return mensagemEditada(original, msg.texto);
     }
 
+    const t = agora(new Date(msg.timestamp || Date.now()));
+    const c = R.classificarMensagem(msg.texto, naviosConhecidos(), t.hora);
     const item = {
-        id: msg.id, chatId: msg.chatId, grupoNome: msg.grupoNome || '', autor: msg.autor || '',
+        id: msg.editaId || msg.id, chatId: msg.chatId, grupoNome: msg.grupoNome || '', autor: msg.autor || '',
         texto: msg.texto.trim(), ts: msg.timestamp || Date.now(), data: t.data, hora: t.hora,
         fromMe: !!msg.fromMe, sugestao: c.sugestao, urgente: c.urgente, campos: c.campos,
         rascunhos: c.rascunhos, estruturada: c.estruturada, atividade: c.atividade || '',
-        status: c.ruido ? 'ignorado' : 'pendente', destino: null
+        status: c.ruido ? 'ignorado' : 'pendente', destino: null, editado: !!msg.editaId
     };
     estado.entrada.push(item);
     estado.entrada.sort((a, b) => a.ts - b.ts);
@@ -902,10 +918,111 @@ async function receberMensagem(msg) {
     if (item.urgente && Date.now() - item.ts < 30 * 60 * 1000 && handlers.alerta && estado.config.alertasAtivos) handlers.alerta(item);
 }
 
-function mesmaPlaca(a, b) { return a && b && a.replace(/-/g, '') === b.replace(/-/g, ''); }
+// ---------------------------------------------------------------------
+// Mensagem apagada no grupo: o que ela gerou sai do relatório e dos e-mails
+// ---------------------------------------------------------------------
+async function mensagemApagada(id) {
+    const item = estado.entrada.find(e => e.id === id);
+    if (!item || item.apagado) return;
+    item.apagado = agora().iso;
+    item.status = 'ignorado';
+    const removidas = [], mantidas = [];
+    for (const opId of item.opIds || []) {
+        const o = estado.operacoes.find(x => x.id === opId);
+        if (!o) continue;
+        if (o.email?.enviadoEm) {
+            // e-mail já saiu: não apaga sozinho, deixa para o líder decidir
+            o.conferir = [...new Set([...(o.conferir || []), 'A mensagem do grupo que gerou esta operação foi APAGADA, mas o e-mail já tinha sido enviado — conferir'])];
+            mantidas.push(o);
+        } else {
+            estado.operacoes = estado.operacoes.filter(x => x.id !== o.id);
+            if (o.linhaNavio) await alterarFicha(f => linhaDoNavio(f, o, true));
+            removidas.push(o);
+        }
+    }
+    item.opIds = mantidas.map(o => o.id);
+    item.destino = [
+        'Apagada no grupo',
+        removidas.length ? `${removidas.length} operação(ões) retirada(s) do relatório` : '',
+        mantidas.length ? `${mantidas.length} com e-mail já enviado — conferir` : ''
+    ].filter(Boolean).join(' · ');
+    await salvarOperacoes();
+    salvarEntradaDepois();
+    if (removidas.length || mantidas.length) auditar(null, 'Mensagem apagada no grupo', `${item.autor} · ${item.hora} · ${item.destino}`);
+    // mensagens que estavam paradas como "possível duplicidade" desta operação agora podem seguir
+    const ids = new Set(removidas.map(o => o.id));
+    for (const outro of estado.entrada.filter(e => e.duplicataDe && ids.has(e.duplicataDe) && e.status === 'pendente')) {
+        outro.duplicataDe = null; outro.destino = null;
+        await processarAutomatico(outro).catch(e => console.error('⚠️  Automação:', e.message));
+    }
+}
+
+// ---------------------------------------------------------------------
+// Mensagem editada no grupo: relatório e e-mail acompanham a correção
+// ---------------------------------------------------------------------
+async function mensagemEditada(item, textoNovo) {
+    const t = agora(new Date(item.ts || Date.now()));
+    const c = R.classificarMensagem(textoNovo, naviosConhecidos(), t.hora);
+    item.textoOriginal = item.textoOriginal || item.texto;
+    Object.assign(item, { texto: textoNovo.trim(), editado: agora().iso, campos: c.campos, urgente: c.urgente, rascunhos: c.rascunhos, estruturada: c.estruturada, atividade: c.atividade || '', sugestao: c.sugestao });
+
+    const ops = (item.opIds || []).map(id => estado.operacoes.find(o => o.id === id)).filter(Boolean);
+    if (!ops.length) {
+        // ainda não tinha virado operação: reavalia do zero
+        if (item.status !== 'usado') {
+            item.status = c.ruido ? 'ignorado' : 'pendente'; item.destino = null; item.duplicataDe = null;
+            if (Date.now() - item.ts < DOZE_HORAS) await processarAutomatico(item).catch(e => console.error('⚠️  Automação:', e.message));
+        }
+        salvarEntradaDepois();
+        return;
+    }
+
+    const rasc = c.sugestao === 'OPERACAO' ? (c.rascunhos || []) : [];
+    let alteradas = 0;
+    await alterarFicha(f => {
+        ops.forEach((o, i) => {
+            const r = rasc[i];
+            if (!r) return;
+            const novos = limparOperacao({ ...r, horaFinal: r.horaFinal || o.horaFinal || '' });
+            if (registrarHistorico(o, novos, 'Mensagem editada no grupo')) alteradas++;
+            Object.assign(o, novos);
+            linhaDoNavio(f, o);
+        });
+    });
+    // a edição tirou navios da mensagem: as operações que sobraram ficam para o líder conferir
+    for (const o of ops.slice(rasc.length)) {
+        o.conferir = [...new Set([...(o.conferir || []), 'A mensagem do grupo foi editada e não cita mais esta operação — conferir'])];
+    }
+    // a edição acrescentou navios: cria as operações novas
+    if (rasc.length > ops.length) {
+        const novas = await registrarOperacoes(rasc.slice(ops.length), { entradaId: item.id, autor: item.autor });
+        item.opIds = [...item.opIds, ...novas.map(o => o.id)];
+    }
+    const base = String(item.destino || 'Operação de bordo').replace(/ · editada no grupo.*$/, '');
+    item.destino = `${base} · editada no grupo${alteradas ? ` (${alteradas} operação(ões) corrigida(s))` : ''}`;
+    await salvarOperacoes();
+    salvarEntradaDepois();
+    if (alteradas) auditar(null, 'Operação corrigida pela edição no grupo', `${item.autor} · ${ops.map(o => o.navio).join(', ')}`);
+}
+
+function mesmaPlaca(a, b) { return placasEmComum(a, b); }
 function mesmoNavio(a, b) {
-    const n = x => semAcento(x || '').toUpperCase().replace(/^MV\s*-?\s*/, '').replace(/[^A-Z0-9]/g, '');
-    return !a || !b || n(a) === n(b);
+    return !a || !b || R.chaveNavio(a) === R.chaveNavio(b);
+}
+function minutos(h) { const m = String(h || '').match(/^(\d{2}):(\d{2})$/); return m ? +m[1] * 60 + +m[2] : null; }
+
+// Mesma operação já registrada (mensagem repetida/reenviada)?
+function operacaoParecida(r, item) {
+    const ficha = estado.ficha || {};
+    return estado.operacoes.find(o => {
+        if (o.origem?.entradaId === item.id) return false;
+        if (o.fichaId !== ficha.id && o.horaFinal) return false;
+        if (!o.navio || !r.navio || R.chaveNavio(o.navio) !== R.chaveNavio(r.navio) || o.tipo !== r.tipo) return false;
+        if (r.tipo === 'TRIPULACAO' && (o.movimento !== r.movimento || (o.quantidade || '') !== (r.quantidade || ''))) return false;
+        if (r.placa && o.placa) return mesmaPlaca(o.placa, r.placa);
+        const a = minutos(o.horaInicial), b = minutos(r.horaInicial);
+        return a !== null && b !== null && Math.abs(a - b) <= 30;
+    });
 }
 
 async function processarAutomatico(item) {
@@ -917,6 +1034,34 @@ async function processarAutomatico(item) {
         const suficiente = item.estruturada || (r0.terminal && (r0.placa || r0.empresa || r0.quantidade));
         if (!suficiente) return;
 
+        // "Retorno dos 05 tripulantes do navio X": fecha a saída a passeio em aberto (não cria operação nova)
+        if (item.rascunhos.every(r => r.tipo === 'TRIPULACAO' && r.movimento === 'Retorno')) {
+            let fechadas = 0;
+            for (const r of item.rascunhos) {
+                const saida = estado.operacoes.filter(o => o.tipo === 'TRIPULACAO' && /^Sa[ií]da/i.test(o.movimento || '') && !o.horaRetorno && mesmoNavio(o.navio, r.navio))
+                    .sort((a, b) => (b.criadoEm || '').localeCompare(a.criadoEm || ''))[0];
+                if (!saida) continue;
+                registrarHistorico(saida, { horaRetorno: r.horaInicial || item.hora }, 'Retorno informado no grupo');
+                saida.horaRetorno = r.horaInicial || item.hora;
+                await alterarFicha(f => linhaDoNavio(f, saida));
+                fechadas++;
+            }
+            await salvarOperacoes();
+            item.status = fechadas ? 'usado' : 'pendente';
+            item.destino = fechadas ? 'Retorno dos tripulantes registrado (automático)' : '⚠️ A confirmar: retorno de tripulantes sem saída a passeio em aberto para este navio';
+            salvarEntradaDepois();
+            return;
+        }
+
+        // dúvida não vira operação sozinha: fica "a confirmar" com o motivo
+        const duvidas = [...new Set(item.rascunhos.flatMap(r => r.conferir || []))];
+        if (duvidas.length) {
+            item.status = 'pendente';
+            item.destino = '⚠️ A confirmar: ' + duvidas.join(' | ');
+            salvarEntradaDepois();
+            return;
+        }
+
         const abertas = estado.operacoes.filter(o => !o.horaFinal);
         const criar = [];
         let saidas = 0;
@@ -926,11 +1071,19 @@ async function processarAutomatico(item) {
                 await registrarSaida(aberta.id, r.horaFinal || item.campos?.hora || item.hora, null);
                 saidas++;
             } else if (!ehSaida || r.horaFinal) {
+                const igual = operacaoParecida(r, item);
+                if (igual) {
+                    item.status = 'pendente';
+                    item.duplicataDe = igual.id;
+                    item.destino = `⚠️ Possível duplicidade: já existe ${R.TIPOS_OPERACAO[igual.tipo]?.rotulo || 'operação'} no ${igual.navio}${igual.horaInicial ? ' (' + igual.horaInicial + 'h)' : ''} — conferir`;
+                    salvarEntradaDepois();
+                    return;
+                }
                 criar.push(r);
             }
         }
         if (criar.length) {
-            const novas = await registrarOperacoes(criar, { atividadeTexto: R.atividadeDasOperacoes(criar, item.hora), entradaId: item.id, autor: item.autor });
+            const novas = await registrarOperacoes(criar, { entradaId: item.id, autor: item.autor });
             item.opIds = [...(item.opIds || []), ...novas.map(o => o.id)];
         }
         if (criar.length || saidas) {

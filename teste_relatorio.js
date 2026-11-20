@@ -85,22 +85,23 @@ assert.strictEqual(o1.responsavel, 'RAFAEL SILVA');
 assert.strictEqual(o1.ajudante, 'VITOR DOS SANTOS');
 assert.strictEqual(o1.placa, 'RJG-9D19');
 assert.strictEqual(o1.horaFinal, '19:01');
-const ativ = R.atividadeDasOperacoes(c.rascunhos, '19:02');
-console.log('Atividade gerada:', ativ);
-assert.ok(ativ.includes('BARCELONA SPIRIT e NISSOS NIKOURIA') && ativ.includes('Saída às 19:01h.'));
-assert.ok(R.resumoNavio(o1).includes('placa RJG-9D19') && R.resumoNavio(o1).endsWith('Saída às 19:01h.'));
+// operação de bordo não vai para as Atividades (seção 4)
+assert.strictEqual(c.atividade, '');
+// seção 6: sucinta, sem horário, sem empresa/placa
+assert.strictEqual(R.resumoNavio(o1), 'Entrega de rancho.');
+assert.strictEqual(R.resumoNavio({ ...o1, horaFinal: '' }), 'Entrega de rancho. Em andamento.');
 
 // Mensagem do print: prefixo MV, 2º ajudante na linha de baixo, autoridade preenchida
 const prov = R.classificarMensagem('*ENTREGA DE PROVISÃO*\nTipo: Rancho\nTerminal: T-ore\nNavio: MV - Lila Psara\nEmpresa: Boa praça\nMotorista: Fernando Maforte\nAjudante: Valmir Felipe\nMarcos Bruno\nVeículo: Caminhão\nPlaca: GXM8B67\nEntrada: 10:48 horas', R.NAVIOS_PADRAO, '10:50');
 const p0 = prov.rascunhos[0];
 assert.strictEqual(prov.sugestao, 'OPERACAO');
-assert.strictEqual(p0.navio, 'MV - LILA PSARA');
+assert.strictEqual(p0.navio, 'LILA PSARA', 'sem o prefixo MV');
 assert.strictEqual(p0.ajudante, 'VALMIR FELIPE, MARCOS BRUNO');
 assert.strictEqual(p0.responsavel, 'FERNANDO MAFORTE');
 assert.strictEqual(p0.veiculo, 'CAMINHÃO');
 assert.strictEqual(p0.autoridades, 'Receita Federal');
 assert.strictEqual(p0.horaInicial, '10:48');
-assert.ok(prov.atividade.includes('ajudantes VALMIR FELIPE e MARCOS BRUNO'));
+assert.strictEqual(p0.placa, 'GXM-8B67');
 assert.strictEqual(R.acharNavio('NISSOS NIKURIA')?.nome, 'NISSOS NIKOURIA');
 assert.strictEqual(R.acharNavio('M/V Barcelona spirit')?.nome, 'BARCELONA SPIRIT');
 assert.strictEqual(R.acharNavio('NAVIO QUALQUER'), null);
@@ -121,10 +122,68 @@ assert.strictEqual(t1.tipo, 'TRIPULACAO');
 assert.strictEqual(t1.movimento, 'Desembarque');
 assert.strictEqual(t1.quantidade, '02');
 assert.strictEqual(t1.terminal, 'T-ORE');
-assert.ok(R.resumoNavio(t1).startsWith('14:20h Desembarque de 02 tripulantes'));
+assert.strictEqual(R.resumoNavio(t1), 'Desembarque de 02 tripulantes. Em andamento.');
+assert.strictEqual(R.resumoNavio({ ...t1, horaFinal: '15:00' }), 'Desembarque de 02 tripulantes.');
 const et = R.minutaEmail({ ...t1, horaFinal: '15:00' });
 assert.ok(et.corpo.includes('Autorizado por (Autoridades): Polícia Federal'));
-assert.ok(et.assunto.startsWith('MOVIMENTAÇÃO DE TRIPULAÇÃO - MV - LILA PSARA - T-ORE'));
+assert.ok(et.assunto.startsWith('MOVIMENTAÇÃO DE TRIPULAÇÃO - LILA PSARA - T-ORE'));
+
+// ---- Mensagens reais do grupo (19/11/2026): nada pode se perder
+const NAVIOS_TURNO = [...R.NAVIOS_PADRAO, { nome: 'MARTHA OLDENDORFF', terminal: 'T-ORE' }, { nome: 'UBUNTU HUMANITY', terminal: 'T-ORE' }];
+const embarque = 'Embarque Definitivo 01 tripulante\n\nMotorista: ROSSINE GUEDES \nEmpresa: LS LOCAÇÕES \nVeículo: CRONOS\nPlaca: SSA-0F86\nAgente: DIEGO ALVARADO \nEmpresa: LS LOCAÇÕES\nNavio: MARTHA OLDENDORFF\nTerminal: T.ORE\nEntrada  na portaria: 14:50Hs';
+const em = R.classificarMensagem(embarque, NAVIOS_TURNO, '15:22').rascunhos[0];
+assert.strictEqual(em.terminal, 'T-ORE');
+assert.strictEqual(em.horaInicial, '14:50', 'horário da mensagem, não o da postagem');
+assert.strictEqual(em.movimento, 'Embarque definitivo');
+assert.strictEqual(em.quantidade, '01');
+assert.strictEqual(em.responsavel, 'ROSSINE GUEDES');
+assert.strictEqual(em.agente, 'DIEGO ALVARADO');
+assert.strictEqual(em.empresa, 'LS LOCAÇÕES', 'empresa repetida igual não duplica');
+assert.deepStrictEqual(em.conferir, []);
+assert.strictEqual(R.resumoNavio(em), 'Embarque definitivo de 01 tripulante. Em andamento.');
+const emEmail = R.minutaEmail({ ...em, data: '19/11/2026' }).corpo;
+assert.ok(emEmail.includes('DIEGO ALVARADO (AGENTE) / ROSSINE GUEDES (MOTORISTA)'));
+assert.ok(emEmail.includes('Embarque ou desembarque: Embarque definitivo'));
+
+// a versão apagada dizia T.OIL: conflito com o navio atracado no T-ORE → a confirmar
+const emErrado = R.classificarMensagem(embarque.replace('T.ORE', 'T.OIL'), NAVIOS_TURNO, '15:21').rascunhos[0];
+assert.ok(emErrado.conferir.some(t => t.includes('T-OIL') && t.includes('T-ORE')), 'terminal divergente vai para "a confirmar"');
+
+const rancho = '*ENTREGA DE PROVISÃO*\n*Tipo:* RANCHO\n*Terminal:* T.ORE\n*Navio:* UBUNTU HUMANITY\n*Empresa:* BOA PRAÇA\n*Motoristas:* FERNANDO\nQUEROZ / WALQUER CHAGAS\n*AJUDANTES :JOÃO EVERTON , GUSTAVO GOMES  *A BORDO*\nMYCAION REIS\n*Veículo:* CAMINHÃO /MOBI\n*Placa:* GXM- 8B67 / RBI- 458\n*Entrada Portaria:* 14:45H';
+const ra = R.classificarMensagem(rancho, NAVIOS_TURNO, '15:23').rascunhos[0];
+assert.strictEqual(ra.tipo, 'RANCHO');
+assert.strictEqual(ra.terminal, 'T-ORE');
+assert.strictEqual(ra.horaInicial, '14:45');
+assert.strictEqual(ra.responsavel, 'FERNANDO QUEROZ / WALQUER CHAGAS', 'motoristas no plural e quebra de linha');
+assert.strictEqual(ra.ajudante, 'JOÃO EVERTON, GUSTAVO GOMES');
+assert.strictEqual(ra.aBordo, 'MYCAION REIS');
+assert.strictEqual(ra.veiculo, 'CAMINHÃO / MOBI');
+assert.strictEqual(ra.placa, 'GXM-8B67 / RBI-458', 'as duas placas, mesmo a incompleta');
+assert.ok(ra.alertas.some(t => t.includes('RBI-458')), 'placa incompleta gera alerta');
+assert.strictEqual(R.resumoNavio(ra), 'Entrega de rancho. Em andamento.');
+const raEmail = R.minutaEmail({ ...ra, data: '19/11/2026' }).corpo;
+console.log('\n--- E-MAIL RANCHO 19/11 ---\n' + raEmail + '\n--------------');
+assert.ok(raEmail.includes('CAMINHÃO - Placa GXM-8B67 / MOBI - Placa RBI-458'));
+assert.ok(raEmail.includes('A bordo: MYCAION REIS'));
+assert.ok(raEmail.includes('FERNANDO QUEROZ / WALQUER CHAGAS / JOÃO EVERTON, GUSTAVO GOMES'));
+
+// linha que o robô não conhece vai para Observações (não se perde)
+const extra = R.classificarMensagem('*ENTREGA DE PROVISÃO*\nTipo: Rancho\nTerminal: T-ORE\nNavio: UBUNTU HUMANITY\nEmpresa: Boa Praça\nLacre: 123456\nPlaca: GXM8B67\nEntrada: 10:00', NAVIOS_TURNO).rascunhos[0];
+assert.ok(extra.observacoes.includes('Lacre: 123456'));
+
+// saída a passeio / retorno
+const passeio = R.classificarMensagem('Saída a passeio de 5 Tripulantes\nNavio- Ubuntu Humanity\nTerminal: T-ORE\nEmpresa: LS LOCAÇÕES', NAVIOS_TURNO, '14:36').rascunhos[0];
+assert.strictEqual(passeio.movimento, 'Saída a passeio');
+assert.strictEqual(passeio.navio, 'UBUNTU HUMANITY');
+assert.strictEqual(R.resumoNavio({ ...passeio, horaFinal: '14:40' }), 'Saída a passeio de 05 tripulantes. Não retornaram até o presente momento.');
+assert.strictEqual(R.resumoNavio({ ...passeio, quantidade: '01' }), 'Saída a passeio de 01 tripulante. Não retornou até o presente momento.');
+assert.strictEqual(R.resumoNavio({ ...passeio, horaRetorno: '18:00' }), 'Saída a passeio de 05 tripulantes. Retornaram ao terminal.');
+assert.strictEqual(R.movimentoDoTexto('Retorno ao terminal dos 05 tripulantes do navio Ubuntu Humanity'), 'Retorno');
+
+// nome do navio parecido (1 letra) → a confirmar
+const parecido = R.classificarMensagem('*ENTREGA DE PROVISÃO*\nTipo: Rancho\nTerminal: T-OIL\nNavio: NISSOS NIKURIA\nEmpresa: X\nPlaca: ABC1D23\nEntrada: 10:00').rascunhos[0];
+assert.strictEqual(parecido.navio, 'NISSOS NIKOURIA');
+assert.ok(parecido.conferir.some(t => t.includes('parecido')));
 
 // ---- Outras classificações
 const s = m => R.classificarMensagem(m).sugestao;
@@ -143,7 +202,7 @@ R.adicionarLinhaNavio(nova, 'T-OIL', 'BARCELONA SPIRIT', 'Fornecimento de Rancho
 R.adicionarLinhaNavio(nova, 'T-ORE', 'LILA PSARA', 'Desembarque de 02 tripulantes.');
 assert.strictEqual(nova.navios.tore.length, 1, 'LILA PSARA = MV - LILA PSARA (não duplica)');
 nova.vtr.kmFinal = 19372;
-nova.atividades.push({ id: 'a', texto: ativ });
+nova.atividades.push({ id: 'a', texto: 'Realizada ronda no perímetro.' });
 const avisos = [{ titulo: 'URNAS DA CIPA', texto: 'Verificar status das chaves.', historico: [{ tipo: 'ATUALIZACAO', data: '14/11', hora: '21:10', texto: 'Chaves com o vigilante.' }] }];
 const texto = R.formatarRelatorio(nova, avisos);
 console.log('\n--- RELATÓRIO ---\n' + texto + '\n-----------------');

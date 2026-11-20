@@ -80,6 +80,11 @@ Sem essas variáveis, tudo funciona, mas o e-mail não sai sozinho. Use **Copiar
 1. **Central:** o líder toca em **Assumir plantão**. O relatório anterior já vem herdado. Se aparecer "Chegou um relatório novo", escolha herdar ou manter o turno.
 2. **Pendências:** toque em cada uma para atualizar ou **Concluir com tratativa**. Avisos abertos passam para o próximo turno.
 3. **Entrada:** mensagens no formato padrão são registradas sozinhas e vão para "Tratadas". As demais vão para o destino que você escolher.
+   - Operações de bordo vão **só para o navio (seção 6)** e para o e-mail, nunca para as Atividades (seção 4).
+   - Seção 6 sem horário nas operações: "Embarque de 01 tripulante.", "Entrega de rancho. Em andamento.", "Saída a passeio de 05 tripulantes. Não retornaram até o presente momento.". Horário só nas manobras e previsões.
+   - **⚠️ A confirmar:** terminal da mensagem diferente do navio atracado, nome de navio parecido, terminal ausente ou mais de um horário. Toque e confirme.
+   - **Apagou no grupo** → a operação sai do relatório e do e-mail (se o e-mail já foi enviado, fica marcada para conferir). **Editou no grupo** → relatório e e-mail são corrigidos, com histórico.
+   - **Possível duplicidade:** mensagem repetida do mesmo navio/operação não vira duas operações.
 4. **E-mails:** chegam no e-mail do líder. Confira, anexe as evidências, encaminhe e toque em **✓ Encaminhado**.
 5. **Relatório:** confira as 8 seções, abra a **Prévia** e toque em **Publicar**. O relatório sai pelo WhatsApp do líder de plantão.
 6. **Fim da escala:** abra **📦 Passagem da escala**, revise, edite e publique.
