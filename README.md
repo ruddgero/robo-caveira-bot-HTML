@@ -14,7 +14,7 @@ Central do plantão do CCOS:
 
 ## 📁 Arquivos (todos na raiz do repositório)
 
-`index.js` · `servidor.js` · `nucleo.js` · `relatorio.js` · `usuarios.js` · `whatsapp.js` · `email.js` · `store.js` · `util.js` · `sessaoFirestore.js` · `index.html` · `app.js` · `style.css` · `sw.js` · `manifest.json` · `icon.svg` · `package.json` · `teste_relatorio.js` · `Dockerfile` · `.env.example` · `.gitignore` · `README.md`
+`index.js` · `servidor.js` · `nucleo.js` · `relatorio.js` · `usuarios.js` · `whatsapp.js` · `email.js` · `store.js` · `util.js` · `roi.js` · `xlsx.js` · `xlsx_leitura.js` · `modelos/roi/` (modelo do ROI em branco) · `sessaoFirestore.js` · `index.html` · `app.js` · `style.css` · `sw.js` · `manifest.json` · `icon.svg` · `package.json` · `teste_relatorio.js` · `Dockerfile` · `.env.example` · `.gitignore` · `README.md`
 
 ---
 
@@ -93,6 +93,9 @@ Sem essas variáveis, tudo funciona, mas o e-mail não sai sozinho. Use **Copiar
 
 ## 🚢 Planilha de navios (T-ORE / T-OIL)
 Ao publicar o relatório, o robô gera a planilha do turno no mesmo layout das planilhas do departamento e manda no WhatsApp do líder (e no e-mail dele, se configurado). Usa só o que foi validado no relatório: manobras do item 6 e operações do turno. DTA conta como Peça; caixa de mar (T-ORE) por berço Leste/Oeste e bordo E/B. Prévia a qualquer momento em **Relatório › 🚢 Planilha navios**.
+
+## 📄 ROI (Relatório de Ocorrência Interna)
+Plantão › **ROI**. Numeração automática NNN/AAAA a partir do controle anual (próximo 031/2026), linha no item 7 só quando o ROI é registrado, simulado com selo, até 8 fotos (câmera ou galeria), Excel no modelo da equipe com evidências, PDF e controle anual. **Os controles dos anos anteriores não ficam no GitHub** (têm nomes e detalhes das ocorrências): o administrador importa as planilhas pelo app (**ROI › 📥 Importar controle anual**), e os dados ficam só no armazenamento do robô (Firestore/pasta dados).
 
 ## 🧪 Testar com a conversa real do grupo
 WhatsApp › grupo › ⋮ › Mais › **Exportar conversa** › Sem mídia. Depois:

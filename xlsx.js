@@ -159,4 +159,4 @@ function gerarXlsx(abas) {
     return zip(arquivos);
 }
 
-module.exports = { gerarXlsx, crc32 };
+module.exports = { gerarXlsx, crc32, zip };

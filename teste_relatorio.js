@@ -303,4 +303,17 @@ assert.strictEqual(R.juntarNomes(['Gustavo Ramos', 'Ítalo']), 'Gustavo Ramos e 
 assert.throws(() => R.lerEquipesComPipe('Gustavo e Ítalo'));
 assert.strictEqual(R.lerEquipesComPipe('Gustavo Ramos e Ítalo | Renan Neves e Ewerton').assumindo, 'Renan Neves e Ewerton');
 assert.ok(R.formatarRelatorio(R.fichaVazia(), []).includes('*8. PASSAGEM DE TURNO*\n\n*EQUIPE SAINDO:*\nConforme escala\n\n*EQUIPE ASSUMINDO:*\nConforme escala'));
+
+// ---- ROI (Relatório de Ocorrência Interna)
+const ROI = require('./roi');
+for (const [t, g] of [['G5-Ação Preventiva', 'G5'], ['G.1 Acidente', 'G1'], ['G1A - Acidente', 'G1'], ['G3 - Atos Ilícitos - SIMULADO', 'G3'], ['G 2 - Quebra', 'G2']]) assert.strictEqual(ROI.codigoDoTipo(t), g, t);
+assert.deepStrictEqual(ROI.lerNumero('001/21'), { seq: 1, ano: 2021 });
+assert.strictEqual(ROI.numeroRoi(31, 2026), '031/2026');
+assert.strictEqual(ROI.linhaItem7({ numero: '031/2026', tipo: 'G1', local: 'Canteiro das Contratadas' }), 'Foi registrado o ROI Nº 031/2026 (G1 – Acidentes) – Canteiro das Contratadas.');
+assert.strictEqual(ROI.linhaItem7({ numero: '032/2026', tipo: 'G3', local: 'Portaria Principal', simulado: true }), 'Foi registrado o ROI Nº 032/2026 (G3 – Atos ilícitos) – Portaria Principal (SIMULADO).');
+const locais = ROI.agruparLocais(['Portaria Principal ', 'Portaria Pincipal', 'portaria principal', 'Estacionamento ADM 01', 'Estacionamento ADM 02']);
+assert.strictEqual(locais[0].nome, 'Portaria Principal'); assert.strictEqual(locais[0].total, 3);
+assert.strictEqual(locais.length, 3);   // ADM 01 ≠ ADM 02
+assert.strictEqual(ROI.adivinharTipo('Caminhão atinge cabos aéreos'), 'G1');
+assert.strictEqual(ROI.adivinharTipo('Porta de contêiner destrancada'), 'G5');
 console.log('\n✅ Todos os testes passaram.');
