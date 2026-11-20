@@ -59,6 +59,13 @@ function idEditado(message) {
     return m?.protocolMessage?.editedMessage ? m.protocolMessage.key?.id : (m?.editedMessage ? m.editedMessage.message?.protocolMessage?.key?.id : null);
 }
 
+// Mensagem apagada "para todos": protocolMessage do tipo REVOKE (0) aponta o id da mensagem apagada
+function idApagado(message) {
+    const m = message?.ephemeralMessage?.message || message;
+    const p = m?.protocolMessage;
+    return p && (p.type === 0 || p.type === 'REVOKE') && p.key?.id ? p.key.id : null;
+}
+
 function timestampMs(t) {
     if (!t) return Date.now();
     const n = typeof t === 'object' ? (t.toNumber ? t.toNumber() : Number(t.low)) : Number(t);
@@ -76,6 +83,8 @@ async function processar(s, m, historico) {
         const chatId = m.key?.remoteJid || '';
         if (!chatId.endsWith('@g.us') || !m.message) return;
         if (!h.gruposDe(s.uid).includes(chatId)) return;
+        const apagaId = idApagado(m.message);
+        if (apagaId) return await h.mensagem({ apagaId, chatId, timestamp: timestampMs(m.messageTimestamp), historico, viaUid: s.uid });
         const texto = textoDaMensagem(m.message);
         if (!texto) return;
         const participante = m.key.participant || m.participant || '';
@@ -157,6 +166,24 @@ async function conectar(s) {
     sock.ev.on('groups.update', ups => ups.forEach(u => u.subject && nomesGrupos.set(u.id, u.subject)));
     sock.ev.on('messaging-history.set', ({ messages }) => { if (atual()) (messages || []).forEach(m => processar(s, m, true)); });
     sock.ev.on('messages.upsert', ({ messages, type }) => { if (atual()) (messages || []).forEach(m => processar(s, m, type !== 'notify')); });
+    // Edições e exclusões também chegam por aqui (depende da versão do WhatsApp)
+    sock.ev.on('messages.update', updates => {
+        if (!atual()) return;
+        for (const { key, update } of updates || []) {
+            if (!key?.remoteJid?.endsWith('@g.us') || !h.gruposDe(s.uid).includes(key.remoteJid)) continue;
+            const apagada = update?.messageStubType === 1 || update?.message === null ||
+                (update?.message && idApagado(update.message));
+            if (apagada) {
+                const apagaId = (update?.message && idApagado(update.message)) || key.id;
+                h.mensagem({ apagaId, chatId: key.remoteJid, timestamp: Date.now(), historico: false, viaUid: s.uid }).catch(e => console.error('⚠️  [WHATSAPP] Exclusão:', e.message));
+                continue;
+            }
+            const editada = update?.message?.editedMessage?.message || update?.message?.protocolMessage?.editedMessage;
+            if (editada) {
+                processar(s, { key: { ...key, id: `${key.id}:edit:${Date.now()}` }, participant: key.participant, message: { protocolMessage: { key, editedMessage: editada } }, messageTimestamp: Math.floor(Date.now() / 1000) }, false);
+            }
+        }
+    });
 }
 
 function falha(s, e) {

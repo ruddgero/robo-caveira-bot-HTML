@@ -62,10 +62,31 @@ function normalizarHora(v) {
     return m ? `${m[1].padStart(2, '0')}:${m[2]}` : '';
 }
 
-// "rjg9d19", "RJG 9D19" → "RJG-9D19"
+// "rjg9d19", "RJG 9D19", "GXM- 8B67" → "RJG-9D19"
+const RE_PLACA = /\b([A-Z]{3})\s*-?\s*([0-9][A-Z0-9][0-9]{2})\b/;
 function normalizarPlaca(v) {
-    const m = String(v || '').toUpperCase().match(/\b([A-Z]{3})[\s\-]?([0-9][A-Z0-9][0-9]{2})\b/);
+    const m = String(v || '').toUpperCase().match(RE_PLACA);
     return m ? `${m[1]}-${m[2]}` : '';
+}
+
+// Várias placas num campo ("GXM- 8B67 / RBI- 458"). Nada é descartado:
+// placa válida vai padronizada; placa incompleta vai como foi escrita e entra em "incompletas".
+function lerPlacas(v) {
+    const partes = String(v || '').toUpperCase().split(/\s*(?:\/|,|;|\s+E\s+|\n)\s*/).map(x => x.trim()).filter(Boolean);
+    const placas = [], incompletas = [];
+    for (const p of partes) {
+        const ok = normalizarPlaca(p);
+        if (ok) { if (!placas.includes(ok)) placas.push(ok); continue; }
+        if (/\d/.test(p)) { const bruta = p.replace(/\s*-\s*/g, '-').replace(/\s+/g, ' '); placas.push(bruta); incompletas.push(bruta); }
+    }
+    return { placas, incompletas, texto: placas.join(' / ') };
+}
+
+// Compara placas (aceita campo com várias placas)
+function placasEmComum(a, b) {
+    const k = v => lerPlacas(v).placas.map(p => p.replace(/[^A-Z0-9]/g, ''));
+    const lb = k(b);
+    return k(a).some(p => p && lb.includes(p));
 }
 
 // "T.OIL", "TOIL", "Petróleo" → "T-OIL" ; "T.ORE", "Minério" → "T-ORE"
@@ -83,5 +104,5 @@ function normalizarTexto(t) {
 
 module.exports = {
     FUSO, agora, turnoPelaHora, dataDeOntem, diaSeguinte, dataDoTurno, chaveTurno, novoId, semAcento,
-    limparMarcador, normalizarHora, normalizarPlaca, normalizarTerminal, normalizarTexto
+    limparMarcador, normalizarHora, normalizarPlaca, lerPlacas, placasEmComum, normalizarTerminal, normalizarTexto
 };

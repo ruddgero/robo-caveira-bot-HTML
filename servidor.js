@@ -127,7 +127,7 @@ function marcas() {
     return {
         ficha: e.versao,
         pendencias: `${e.pendencias.length}:${e.pendencias.reduce((s, p) => s + (p.historico?.length || 0), 0)}:${e.pendencias.filter(p => p.status === 'ABERTA').length}`,
-        operacoes: `${e.operacoes.length}:${e.operacoes.filter(o => o.horaFinal).length}:${e.operacoes.filter(o => o.email?.enviadoEm || o.email?.erro).length}`,
+        operacoes: `${e.operacoes.length}:${e.operacoes.filter(o => o.horaFinal).length}:${e.operacoes.filter(o => o.email?.enviadoEm || o.email?.erro).length}:${e.operacoes.reduce((s, o) => s + (o.historico?.length || 0) + (o.conferir?.length || 0) + (o.horaRetorno ? 1 : 0), 0)}`,
         relatorios: `${e.relatorios[0]?.id || ''}:${e.relatorios[0]?.herdadoEm || ''}:${e.plantao.relatorioPendenteId || ''}`,
         historico: e.historico.length,
         plantao: `${e.plantao.liderId || ''}:${e.plantao.sugerirNovaEscala ? 1 : 0}:${e.escala?.id || ''}`
