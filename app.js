@@ -402,12 +402,12 @@ MQ_DESKTOP.addEventListener?.('change', () => { if (S.ficha) redesenharAba(); })
 // Navegação: 4 abas principais; Plantão e Pendências têm subabas
 // Tudo do turno fica em Plantão (Turno | Relatório | E-mails | Histórico; as mensagens do grupo abrem pelo Turno).
 // O menu Pendências é só da Segurança Patrimonial.
-const GRUPOS = { plantao: ['central', 'relatorio', 'emails', 'historico', 'entrada'], pendencias: ['pendencias'], painel: ['painel'] };
-const ROTULOS_SUB = { central: 'Turno', relatorio: 'Relatório', emails: 'E-mails', historico: 'Histórico' };
+const GRUPOS = { plantao: ['central', 'relatorio', 'emails', 'historico', 'roi', 'entrada'], pendencias: ['pendencias'], painel: ['painel'] };
+const ROTULOS_SUB = { central: 'Turno', relatorio: 'Relatório', emails: 'E-mails', historico: 'Histórico', roi: 'ROI' };
 const grupoDa = aba => Object.keys(GRUPOS).find(g => GRUPOS[g].includes(aba)) || 'plantao';
 const DESENHAR = {
   central: () => desenharCentral(), relatorio: () => desenharRelatorio(), emails: () => desenharEmails(),
-  pendencias: () => desenharPendencias(), entrada: () => desenharEntrada(), historico: () => desenharHistorico(), painel: () => desenharPainelGerencial()
+  pendencias: () => desenharPendencias(), entrada: () => desenharEntrada(), historico: () => desenharHistorico(), roi: () => desenharROI(), painel: () => desenharPainelGerencial()
 };
 function redesenharAba() { (DESENHAR[S.aba] || (() => {}))(); }
 
@@ -461,6 +461,7 @@ async function atualizarEstado() {
 
     if (m.relatorios !== a.relatorios && ant) aviso('📑 Relatório da equipe anterior atualizado');
     if (m.historico !== a.historico && ant) { S.historico = null; if (S.aba === 'historico' && livre) desenharHistorico(); }
+    if (m.rois !== a.rois && ant) { S.roi = null; if (S.aba === 'roi' && livre) desenharROI(); }
     if (m.pendencias !== a.pendencias || m.operacoes !== a.operacoes || m.relatorios !== a.relatorios || m.plantao !== a.plantao || m.ficha !== a.ficha) {
       await carregarCentral();
       if (['central', 'pendencias', 'emails'].includes(S.aba) && livre) redesenharAba();
@@ -1326,6 +1327,8 @@ function cartaoMensagem(item) {
   } else {
     acoes.push(el('button', { class: 'btn pequeno', onclick: () => marcarItem(item, 'pendente') }, 'Restaurar'));
   }
+  // ocorrência no grupo → rascunho de ROI
+  if ((item.sugestao === 'OCORRENCIA' || item.urgente) && !item.apagado && ehLider()) acoes.unshift(el('button', { class: 'btn pequeno', onclick: () => novoRoi({ entradaId: item.id }) }, '📄 Abrir ROI'));
   // mensagem do grupo convertida para o modelo padrão
   if (item.padronizada && !item.apagado) acoes.unshift(el('button', { class: 'btn fantasma pequeno', onclick: async () => { await copiar(item.padronizada); aviso('Mensagem no padrão copiada ✓'); } }, '💬 Padrão'));
   return el('article', { class: `msg${item.urgente && item.status === 'pendente' ? ' urgente' : ''}${item.status !== 'pendente' ? ' tratada' : ''}` },
@@ -2670,3 +2673,336 @@ async function abrirHistorico() {
     entrar();
   } catch (_) { mostrarLogin(); }
 })();
+
+// =====================================================================
+// ROI · Relatório de Ocorrência Interna (Plantão › ROI)
+// =====================================================================
+const ROI_CAMPOS_TEXTO = {
+  oque: 'O quê', onde: 'Onde', quando: 'Quando', quem: 'Quem', redacao: 'Redação da ocorrência', providencias: 'Providências', recomendacoes: 'Recomendações'
+};
+const ROI_IC = { G1: '💥', G2: '⚠️', G3: '🚔', G4: '✋', G5: '🛡️', G6: '📄' };
+
+async function carregarRois() { S.roi = await api('GET', '/api/roi'); }
+
+function seloSimulado() { return el('span', { class: 'etiqueta simulado', text: 'SIMULADO' }); }
+
+function desenharROI() {
+  const c = $('#aba-roi');
+  if (!S.roi) {
+    c.replaceChildren(el('div', { class: 'vazio' }, 'Carregando…'));
+    carregarRois().then(desenharROI).catch(e => aviso(e.message, true));
+    return;
+  }
+  const { rois, proximo } = S.roi;
+  S.filtroRoi = S.filtroRoi || 'todos';
+  const anos = [...new Set(rois.filter(r => r.ano).map(r => r.ano))].sort((a, b) => b - a);
+  const anoAtual = Number(agoraBR().data.slice(6));
+  if (S.anoRoi === undefined) S.anoRoi = anos.includes(anoAtual) ? anoAtual : (anos[0] || '');
+  const termo = semAcento(S.buscaRoi || '').toLowerCase().trim();
+  const itens = rois.filter(r => S.filtroRoi === 'rascunho' ? r.status === 'rascunho'
+    : S.filtroRoi === 'simulados' ? r.simulado && r.status !== 'rascunho'
+      : S.filtroRoi === 'classificar' ? r.aClassificar : true)
+    .filter(r => r.status === 'rascunho' || !S.anoRoi || termo || r.ano === S.anoRoi)
+    .filter(r => !termo || semAcento(`${r.numero} ${r.tipo} ${r.grupo} ${r.local} ${r.data} ${r.relator} ${r.descricao} ${r.titulo} ${r.simulado ? 'simulado' : ''}`).toLowerCase().includes(termo));
+  const cont = f => rois.filter(f).length;
+  const busca = el('input', { type: 'search', placeholder: 'Buscar por número, tipo, local, descrição, relator…', value: S.buscaRoi || '' });
+  busca.addEventListener('input', () => {
+    S.buscaRoi = busca.value; clearTimeout(S.timerBuscaRoi);
+    S.timerBuscaRoi = setTimeout(() => { desenharROI(); const b = $('#aba-roi input[type=search]'); if (b) { b.focus(); b.setSelectionRange(b.value.length, b.value.length); } }, 250);
+  });
+  const selAno = el('select', { onchange: e => { S.anoRoi = e.target.value ? Number(e.target.value) : ''; desenharROI(); } },
+    el('option', { value: '', text: 'Todos os anos' }), ...anos.map(a => el('option', { value: a, text: String(a) })));
+  selAno.value = S.anoRoi || '';
+  const filtros = [['todos', 'Todos'], ['rascunho', `Rascunhos (${cont(r => r.status === 'rascunho')})`], ['simulados', 'Simulados']];
+  if (cont(r => r.aClassificar)) filtros.push(['classificar', `A classificar (${cont(r => r.aClassificar)})`]);
+
+  c.replaceChildren(
+    el('section', { class: 'cartao' },
+      el('div', { class: 'cartao-topo' },
+        el('div', {}, el('h2', { text: 'ROI · Relatório de Ocorrência Interna' }),
+          el('p', { class: 'mudo pequeno', style: 'margin:4px 0 0', text: `Próximo número: ${proximo} · o número só é dado ao registrar.` })),
+        el('button', { class: 'btn primario', onclick: () => novoRoi() }, '+ Novo ROI')),
+      el('div', { class: 'linha', style: 'gap:8px;flex-wrap:wrap' },
+        S.anoRoi ? el('button', { class: 'btn pequeno', onclick: () => baixarArquivo(`/api/roi/controle/${S.anoRoi}/xlsx`, `ROI_${S.anoRoi}.xlsx`) }, `⬇️ Controle ${S.anoRoi} (Excel)`) : null,
+        ehAdmin() ? el('button', { class: 'btn pequeno', onclick: importarControleRoi }, '📥 Importar controle anual') : null),
+      el('div', { class: 'filtros' }, filtros.map(([v, t]) => el('button', { class: 'filtro' + (S.filtroRoi === v ? ' ativo' : ''), onclick: () => { S.filtroRoi = v; desenharROI(); } }, t))),
+      el('div', { class: 'grade-2' }, busca, selAno)),
+    itens.length ? el('div', { class: 'lista' }, itens.slice(0, 300).map(r => el('button', { class: 'linha-op', onclick: () => abrirRoi(r.id) },
+      el('span', { class: 'ic', text: ROI_IC[r.tipo] || '📝' }),
+      el('span', { style: 'min-width:0' },
+        el('div', { class: 'tit' }, r.status === 'rascunho' ? 'Rascunho' : `ROI ${r.numero}`, r.tipo ? ` · ${r.tipo} – ${r.grupo}` : '', ' ', r.simulado ? seloSimulado() : null,
+          r.status === 'cancelado' ? el('span', { class: 'etiqueta urgente', text: 'CANCELADO' }) : null),
+        el('div', { class: 'sub', text: [r.data, r.local, r.descricao.length > 110 ? r.descricao.slice(0, 107) + '…' : r.descricao].filter(Boolean).join(' · ') })),
+      el('span', { class: 'etiqueta-origem', text: r.origem === 'importado' ? 'Controle' : r.fotos ? `📷 ${r.fotos}` : (r.relator || '').split(' ')[0] }))))
+      : el('div', { class: 'vazio' }, el('span', { class: 'ic', text: '📄' }), termo ? 'Nada encontrado.' : 'Nenhum ROI aqui ainda.')
+  );
+}
+
+async function novoRoi(dados = {}) {
+  try {
+    const { roi } = await api('POST', '/api/roi', dados);
+    S.roi = null;
+    if (S.aba !== 'roi') trocarAba('roi'); else desenharROI();
+    abrirFormRoi(roi);
+  } catch (e) { aviso(e.message, true); }
+}
+
+async function abrirRoi(id) {
+  try { abrirFormRoi((await api('GET', `/api/roi/${encodeURIComponent(id)}`)).roi); }
+  catch (e) { aviso(e.message, true); }
+}
+
+// Reduz a foto no aparelho (até 1600 px, JPEG) para caber no envio
+async function reduzirFoto(arquivo) {
+  const url = URL.createObjectURL(arquivo);
+  try {
+    const img = await new Promise((ok, falha) => { const i = new Image(); i.onload = () => ok(i); i.onerror = () => falha(new Error('Não consegui abrir esta imagem.')); i.src = url; });
+    let lado = 1600, qualidade = 0.78, dados = '';
+    for (let tent = 0; tent < 5; tent++) {
+      const esc = Math.min(1, lado / Math.max(img.naturalWidth, img.naturalHeight));
+      const cv = el('canvas', { width: Math.round(img.naturalWidth * esc), height: Math.round(img.naturalHeight * esc) });
+      cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
+      dados = cv.toDataURL('image/jpeg', qualidade);
+      if (dados.length * 0.75 < 800 * 1024) break;
+      lado *= 0.8; qualidade -= 0.08;
+    }
+    return dados;
+  } finally { URL.revokeObjectURL(url); }
+}
+
+function abrirFormRoi(r) {
+  const meta = S.roi || { grupos: {}, locais: [], maxFotos: 8 };
+  const grupos = meta.grupos && Object.keys(meta.grupos).length ? meta.grupos
+    : { G1: 'Acidentes', G2: 'Quebra de procedimento', G3: 'Atos ilícitos', G4: 'Ameaças e agressões', G5: 'Ação preventiva', G6: 'Outros' };
+  const registrado = r.status === 'registrado', cancelado = r.status === 'cancelado';
+  const somenteLeitura = cancelado || (registrado && !ehLider());
+  const campos = {};
+  const linha = (rotulo, chave, opts = {}) => {
+    const [c, i] = opts.texto ? campoTexto(rotulo, r[chave], { linhas: opts.linhas || 3, placeholder: opts.placeholder }) : campoLinha(rotulo, r[chave], { placeholder: opts.placeholder, inputmode: opts.inputmode });
+    if (opts.lista) i.setAttribute('list', opts.lista);
+    if (somenteLeitura) i.disabled = true;
+    campos[chave] = i;
+    return c;
+  };
+  const selecao = (rotulo, chave, opcoes) => {
+    const s = el('select', { disabled: somenteLeitura }, opcoes.map(([v, t]) => el('option', { value: v, text: t })));
+    s.value = r[chave] || '';
+    campos[chave] = s;
+    return el('label', { class: 'campo' }, rotulo, s);
+  };
+  const simulado = el('input', { type: 'checkbox', checked: !!r.simulado, disabled: somenteLeitura });
+  const datalist = el('datalist', { id: 'roi-locais' }, (meta.locais || []).map(l => el('option', { value: l })));
+
+  // envolvidos e/ou testemunhas (até 10 linhas, como no modelo)
+  const envolvidos = (r.envolvidos || []).map(e => ({ ...e }));
+  const boxEnv = el('div', { class: 'lista' });
+  const desenharEnv = () => boxEnv.replaceChildren(...envolvidos.map((e, i) => el('div', { class: 'roi-env' },
+    ...[['nome', 'Nome'], ['matricula', 'Matrícula'], ['cargo', 'Cargo'], ['empresa', 'Empresa ou setor'], ['telefone', 'Tel. contato']].map(([k, ph]) =>
+      el('input', { type: 'text', value: e[k] || '', placeholder: ph, disabled: somenteLeitura, oninput: ev => { e[k] = ev.target.value; } })),
+    somenteLeitura ? null : el('button', { class: 'btn fantasma pequeno', title: 'Remover', onclick: () => { envolvidos.splice(i, 1); desenharEnv(); } }, '✕'))),
+    envolvidos.length < 10 && !somenteLeitura ? el('button', { class: 'btn pequeno', onclick: () => { envolvidos.push({}); desenharEnv(); } }, '+ Envolvido / testemunha') : null);
+  desenharEnv();
+
+  // autoridades acionadas
+  const aut = { ...(r.autoridades || {}) };
+  const autoridades = el('div', { class: 'grade-2' }, [['pm', 'Polícia Militar'], ['pf', 'Polícia Federal'], ['pc', 'Polícia Civil'], ['outras', 'Outras']].map(([k, t]) => {
+    const [c, i] = campoLinha(t, aut[k] || 'N/A'); i.disabled = somenteLeitura; i.addEventListener('input', () => { aut[k] = i.value; }); return c;
+  }));
+
+  // fotos (até 8, com legenda): galeria ou câmera
+  const legendas = {};
+  const boxFotos = el('div', { class: 'roi-fotos' });
+  const desenharFotos = () => {
+    boxFotos.replaceChildren(...(r.fotos || []).map((f, i) => el('div', { class: 'roi-foto' },
+      el('img', { src: `/api/roi/${encodeURIComponent(r.id)}/foto/${encodeURIComponent(f.id)}`, alt: f.legenda || 'Foto', loading: 'lazy' }),
+      el('input', { type: 'text', value: legendas[f.id] ?? f.legenda ?? '', placeholder: `${String(i + 1).padStart(2, '0')} · legenda`, disabled: somenteLeitura, oninput: ev => { legendas[f.id] = ev.target.value; } }),
+      somenteLeitura ? null : el('button', { class: 'btn fantasma pequeno', onclick: async () => {
+        if (!await confirmar('Remover foto', 'Remover esta foto do ROI?', 'Remover', true)) return abrirFormRoi(r);
+        try { await api('POST', `/api/roi/${encodeURIComponent(r.id)}/foto/${encodeURIComponent(f.id)}/excluir`); r.fotos = r.fotos.filter(x => x.id !== f.id); } catch (e) { aviso(e.message, true); }
+        abrirFormRoi(r);
+      } }, 'Remover'))));
+  };
+  desenharFotos();
+  const enviarFotos = async lista => {
+    for (const arq of [...lista]) {
+      if ((r.fotos || []).length >= (meta.maxFotos || 8)) { aviso(`O modelo comporta até ${meta.maxFotos || 8} fotos.`, true); break; }
+      try {
+        aviso('Enviando foto…');
+        const base64 = await reduzirFoto(arq);
+        const { foto } = await api('POST', `/api/roi/${encodeURIComponent(r.id)}/foto`, { base64, legenda: '' });
+        r.fotos = [...(r.fotos || []), foto];
+        desenharFotos();
+        aviso('Foto incluída ✓');
+      } catch (e) { aviso(e.message, true); }
+    }
+  };
+  const inpCamera = el('input', { type: 'file', accept: 'image/*', capture: 'environment', hidden: true, onchange: e => enviarFotos(e.target.files) });
+  const inpGaleria = el('input', { type: 'file', accept: 'image/*', multiple: true, hidden: true, onchange: e => enviarFotos(e.target.files) });
+
+  const coletar = () => {
+    const d = {};
+    for (const [k, i] of Object.entries(campos)) d[k] = i.value;
+    d.simulado = simulado.checked;
+    d.envolvidos = envolvidos;
+    d.autoridades = aut;
+    d.fotosLegendas = legendas;
+    return d;
+  };
+  const salvar = async () => {
+    const { roi } = await api('PUT', `/api/roi/${encodeURIComponent(r.id)}`, coletar());
+    S.roi = null; if (S.aba === 'roi') desenharROI();
+    return roi;
+  };
+
+  const historico = (r.historico || []).length ? el('details', { class: 'roi-hist' }, el('summary', { text: `Histórico de correções (${r.historico.length})` }),
+    ...r.historico.slice().reverse().map(h => el('div', { class: 'mudo pequeno', text: `${quando(h.em)} · ${h.por?.nome || ''} · ${h.origem}: ${Object.keys(h.campos || {}).join(', ')}` }))) : null;
+
+  const secao = (titulo, ...filhos) => el('fieldset', { class: 'roi-secao' }, el('legend', { text: titulo }), ...filhos);
+  const corpo = [
+    datalist,
+    registrado || cancelado ? el('div', { class: 'faixa info' },
+      el('strong', {}, `ROI Nº ${r.numero}`, ' ', r.simulado ? seloSimulado() : null, cancelado ? el('span', { class: 'etiqueta urgente', text: 'CANCELADO' }) : null),
+      r.linhaItem7 && !cancelado && r.origem !== 'importado' ? el('span', { class: 'mudo pequeno', text: `Item 7: ${r.linhaItem7}` }) : null,
+      r.origem === 'importado' ? el('span', { class: 'mudo pequeno', text: `Importado do controle anual${r.tipoOriginal ? ` · tipo na planilha: "${r.tipoOriginal}"` : ''}.` }) : null,
+      cancelado ? el('span', { class: 'mudo pequeno', text: `Motivo: ${r.motivoCancelamento || ''}` }) : null)
+      : el('div', { class: 'faixa' }, el('span', { class: 'mudo pequeno', text: `Rascunho. Ao registrar, recebe o número ${S.roi?.proximo || 'seguinte'} e a linha entra no item 7 do relatório do turno.` })),
+    secao('Identificação',
+      el('div', { class: 'grade-2' },
+        selecao('Código do ROI', 'tipo', [['', 'Escolha…'], ...Object.entries(grupos).map(([k, v]) => [k, `${k} – ${v}`])]),
+        el('label', { class: 'check', style: 'align-self:end;padding-bottom:10px' }, simulado, 'É simulado')),
+      linha('Título ou assunto', 'titulo', { placeholder: 'Ex.: ACIDENTES - DANOS EM MATERIAIS E/OU EQUIPAMENTOS' }),
+      el('div', { class: 'grade-2' }, linha('Relator', 'relator'), linha('Matrícula', 'matricula', { inputmode: 'numeric' }),
+        linha('Empresa', 'empresa'), selecao('Turno', 'turno', [['', '—'], ['Diurno', 'Diurno'], ['Noturno', 'Noturno']])),
+      linha('Área responsável', 'area')),
+    secao('Dados e informações pertinentes',
+      linha('Local (setor) — usado no item 7 e no indicador', 'local', { lista: 'roi-locais', placeholder: 'Ex.: Canteiro das Contratadas' }),
+      el('div', { class: 'grade-2' }, linha('Data', 'data', { placeholder: 'dd/mm/aaaa' }), linha('Hora', 'hora', { placeholder: 'hh:mm' })),
+      ...Object.entries(ROI_CAMPOS_TEXTO).map(([k, t]) => linha(t, k, { texto: true, linhas: k === 'redacao' ? 5 : 2 }))),
+    secao('Comunicação',
+      el('div', { class: 'grade-2' }, linha('Comunicante', 'comunicante'), linha('Função', 'funcao'), linha('Site', 'site'), linha('Responsável da área', 'responsavelArea'),
+        linha('Revisado por', 'revisadoPor'), linha('Ciência ao gestor', 'cienciaGestor'), linha('Tempo total do atendimento', 'tempoAtendimento'))),
+    secao('Bem ou patrimônio envolvido',
+      linha('Descrição', 'bemDescricao', { texto: true, linhas: 2 }),
+      el('div', { class: 'grade-3' }, linha('Quant.', 'bemQuant'), linha('Valor (unidade)', 'bemValorUnit'), linha('Valor total', 'bemValorTotal'))),
+    secao('Envolvidos e/ou testemunhas', boxEnv),
+    secao('Risco, observações e autoridades',
+      selecao('Risco de reincidência', 'risco', [['', '—'], ['Alto', 'Alto'], ['Médio', 'Médio'], ['Baixo', 'Baixo']]),
+      linha('ROI(s) anterior(es)', 'roisAnteriores'), linha('Observações', 'observacoes', { texto: true, linhas: 2 }),
+      autoridades, linha('Anexos', 'anexos', { texto: true, linhas: 2 })),
+    secao('Controle anual',
+      el('div', { class: 'grade-2' }, linha('Gestão', 'gestao'), linha('Data da comunicação', 'dataComunicacao'), linha('Destinatário', 'destinatario'))),
+    secao(`Evidências fotográficas (até ${meta.maxFotos || 8})`, boxFotos,
+      somenteLeitura ? null : el('div', { class: 'linha', style: 'gap:8px;flex-wrap:wrap' },
+        el('button', { class: 'btn', onclick: () => inpCamera.click() }, '📷 Tirar foto'),
+        el('button', { class: 'btn', onclick: () => inpGaleria.click() }, '🖼️ Escolher da galeria'), inpCamera, inpGaleria)),
+    historico
+  ];
+
+  const rodape = [];
+  const acao = (rotulo, classe, fn) => el('button', { class: `btn ${classe}`, onclick: async ev => {
+    ev.target.disabled = true;
+    try { await fn(); } catch (e) { aviso(e.message, true); } finally { ev.target.disabled = false; }
+  } }, rotulo);
+  if (r.status === 'rascunho') {
+    rodape.push(
+      acao('Descartar', 'fantasma', async () => {
+        if (!await confirmar('Descartar rascunho', 'O rascunho e as fotos serão apagados.', 'Descartar', true)) return abrirFormRoi(r);
+        await api('POST', `/api/roi/${encodeURIComponent(r.id)}/cancelar`, {}); fecharModal(); S.roi = null; desenharROI(); aviso('Rascunho descartado');
+      }),
+      acao('Salvar rascunho', '', async () => { await salvar(); fecharModal(); aviso('Rascunho salvo ✓'); }),
+      ehLider() ? acao(`Registrar ROI`, 'primario', async () => {
+        await salvar();
+        const ok = await confirmar('Registrar ROI', [`O ROI recebe o número ${S.roi?.proximo || (await api('GET', '/api/roi')).proximo} e a linha abaixo entra no item 7 do relatório do turno:`,
+          el('div', { class: 'citacao', text: `Foi registrado o ROI Nº … (${campos.tipo.value} – ${grupos[campos.tipo.value] || ''}) – ${campos.local.value}${simulado.checked ? ' (SIMULADO)' : ''}.` })], 'Registrar');
+        if (!ok) return abrirFormRoi({ ...r, ...coletar(), fotos: r.fotos });
+        const { roi } = await api('POST', `/api/roi/${encodeURIComponent(r.id)}/registrar`, {});
+        S.roi = null; desenharROI();
+        await recarregarTudo().catch(() => {});
+        aviso(`ROI ${roi.numero} registrado ✓`);
+        abrirFormRoi(roi);
+      }) : null);
+  } else {
+    if (!somenteLeitura && r.origem !== 'importado') rodape.push(acao('Cancelar ROI', 'perigo', async () => {
+      const [c, t] = campoTexto('Motivo do cancelamento (o número fica reservado)', '', { linhas: 2, autofocus: true });
+      abrirModal(`Cancelar ROI ${r.numero}`, [c], botoesSalvar(async () => {
+        await api('POST', `/api/roi/${encodeURIComponent(r.id)}/cancelar`, { motivo: t.value });
+        fecharModal(); S.roi = null; desenharROI(); await recarregarTudo().catch(() => {}); aviso('ROI cancelado');
+      }, 'Cancelar ROI', 'perigo'));
+    }));
+    rodape.push(
+      acao('⬇️ Excel', '', async () => { if (!somenteLeitura) await salvar(); await baixarArquivo(`/api/roi/${encodeURIComponent(r.id)}/xlsx`, `ROI_${r.numero.replace('/', '-')}.xlsx`); }),
+      acao('🖨️ PDF', '', async () => { const roi = somenteLeitura ? r : await salvar(); imprimirRoi(roi); }));
+    if (!somenteLeitura) rodape.push(acao('Salvar correção', 'primario', async () => { await salvar(); await recarregarTudo().catch(() => {}); fecharModal(); aviso('Correção salva ✓ (o número continua o mesmo)'); }));
+  }
+  if (r.status === 'rascunho') rodape.splice(2, 0, acao('🖨️ Prévia', '', async () => imprimirRoi(await salvar())));
+  abrirModal(r.status === 'rascunho' ? '📄 Novo ROI (rascunho)' : `📄 ROI ${r.numero}`, corpo, rodape.filter(Boolean));
+}
+
+// Impressão / PDF no formato do modelo da equipe
+async function imprimirRoi(r) {
+  const v = x => x || '';
+  const grupo = `${r.tipo || ''}${r.grupo ? ' – ' + r.grupo : ''}`;
+  const cel = (rot, val, attrs = {}) => [el('th', { text: rot }), el('td', { ...attrs, text: v(val) })];
+  const fotos = (r.fotos || []).map((f, i) => el('figure', {},
+    el('img', { src: `/api/roi/${encodeURIComponent(r.id)}/foto/${encodeURIComponent(f.id)}` }),
+    el('figcaption', { text: `${String(i + 1).padStart(2, '0')} · ${f.legenda || 'Evidência'}` })));
+  $('#impressao').replaceChildren(el('div', { class: 'roi-imp' },
+    el('h1', { text: 'Relatório de Ocorrência Interna (ROI) - CSE - Porto do Açu' }),
+    r.simulado ? el('div', { class: 'selo-imp', text: 'SIMULADO' }) : null,
+    el('table', {},
+      el('tr', {}, cel('Nº ROI', r.numero || 'RASCUNHO'), cel('Relator', r.relator), cel('Matrícula', r.matricula)),
+      el('tr', {}, cel('Empresa', r.empresa), cel('Turno', r.turno), cel('Área responsável', r.area)),
+      el('tr', {}, cel('Título ou assunto', r.titulo, { colspan: 3 }), cel('Código', grupo))),
+    el('h2', { text: 'Dados e informações pertinentes' }),
+    el('table', {}, Object.entries(ROI_CAMPOS_TEXTO).map(([k, t]) => el('tr', {}, cel(t, k === 'onde' ? (r.onde || r.local) : r[k], { class: 'longo' })))),
+    el('table', {},
+      el('tr', {}, cel('Data', r.data), cel('Hora', r.hora), cel('Comunicante', r.comunicante), cel('Função', r.funcao)),
+      el('tr', {}, cel('Site', r.site), cel('Setor', r.local), cel('Responsável área', r.responsavelArea), cel('Revisado por', r.revisadoPor)),
+      el('tr', {}, cel('Ciência ao gestor', r.cienciaGestor), cel('Tempo total', r.tempoAtendimento), cel('Bem envolvido', [r.bemDescricao, r.bemQuant && `Quant.: ${r.bemQuant}`, r.bemValorTotal && `Total: ${r.bemValorTotal}`].filter(Boolean).join(' · '), { colspan: 3 }))),
+    (r.envolvidos || []).length ? [el('h2', { text: 'Envolvidos e/ou testemunhas' }), el('table', {},
+      el('tr', {}, ['Matrícula', 'Nome', 'Cargo', 'Empresa ou setor', 'Tel. contato'].map(t => el('th', { text: t }))),
+      r.envolvidos.map(e => el('tr', {}, [e.matricula, e.nome, e.cargo, e.empresa, e.telefone].map(t => el('td', { text: v(t) })))))] : null,
+    el('table', {},
+      el('tr', {}, cel('Risco de reincidência', r.risco), cel('ROI(s) anterior(es)', r.roisAnteriores || 'não informado(s)')),
+      el('tr', {}, cel('Observações', r.observacoes, { colspan: 3 })),
+      el('tr', {}, cel('Autoridades acionadas', ['pm', 'pf', 'pc', 'outras'].map((k, i) => `${['PM', 'PF', 'PC', 'Outras'][i]}: ${r.autoridades?.[k] || 'N/A'}`).join(' · '), { colspan: 3 })),
+      el('tr', {}, cel('Anexos', r.anexos, { colspan: 3 }))),
+    el('div', { class: 'legenda-imp', text: 'G1 Acidentes · G2 Quebra de procedimento · G3 Atos ilícitos · G4 Ameaças e agressões · G5 Ação preventiva · G6 Outros' }),
+    fotos.length ? [el('h2', { class: 'quebra', text: `Relatório fotográfico | ${(r.titulo || r.grupo || '').toUpperCase()}` }),
+      el('p', { text: [r.local, r.data, r.numero && `ROI Nº ${r.numero}`].filter(Boolean).join('  •  ') }), el('div', { class: 'fotos-imp' }, fotos)] : null));
+  await Promise.all([...$('#impressao').querySelectorAll('img')].map(i => i.complete ? null : new Promise(ok => { i.onload = i.onerror = ok; })));
+  window.print();
+}
+
+// Admin: importar os controles anuais (.xlsx), um arquivo por vez
+function importarControleRoi() {
+  const inp = el('input', { type: 'file', accept: '.xlsx', multiple: true });
+  const saida = el('div', { class: 'lista' });
+  abrirModal('📥 Importar controle anual de ROI', [
+    el('p', { class: 'mudo', text: 'Escolha as planilhas "Relatório de Ocorrências Internas" (uma por ano). Os tipos são padronizados (G1 a G6) e a numeração continua a partir do último número de cada ano. Reimportar a mesma planilha substitui as linhas dela; o que foi feito no app não é alterado.' }),
+    inp, saida
+  ], [el('button', { class: 'btn primario', 'data-fechar': true }, 'Fechar')]);
+  inp.addEventListener('change', async () => {
+    for (const arq of [...inp.files]) {
+      const box = el('div', { class: 'faixa' }, el('strong', { text: arq.name }), el('span', { class: 'mudo', text: 'Lendo…' }));
+      saida.append(box);
+      try {
+        const base64 = await new Promise((ok, falha) => { const fr = new FileReader(); fr.onload = () => ok(fr.result); fr.onerror = falha; fr.readAsDataURL(arq); });
+        const r = await api('POST', '/api/roi/importar', { nome: arq.name, base64 });
+        box.replaceChildren(...[el('strong', { text: `${arq.name} → ${r.anos.join(', ')}` }),
+          el('span', { text: `${r.importados} ROIs · último ${r.ultimo.join(', ')} · ${Object.entries(r.porTipo).filter(([, n]) => n).map(([g, n]) => `${g}: ${n}`).join(' · ')}${r.simulados ? ` · ${r.simulados} simulado(s)` : ''}` }),
+          r.aClassificar.length ? el('span', { class: 'etiqueta atencao', text: `${r.aClassificar.length} a classificar (tipo sem código G)` }) : null,
+          ...r.avisos.map(a => el('span', { class: 'mudo pequeno', text: '• ' + a }))].filter(Boolean));
+      } catch (e) { box.replaceChildren(el('strong', { text: arq.name }), el('span', { class: 'etiqueta urgente', text: e.message })); }
+    }
+    try {
+      const g = await api('GET', '/api/roi/resumo');
+      saida.append(el('div', { class: 'faixa info' },
+        el('strong', { text: `Total no app: ${g.total} ROIs · próximo número ${g.proximo}` }),
+        el('span', { text: g.porAno.map(a => `${a.ano}: ${a.total} (último ${a.ultimo})`).join(' · ') }),
+        el('details', {}, el('summary', { text: `Locais encontrados (${g.locais.length}) — grafias parecidas foram juntadas` }),
+          ...g.locais.map(l => el('div', { class: 'pequeno', text: `${l.nome} · ${l.total}${l.variantes.length > 1 ? `  (${l.variantes.join(' | ')})` : ''}` })))));
+    } catch (_) {}
+    S.roi = null; if (S.aba === 'roi') desenharROI();
+  });
+}

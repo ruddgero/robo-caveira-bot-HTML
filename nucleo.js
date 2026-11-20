@@ -162,6 +162,7 @@ async function carregar() {
         if (JSON.stringify(estado.ficha.navios) !== antes) { await store.set('ficha', estado.ficha); await store.set('operacoes', estado.operacoes); console.log('🚢 [NAVIOS] Seção 6 organizada (um tópico por navio).'); }
     }
     if (arrumarPendencias()) { await store.set('pendencias', estado.pendencias); console.log('🧹 [PENDÊNCIAS] Títulos arrumados e repetidas juntadas.'); }
+    await require('./roi').carregar();   // ROIs (Relatório de Ocorrência Interna)
 }
 
 function aoAlerta(fn) { handlers.alerta = fn; }
@@ -1666,7 +1667,7 @@ function textoPassagem({ negrito = true } = {}) {
 module.exports = {
     estado, carregar, aoAlerta, aoMudarPlantao, aoPrecisarMinutaWhatsapp, auditar, minutasPendentes,
     salvarConfig, liderDePlantao, assumirPlantao, nomesDaEquipe, adicionarNomeEquipe, removerNomeEquipe,
-    salvarFicha, herdar, novaFichaEmBranco, marcarPublicado, textoRelatorio, conferencia, avisosAbertos, operacoesDaFicha,
+    salvarFicha, alterarFicha, herdar, novaFichaEmBranco, marcarPublicado, textoRelatorio, conferencia, avisosAbertos, operacoesDaFicha,
     registrarRelatorio, dispensarRelatorioPendente, aposPublicar, equipeDoUsuario, salvarEquipe, excluirEquipe,
     organogramaParaTela, criarSubstituicao, excluirSubstituicao, salvarPessoa, excluirPessoa, escalaDoTurno, preencherEquipes,
     arquivarRelatorio, historicoOrdenado, importarMensagens, herdarDoHistorico,

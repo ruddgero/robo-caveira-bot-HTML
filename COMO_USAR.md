@@ -60,6 +60,14 @@ Entrada na portaria: 14:50Hs
 - Toque num nome para **substituir**: aparecem só pessoas do mesmo cargo (feristas primeiro, depois quem está de folga). **Só este turno** ou **Por período (férias)**.
 - **☰ › Organograma, escala e férias**: próximos 8 dias da escala, férias/substituições e o quadro operacional.
 
+## Plantão › ROI (Relatório de Ocorrência Interna)
+- **+ Novo ROI** abre o modelo da equipe (Nº ROI, relator, código G1–G6, O quê/Onde/Quando/Quem, redação, providências, envolvidos, risco, autoridades, anexos). Ocorrência no grupo: botão **📄 Abrir ROI** na mensagem já traz o texto.
+- **É simulado**: o ROI conta no indicador, mas aparece sempre com o selo **SIMULADO** (no ROI, no item 7 e no indicador).
+- **Fotos** (até 8, com legenda): **📷 Tirar foto** (câmera) ou **🖼️ Escolher da galeria**.
+- **Registrar ROI** (líder): recebe o número automático (continua o controle: o próximo é **031/2026**; recomeça em 001 a cada ano) e o item 7 do relatório ganha só a linha: *Foi registrado o ROI Nº 031/2026 (G1 – Acidentes) – Canteiro das Contratadas.* O resto do relatório não muda.
+- Depois de registrado: **⬇️ Excel** (mesmo modelo, com a aba Evidências Fotográficas), **🖨️ PDF**, **Salvar correção** (o número não muda e a correção fica no histórico) ou **Cancelar ROI** (com motivo; o número fica reservado).
+- **⬇️ Controle AAAA (Excel)**: a planilha anual de controle, nas mesmas colunas da equipe. O administrador traz os anos anteriores em **📥 Importar controle anual**.
+
 ## Errou a mensagem?
 - **Apague e mande de novo** ou **edite** no grupo: o robô sempre fica com a **última versão**.
 - O que o robô não tiver certeza vai para **⚠️ A confirmar** (terminal diferente do navio atracado, nome parecido, sem horário…). Toque e confirme.

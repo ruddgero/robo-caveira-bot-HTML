@@ -15,6 +15,7 @@ const store = require('./store');
 const R = require('./relatorio');
 const { agora } = require('./util');
 const { gerarXlsx } = require('./xlsx');
+const ROI = require('./roi');
 
 // Arquivos da tela: SÓ estes podem ser entregues ao navegador
 const PASTA_PUBLICA = __dirname;
@@ -130,6 +131,7 @@ function marcas() {
         operacoes: `${e.operacoes.length}:${e.operacoes.filter(o => o.horaFinal).length}:${e.operacoes.filter(o => o.email?.enviadoEm || o.email?.erro).length}:${e.operacoes.reduce((s, o) => s + (o.historico?.length || 0) + (o.conferir?.length || 0) + (o.horaRetorno ? 1 : 0), 0)}`,
         relatorios: `${e.relatorios[0]?.id || ''}:${e.relatorios[0]?.herdadoEm || ''}:${e.plantao.relatorioPendenteId || ''}`,
         historico: e.historico.length,
+        rois: ROI.marcaRois(),
         plantao: `${e.plantao.liderId || ''}:${e.plantao.sugerirNovaEscala ? 1 : 0}:${e.escala?.id || ''}`
     };
 }
@@ -457,6 +459,42 @@ rota('POST', '/api/operacoes/:id/marcar', async (req, res, { corpo, params, u })
     return { operacao: operacaoParaTela(await nucleo.marcarEmailOperacao(params.id, corpo.campo, u)) };
 });
 
+// --- ROI (Relatório de Ocorrência Interna)
+rota('GET', '/api/roi', async () => ({ rois: ROI.listar(), proximo: ROI.proximoNumero(), grupos: ROI.GRUPOS_ROI, locais: ROI.locaisConhecidos(), maxFotos: ROI.MAX_FOTOS }));
+rota('GET', '/api/roi/resumo', async () => ROI.resumoGeral());
+rota('GET', '/api/roi/controle/:ano/xlsx', async (req, res, { params }) => {
+    const arq = ROI.xlsxControle(+params.ano);
+    return { __arquivo: true, tipo: XLSX, nome: arq.nome, dados: arq.dados };
+});
+rota('POST', '/api/roi/importar', async (req, res, { corpo, u }) => {
+    if (!corpo.base64) throw erro('Envie a planilha.');
+    return ROI.importarControle(Buffer.from(String(corpo.base64).replace(/^data:[^,]+,/, ''), 'base64'), String(corpo.nome || 'planilha.xlsx'), u);
+}, { perfis: ['ADMIN'] });
+rota('POST', '/api/roi', async (req, res, { corpo, u }) => ({ roi: ROI.detalhe((await ROI.criar(corpo || {}, u)).id) }));
+rota('GET', '/api/roi/:id', async (req, res, { params }) => ({ roi: ROI.detalhe(params.id) }));
+rota('PUT', '/api/roi/:id', async (req, res, { corpo, params, u }) => {
+    const r = ROI.estado.rois.find(x => x.id === params.id);
+    if (r && r.status !== 'rascunho' && !LIDERES.includes(u.perfil)) throw erro('Só o líder corrige um ROI registrado.', 403);
+    await ROI.editar(params.id, corpo || {}, u);
+    return { roi: ROI.detalhe(params.id) };
+});
+rota('POST', '/api/roi/:id/registrar', async (req, res, { corpo, params, u }) => { await ROI.registrar(params.id, corpo || {}, u); return { roi: ROI.detalhe(params.id) }; }, { perfis: LIDERES });
+rota('POST', '/api/roi/:id/cancelar', async (req, res, { corpo, params, u }) => {
+    const r = ROI.estado.rois.find(x => x.id === params.id);
+    if (r && r.status !== 'rascunho' && !LIDERES.includes(u.perfil)) throw erro('Só o líder cancela um ROI registrado.', 403);
+    return ROI.cancelar(params.id, corpo.motivo, u);
+});
+rota('POST', '/api/roi/:id/foto', async (req, res, { corpo, params, u }) => ({ foto: await ROI.adicionarFoto(params.id, corpo || {}, u) }));
+rota('POST', '/api/roi/:id/foto/:foto/excluir', async (req, res, { params, u }) => { await ROI.removerFoto(params.id, params.foto, u); return { ok: true }; });
+rota('GET', '/api/roi/:id/foto/:foto', async (req, res, { params }) => {
+    const f = await ROI.lerFoto(params.id, params.foto);
+    return { __arquivo: true, tipo: f.tipo, nome: `foto_${params.foto}.${f.tipo === 'image/png' ? 'png' : 'jpg'}`, dados: f.dados };
+});
+rota('GET', '/api/roi/:id/xlsx', async (req, res, { params }) => {
+    const arq = await ROI.xlsxDoRoi(params.id);
+    return { __arquivo: true, tipo: XLSX, nome: arq.nome, dados: arq.dados };
+});
+
 // --- Escala
 rota('GET', '/api/escala', async () => nucleo.construirPassagem());
 rota('POST', '/api/escala/iniciar', async (req, res, { u }) => { await nucleo.iniciarEscala(u); return nucleo.construirPassagem(); }, { perfis: LIDERES });
@@ -540,7 +578,7 @@ async function tratar(req, res) {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('X-Frame-Options', 'DENY');
     res.setHeader('Referrer-Policy', 'no-referrer');
-    res.setHeader('Content-Security-Policy', "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'");
+    res.setHeader('Content-Security-Policy', "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'");
 
     const url = req.url.split('?')[0];
     const r = rotas.find(x => x.metodo === req.method && x.re.test(url));
@@ -566,7 +604,7 @@ async function tratar(req, res) {
         if (saida && saida.__arquivo) {
             res.writeHead(200, {
                 'Content-Type': saida.tipo, 'Content-Length': saida.dados.length, 'Cache-Control': 'no-store',
-                'Content-Disposition': `attachment; filename="${saida.nome.replace(/[^\w.\-]/g, '_')}"`
+                'Content-Disposition': `${saida.tipo.startsWith('image/') ? 'inline' : 'attachment'}; filename="${saida.nome.replace(/[^\w.\-]/g, '_')}"`
             });
             return res.end(saida.dados);
         }
