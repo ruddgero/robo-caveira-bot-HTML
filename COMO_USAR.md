@@ -75,7 +75,7 @@ Entrada na portaria: 14:50Hs
 
 ## Indicadores › Ocorrências
 - Total do período comparado com o **mesmo período do ano anterior**, o mês atual (parcial) contra a **média dos últimos 3 meses**, tipo mais frequente e simulados (contam no total, com o selo **SIMULADO**).
-- Gráficos por mês, por local e por ano: **passe o mouse ou toque na barra** para ver os tipos e as quantidades. Filtro por ano e mês. Sem metas e sem separação por equipe ou turno.
+- Ano e mês em botões no topo. **Passe o mouse** nas barras para ver os tipos e as quantidades; **toque** num mês, ano, tipo (legenda) ou local para filtrar a tela inteira. Os filtros aparecem no topo com × e **Limpar filtros**. Sem metas e sem separação por equipe ou turno.
 - **Leitura do período**: as análises em frases são geradas sozinhas.
 - **📍 Locais** (admin): grafias parecidas e locais com complemento já vêm juntos; para juntar dois locais, dê o mesmo nome aos dois. O texto do ROI não muda.
 
