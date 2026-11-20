@@ -191,32 +191,118 @@ function fichaVazia(config = {}) {
     };
 }
 
-// Converte texto da seção 6 em lista { navio, linhas[] }.
-// Aceita "*NAVIO*\n✓ linha" (robô antigo) e "NAVIO: situação" (relatório da US).
-function naviosDeTexto(texto) {
-    const lista = [];
-    let atual = null;
-    for (const bruta of String(texto || '').split('\n')) {
-        const linha = bruta.trim();
-        if (!linha || ehSemAlteracao(linha)) continue;
-        const semMarc = limparMarcador(linha);
-        const titulo = linha.match(/^\*([^*]+)\*$/);
-        if (titulo) { atual = { id: novoId(), navio: titulo[1].trim().toUpperCase(), linhas: [] }; lista.push(atual); continue; }
-        const comDoisPontos = semMarc.match(/^([A-Z0-9][A-Z0-9 .\-]{2,40}?)\s*:\s*(.+)$/);
-        if (!/^[✓✔•]/.test(linha) && comDoisPontos && comDoisPontos[1] === comDoisPontos[1].toUpperCase()) {
-            const nome = comDoisPontos[1].trim();
-            let n = lista.find(x => x.navio === nome);
-            if (!n) { n = { id: novoId(), navio: nome, linhas: [] }; lista.push(n); }
-            n.linhas.push(comDoisPontos[2].trim());
-            atual = n; continue;
-        }
-        if (!atual) { atual = { id: novoId(), navio: '', linhas: [] }; lista.push(atual); }
-        atual.linhas.push(semMarc);
-    }
-    return lista;
+// ---------------------------------------------------------------------
+// Seção 6: o NAVIO é o tópico e as atividades ficam embaixo dele.
+// Aceita "*NAVIO*\n✓ linha" (robô), "NAVIO: situação" (US), "✓ NAVIO" (nome escrito como item)
+// e frases soltas antes do nome ("PREVISÃO DE DESATRACAÇÃO…" → vai para o navio logo abaixo).
+// ---------------------------------------------------------------------
+const PALAVRAS_DE_ATIVIDADE = /previs|atraca|desatraca|manobra|fundead|fundeio|embarque|desembarque|entrega|fornecimento|rancho|tripula|passeio|retorn|inspe[cç]|mergulho|lacre|abastec|retirada|sem altera|^s\s*\/?\s*a\b|placa|ve[ií]culo|motorista|empresa|assinad|capit|agente|previst|\bdta\b|\bk-?9\b|pend[eê]n|aguard/i;
+function ehNomeDeNavio(linha, navios = NAVIOS_PADRAO) {
+    const t = limparMarcador(String(linha || '').replace(/[*_~]/g, '')).replace(/[:.]+$/, '').trim();
+    if (!t || t.length < 3 || t.length > 40) return false;
+    if (/\d{1,2}[:h]\d{2}|\d{1,2}\/\d{1,2}/.test(t) || PALAVRAS_DE_ATIVIDADE.test(semAcento(t))) return false;
+    if (navios.some(n => chaveNavio(n.nome) === chaveNavio(t))) return true;
+    if (t !== t.toUpperCase() || !/[A-Z]/.test(semAcento(t))) return false;
+    if (/^T[\s.\-]?(ORE|OIL)$/i.test(t)) return false;
+    return t.split(/\s+/).length <= 5;
 }
 
-// repetir = true: operações diferentes podem ter o mesmo texto (ex.: dois "Embarque de 01 tripulante.")
+// Linha no formato antigo do robô ("14:36h Saída a passeio de 05 tripulantes – veículo placa X. Saída às 08:21h.")
+// vira o padrão atual ("Saída a passeio de 05 tripulantes.")
+function linhaNoPadrao(linha) {
+    let l = limparMarcador(String(linha || '').replace(/[*_~]/g, '')).trim();
+    const antiga = l.match(/^\d{1,2}:\d{2}h\s+(.+)$/);
+    if (antiga && /tripulante|rancho|materia|entrega|fornecimento|dta|[aá]gua|combust|res[ií]duo|k-?9|mergulho|lacre|opera[cç][aã]o de bordo/i.test(antiga[1])) {
+        let corpo = antiga[1].split(/\s+[–-]\s+/)[0].replace(/\.\s*$/, '');
+        corpo = corpo.replace(/^Fornecimento de (Rancho|Materiais|DTA|Água Potável)/i, (_, x) => `Entrega de ${x.toLowerCase()}`);
+        const emAndamento = /em andamento/i.test(l);
+        l = `${corpo}.${emAndamento ? ' Em andamento.' : ''}`;
+    }
+    // manobra escrita do jeito livre → padrão ("PREVISÃO DE DESATRACAÇÃO 20/11 ÀS16:00" → "Previsão de desatracação em 20/11 às 16:00.")
+    const mb = manobraDoTexto(l.replace(/ÀS(\d)/i, 'às $1'));
+    if (mb && /^(previs|em manobra|atracad|desatracad|fundead)/i.test(semAcento(l)) && l.length < 60 && !/\b(dc|dp|capit|assinad)/i.test(l)) l = mb.linha;
+    return l;
+}
+
+// Operação de bordo já concluída num turno anterior: não se repete no relatório seguinte
+function ehOperacaoConcluida(linha) {
+    const l = semAcento(String(linha || '')).toLowerCase();
+    if (/em andamento|nao retorn|aguardando/.test(l)) return false;
+    return /^(embarque|desembarque|saida a passeio|saida para atendimento|entrega de|fornecimento de|abastecimento|retirada de|inspecao k9|inspecao submarina|lacre)/.test(l);
+}
+
+// Junta o mesmo navio num tópico só (sem linhas repetidas)
+function arrumarNavios(lista, navios = NAVIOS_PADRAO) {
+    const saida = [];
+    for (const n of lista || []) {
+        let nome = String(n.navio || '').replace(/[*_~]/g, '').trim().toUpperCase();
+        let linhas = (n.linhas || []).map(linhaNoPadrao).filter(l => l && !ehSemAlteracao(l));
+        // "tópico" que na verdade é uma atividade ("PREVISÃO DE DESATRACAÇÃO 20/11 ÀS 16:00") vira linha
+        if (nome && !ehNomeDeNavio(nome, navios) && PALAVRAS_DE_ATIVIDADE.test(semAcento(nome))) { linhas.unshift(linhaNoPadrao(nome)); nome = ''; }
+        // tópico sem nome com o nome escrito como primeira linha ("✓ UBUNTU HUMANITY")
+        if (!nome && linhas.length && ehNomeDeNavio(linhas[0], navios)) { nome = nomeNavioLimpo(linhas[0]).replace(/[:.]+$/, ''); linhas = linhas.slice(1); }
+        // nome de navio solto no meio das linhas abre outro tópico
+        const blocos = [{ nome, linhas: [] }];
+        for (const l of linhas) {
+            if (ehNomeDeNavio(l, navios)) blocos.push({ nome: nomeNavioLimpo(l).replace(/[:.]+$/, ''), linhas: [] });
+            else blocos[blocos.length - 1].linhas.push(l);
+        }
+        for (const b of blocos) {
+            if (!b.nome && !b.linhas.length) continue;
+            const nomeFinal = nomeNavioLimpo(b.nome);
+            let alvo = nomeFinal ? saida.find(x => chaveNavio(x.navio) === chaveNavio(nomeFinal)) : null;
+            if (!alvo) { alvo = { ...n, id: saida.length && n.id && saida.some(x => x.id === n.id) ? novoId() : (n.id || novoId()), navio: nomeFinal, linhas: [] }; saida.push(alvo); }
+            for (const l of b.linhas) if (!alvo.linhas.includes(l)) alvo.linhas.push(l);
+        }
+    }
+    // tópicos sem nome: as linhas vão para o próximo navio (frase escrita acima do nome), senão ficam num tópico sem nome
+    for (let i = 0; i < saida.length; i++) {
+        if (saida[i].navio) continue;
+        const prox = saida.slice(i + 1).find(x => x.navio);
+        if (prox) { prox.linhas = [...saida[i].linhas.filter(l => !prox.linhas.includes(l)), ...prox.linhas]; saida.splice(i, 1); i--; }
+    }
+    // ordem dentro do navio: chegada → observações → operações → saída/previsão de saída
+    const ordem = l => {
+        const x = semAcento(l).toLowerCase();
+        if (/^(atracad|em manobra de atracacao|previsao de atracacao|fundead)/.test(x)) return 0;
+        if (/^(previsao de desatracacao|em manobra de desatracacao|desatracad)/.test(x)) return 3;
+        if (/^(embarque|desembarque|saida a passeio|saida para atendimento|entrega de|abastecimento|retirada de|inspecao|lacre|operacao de bordo)/.test(x)) return 2;
+        return 1;
+    };
+    for (const n of saida) n.linhas = n.linhas.map((l, i) => [ordem(l), i, l]).sort((a, b) => a[0] - b[0] || a[1] - b[1]).map(x => x[2]);
+    return saida.filter(n => n.navio || n.linhas.length);
+}
+
+function naviosDeTexto(texto, navios = NAVIOS_PADRAO) {
+    const lista = [];
+    let atual = null;
+    let pendentes = [];   // linhas escritas antes do nome do navio
+    for (const bruta of String(texto || '').split('\n')) {
+        const linha = bruta.trim();
+        if (!linha) { atual = null; continue; }
+        if (ehSemAlteracao(linha)) continue;
+        const semMarc = limparMarcador(linha.replace(/[*_~]/g, ''));
+        const negrito = /^\*([^*]+)\*:?$/.test(linha);
+        const comDoisPontos = semMarc.match(/^([A-Z0-9][A-Z0-9 .\-]{2,40}?)\s*:\s*(.+)$/);
+        if (ehNomeDeNavio(semMarc, navios) || (negrito && !PALAVRAS_DE_ATIVIDADE.test(semAcento(semMarc)) && !/\d/.test(semMarc))) {
+            atual = { id: novoId(), navio: nomeNavioLimpo(semMarc.replace(/[:.]+$/, '')), linhas: [...pendentes] };
+            pendentes = [];
+            lista.push(atual);
+            continue;
+        }
+        if (comDoisPontos && comDoisPontos[1] === comDoisPontos[1].toUpperCase() && ehNomeDeNavio(comDoisPontos[1], navios)) {
+            atual = { id: novoId(), navio: nomeNavioLimpo(comDoisPontos[1]), linhas: [...pendentes, linhaNoPadrao(comDoisPontos[2])] };
+            pendentes = [];
+            lista.push(atual);
+            continue;
+        }
+        if (atual) atual.linhas.push(linhaNoPadrao(semMarc));
+        else pendentes.push(linhaNoPadrao(semMarc));
+    }
+    if (pendentes.length) lista.push({ id: novoId(), navio: '', linhas: pendentes });
+    return arrumarNavios(lista, navios);
+}
+
 function adicionarLinhaNavio(ficha, terminal, nomeNavio, linha, repetir = false) {
     const chave = terminal === 'T-OIL' ? 'toil' : 'tore';
     ficha.navios = ficha.navios || { tore: [], toil: [] };
@@ -471,8 +557,11 @@ function fichaHerdada(relatorio, fichaAtual, config = {}) {
         ocrLeituras: d.sistemas.ocrLeituras ?? ''
     };
     const temNavios = d.navios.tore.length || d.navios.toil.length;
+    // herda o tópico de cada navio; operações já concluídas no turno anterior não se repetem; navio que desatracou sai
+    const herdar = lista => arrumarNavios(lista).map(n => ({ ...n, linhas: n.linhas.filter(l => !ehOperacaoConcluida(l)) }))
+        .filter(n => n.linhas.length && !n.linhas.some(l => /^desatracad/i.test(semAcento(l))));
     nova.navios = temNavios
-        ? { tore: d.navios.tore, toil: d.navios.toil }
+        ? { tore: herdar(d.navios.tore), toil: herdar(d.navios.toil) }
         : JSON.parse(JSON.stringify(anterior.navios || { tore: [], toil: [] }));
 
     // Opção HERANÇA: quem assumiu o turno anterior é a equipe saindo agora; a equipe assumindo é escolhida nos botões
@@ -1107,7 +1196,7 @@ module.exports = {
     padronizarRelatorio, ehRelatorioFlexivel, turnoDoTexto, dataDoTexto,
     proximoTurno, turnoAnterior, linhasExcel,
     ehMensagemDeSaida, TIPOS_OPERACAO, MOVIMENTOS, NAVIOS_PADRAO,
-    fichaVazia, naviosDeTexto, adicionarLinhaNavio, ehRelatorioDeTurno, lerRelatorio, fichaHerdada,
+    fichaVazia, naviosDeTexto, arrumarNavios, ehNomeDeNavio, linhaNoPadrao, ehOperacaoConcluida, adicionarLinhaNavio, ehRelatorioDeTurno, lerRelatorio, fichaHerdada,
     formatarRelatorio, conferirFicha, formatarPassagemEscala, textoAviso,
     lerMensagemPadrao, classificarMensagem, extrairCampos, rascunhosOperacao, atividadeDasOperacoes,
     tipoOperacaoDoTexto, movimentoDoTexto, resumoNavio, minutaEmail, mensagemPadrao, manobraDoTexto, linhaManobra, numeroKm, navioConhecido, terminalDoNavio,

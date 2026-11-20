@@ -65,7 +65,7 @@ assert.strictEqual(d.turno, 'DIURNO');
 assert.strictEqual(d.vtr.kmFinal, 19365);
 assert.strictEqual(d.sistemas.ocrLeituras, '188');
 assert.strictEqual(d.equipes.assumindo, 'Ruddgero Ribeiro, Lais Campos e Felipe Furtado', 'sem o ✓');
-assert.strictEqual(d.navios.tore[0].navio, 'MV - LILA PSARA');
+assert.strictEqual(d.navios.tore[0].navio, 'LILA PSARA', 'nome do navio sem o prefixo MV');
 assert.deepStrictEqual(d.navios.tore[0].linhas, ['Atracado às 08:54.']);
 assert.strictEqual(d.navios.toil[0].navio, 'AROSA');
 assert.deepStrictEqual(lido.faltando, []);
@@ -246,6 +246,16 @@ assert.deepStrictEqual(ORG.equipeEfetiva(org, 'AZUL', '05/12/2026').nomes, ['Rud
 assert.deepStrictEqual(ORG.equipeEfetiva(org, 'AZUL', '16/12/2026').nomes, ['Ruddgero Ribeiro', 'Felipe Furtado', 'Laís Campos']);
 const ops = ORG.opcoesSubstituto(org, 'Ewerton Brito', '05/12/2026').opcoes;
 assert.ok(ops.every(o => o.cargo === 'OPERADOR') && !ops.some(o => o.nome === 'Mariana Freitas' || o.nome === 'Felipe Furtado'));
+
+// ---- Seção 6 organizada: navio é o tópico, atividades embaixo, sem repetir (caso do print de 20/11)
+const bagunca = [{ id: '1', navio: '', linhas: ['UBUNTU HUMANITY', 'Atracado 18/11 às 22:30h. DC e DP assinadas pelo Capitão no CCOS.'] },
+    { id: '2', navio: 'PREVISÃO DE DESATRACAÇÃO 20/11 ÀS16:00', linhas: ['MARTHA OLDENDORFF', 'Atracado de atracação 19/11 às 10:30h.'] },
+    { id: '3', navio: 'UBUNTU HUMANITY', linhas: ['14:36h Saída a passeio de 05 tripulantes – veículo placa LUG-8F38. Saída às 08:21h.'] },
+    { id: '4', navio: 'MARTHA OLDENDORFF', linhas: ['Entrega de materiais e equipamentos.'] }];
+assert.deepStrictEqual(R.arrumarNavios(bagunca).map(n => [n.navio, n.linhas]), [
+    ['UBUNTU HUMANITY', ['Atracado 18/11 às 22:30h. DC e DP assinadas pelo Capitão no CCOS.', 'Saída a passeio de 05 tripulantes.']],
+    ['MARTHA OLDENDORFF', ['Atracado em 19/11 às 10:30.', 'Entrega de materiais e equipamentos.', 'Previsão de desatracação em 20/11 às 16:00.']]]);
+assert.ok(R.ehOperacaoConcluida('Entrega de rancho.') && !R.ehOperacaoConcluida('Entrega de rancho. Em andamento.'));
 
 // ---- Outras classificações
 const s = m => R.classificarMensagem(m).sugestao;

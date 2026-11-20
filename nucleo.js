@@ -145,6 +145,22 @@ async function carregar() {
         ]);
         if (migrou) console.log('🔄 [MIGRAÇÃO] Dados da versão anterior convertidos (avisos → pendências, navios e operações).');
     }
+    if (estado.ficha?.navios) {
+        const antes = JSON.stringify(estado.ficha.navios);
+        const conhecidos = naviosConhecidos();
+        estado.ficha.navios = { tore: R.arrumarNavios(estado.ficha.navios.tore, conhecidos), toil: R.arrumarNavios(estado.ficha.navios.toil, conhecidos) };
+        // operações do turno com linha no formato antigo: a linha passa para o padrão atual (sem duplicar)
+        for (const o of estado.operacoes.filter(x => x.fichaId === estado.ficha.id && x.linhaNavio)) {
+            const lista = estado.ficha.navios[o.linhaNavio.terminal === 'T-OIL' ? 'toil' : 'tore'] || [];
+            const n = lista.find(x => R.chaveNavio(x.navio) === R.chaveNavio(o.linhaNavio.navio));
+            if (!n || n.linhas.includes(o.linhaNavio.linha)) continue;
+            const nova = R.resumoNavio(o);
+            const i = n.linhas.indexOf(R.linhaNoPadrao(o.linhaNavio.linha));
+            if (i >= 0) n.linhas[i] = nova; else if (!n.linhas.includes(nova)) n.linhas.push(nova);
+            o.linhaNavio = { ...o.linhaNavio, navio: n.navio, linha: nova };
+        }
+        if (JSON.stringify(estado.ficha.navios) !== antes) { await store.set('ficha', estado.ficha); await store.set('operacoes', estado.operacoes); console.log('🚢 [NAVIOS] Seção 6 organizada (um tópico por navio).'); }
+    }
     if (arrumarPendencias()) { await store.set('pendencias', estado.pendencias); console.log('🧹 [PENDÊNCIAS] Títulos arrumados e repetidas juntadas.'); }
 }
 
@@ -221,6 +237,11 @@ async function salvarFicha(ficha, versaoCliente, { substituir = false } = {}) {
     const id = substituir ? ficha.id : estado.ficha.id;
     const fixos = substituir ? {} : { criadoEm: estado.ficha.criadoEm, herdadoDe: estado.ficha.herdadoDe, publicadoEm: estado.ficha.publicadoEm };
     const { avisos, operacoes, ...limpa } = ficha;
+    // seção 6 sempre organizada: um tópico por navio, sem linhas repetidas
+    if (limpa.navios) {
+        const conhecidos = naviosConhecidos();
+        limpa.navios = { tore: R.arrumarNavios(limpa.navios.tore, conhecidos), toil: R.arrumarNavios(limpa.navios.toil, conhecidos) };
+    }
     estado.ficha = { ...limpa, ...fixos, id, versao: estado.versao, atualizadoEm: t.iso };
     await store.set('ficha', estado.ficha);
     return estado.ficha;
