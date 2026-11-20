@@ -2253,11 +2253,11 @@ function desenharPainelGerencial() {
   if (S.indVista !== 'ocorrencias') return desenharInicioIndicadores();
   const c = $('#aba-painel');
   S.indTipos = S.indTipos || [];
-  const chave = JSON.stringify([S.indAno || 0, S.indMes || 0, S.indTipos, S.indLocal || '']);
+  const chave = JSON.stringify([S.indAno || 0, S.indMes || 0, S.indTipos, S.indLocal || '', S.indEmpresa || '']);
   if (!S.ind || S.ind.__chave !== chave) {
     if (!S.ind) c.replaceChildren(el('div', { class: 'vazio' }, 'Carregando indicadores…'));
     const q = new URLSearchParams(); if (S.indAno) q.set('ano', S.indAno); if (S.indMes) q.set('mes', S.indMes);
-    if (S.indTipos.length) q.set('tipos', S.indTipos.join(',')); if (S.indLocal) q.set('local', S.indLocal);
+    if (S.indTipos.length) q.set('tipos', S.indTipos.join(',')); if (S.indLocal) q.set('local', S.indLocal); if (S.indEmpresa) q.set('empresa', S.indEmpresa);
     api('GET', '/api/indicadores/ocorrencias?' + q).then(d => { S.ind = Object.assign(d, { __chave: chave }); if (S.aba === 'painel') desenharPainelGerencial(); })
       .catch(e => aviso(e.message, true));
     if (!S.ind) return;
@@ -2295,14 +2295,36 @@ function desenharPainelGerencial() {
   const linhaMeses = el('div', { class: 'filtros ind-filtros' }, botao('Ano todo', !d.mes, () => { S.indMes = 0; refazer(); }),
     ...d.meses.map(m => botao(MESES_ABREV[m.mes - 1], d.mes === m.mes, () => { S.indMes = d.mes === m.mes ? 0 : m.mes; refazer(); })));
   const ativos = [...d.filtroTipos.map(g => botao(`${nomeTipo(g)} ×`, true, () => alternarTipo(g))),
-    d.filtroLocal ? botao(`📍 ${d.filtroLocal} ×`, true, () => { S.indLocal = ''; refazer(); }) : null].filter(Boolean);
+    d.filtroLocal ? botao(`📍 ${d.filtroLocal} ×`, true, () => { S.indLocal = ''; refazer(); }) : null,
+    d.filtroEmpresa ? botao(`🏢 ${d.filtroEmpresa} ×`, true, () => { S.indEmpresa = ''; refazer(); }) : null].filter(Boolean);
   const linhaAtivos = ativos.length || d.mes ? el('div', { class: 'filtros ind-filtros' }, ...ativos,
-    el('button', { class: 'btn fantasma pequeno', onclick: ev => { ev.stopPropagation(); S.indMes = 0; S.indTipos = []; S.indLocal = ''; refazer(); } }, 'Limpar filtros')) : null;
+    el('button', { class: 'btn fantasma pequeno', onclick: ev => { ev.stopPropagation(); S.indMes = 0; S.indTipos = []; S.indLocal = ''; S.indEmpresa = ''; refazer(); } }, 'Limpar filtros')) : null;
 
   const variacao = d.anterior ? Math.round((d.total - d.anterior) / d.anterior * 100) : null;
+  const seta = (v, base, ano) => v === null ? '' : `${v < 0 ? '▼' : v > 0 ? '▲' : '='} ${Math.abs(v)}% vs ${ano} (${base})`;
   const topTipo = Object.entries(d.tipos).sort((a, b) => b[1] - a[1])[0];
-  const kpi = (rot, val, sub) => el('div', { class: 'ind-kpi' }, el('small', { text: rot }), el('b', { text: String(val) }), el('span', {}, sub));
+  const kpi = (rot, val, sub, filtrar, ativo) => el(filtrar ? 'button' : 'div', { class: 'ind-kpi' + (filtrar ? ' clicavel' : '') + (ativo ? ' sel' : ''), title: filtrar ? 'Toque para filtrar' : null,
+    onclick: filtrar ? ev => { ev.stopPropagation(); filtrar(); } : null }, el('small', { text: rot }), el('b', { text: String(val) }), el('span', {}, sub));
   const periodoTxt = d.mes ? MESES_ABREV[d.mes - 1] + '/' + d.ano : d.parcialAno ? `${d.ano} até ${d.hoje.slice(0, 5)}` : String(d.ano);
+  const barras = (itens, max, sel, filtrar, titulo) => el('div', { class: 'ind-locais' }, itens.map(l => comDica(el('div', { class: 'ind-local' + (sel === l.nome ? ' sel' : ''), role: 'button' },
+    el('span', { class: 'nome', text: l.nome }), el('div', { class: 'ind-trilho' }, pilha(l.porTipo, max, true)), el('b', { text: String(l.total) })),
+    `${l.nome} · ${l.total}`, [...linhasTipos(l.porTipo, l.simulados), ...(l.outros ? l.outros.map(o => `${o.nome}: ${o.total}`) : [])],
+    l.outros ? null : () => filtrar(l.nome))));
+  const agrupar = (lista, n, rotulo) => {
+    const top = lista.slice(0, n), resto = lista.slice(n);
+    if (resto.length) {
+      const pt = {}; resto.forEach(l => Object.entries(l.porTipo).forEach(([g, q]) => { pt[g] = (pt[g] || 0) + q; }));
+      top.push({ nome: `Outros ${resto.length} ${rotulo}`, total: resto.reduce((s, l) => s + l.total, 0), porTipo: pt, simulados: resto.reduce((s, l) => s + (l.simulados || 0), 0), outros: resto });
+    }
+    return top;
+  };
+
+  // números do topo: só os que têm informação (os outros se ajustam na linha)
+  const kpis = [kpi('ROIs no período', d.total, variacao === null ? periodoTxt : seta(variacao, d.anterior, d.anoAnterior))];
+  if (d.mesRef.total || d.mesRef.media) kpis.push(kpi(`${d.mesRef.nome}${d.mesRef.parcial ? ' (parcial)' : ''}`, d.mesRef.total, `média dos 3 meses anteriores: ${String(d.mesRef.media.toFixed(1)).replace('.', ',')}`,
+    () => { S.indMes = d.mes === d.mesRef.mes ? 0 : d.mesRef.mes; refazer(); }, d.mes === d.mesRef.mes));
+  if (topTipo) kpis.push(kpi('Tipo mais frequente', topTipo[0], `${G[topTipo[0]]} · ${topTipo[1]} (${Math.round(topTipo[1] / d.total * 100)}%)`, () => alternarTipo(topTipo[0]), d.filtroTipos.includes(topTipo[0])));
+  if (d.simulados) kpis.push(kpi('Simulados', d.simulados, ['contam no total, com o selo ', el('span', { class: 'etiqueta simulado', text: 'SIMULADO' })]));
 
   // mês a mês (colunas empilhadas por tipo)
   const maxMes = Math.max(1, ...d.meses.map(m => m.total));
@@ -2312,58 +2334,106 @@ function desenharPainelGerencial() {
     `${MESES_ABREV[m.mes - 1]}/${d.ano} · ${m.total} ROI${m.total === 1 ? '' : 's'}`, m.total ? linhasTipos(m.porTipo, m.simulados) : ['Sem ROI'],
     () => { S.indMes = d.mes === m.mes ? 0 : m.mes; refazer(); })));
 
-  // locais
-  const top = d.locais.slice(0, 8), resto = d.locais.slice(8);
-  if (resto.length) {
-    const pt = {}; resto.forEach(l => Object.entries(l.porTipo).forEach(([g, n]) => { pt[g] = (pt[g] || 0) + n; }));
-    top.push({ nome: `Outros ${resto.length} locais`, total: resto.reduce((s, l) => s + l.total, 0), porTipo: pt, simulados: resto.reduce((s, l) => s + l.simulados, 0), outros: resto });
-  }
-  const maxLocal = Math.max(1, ...top.map(l => l.total));
-  const locais = el('div', { class: 'ind-locais' }, top.map(l => comDica(el('div', { class: 'ind-local' + (d.filtroLocal === l.nome ? ' sel' : ''), role: 'button' },
-    el('span', { class: 'nome', text: l.nome }), el('div', { class: 'ind-trilho' }, pilha(l.porTipo, maxLocal, true)), el('b', { text: String(l.total) })),
-    `${l.nome} · ${l.total}`, [...linhasTipos(l.porTipo, l.simulados), ...(l.outros ? l.outros.map(o => `${o.nome}: ${o.total}`) : [])],
-    l.outros ? null : () => { S.indLocal = d.filtroLocal === l.nome ? '' : l.nome; refazer(); })));
+  // pontos críticos (locais) e empresas
+  const topLocais = agrupar(d.locais, 8, 'locais');
+  const locais = barras(topLocais, Math.max(1, ...topLocais.map(l => l.total)), d.filtroLocal, nome => { S.indLocal = d.filtroLocal === nome ? '' : nome; refazer(); });
+  const topEmp = agrupar(d.empresas, 8, 'empresas');
+  const empresas = barras(topEmp, Math.max(1, ...topEmp.map(l => l.total)), d.filtroEmpresa, nome => { S.indEmpresa = d.filtroEmpresa === nome ? '' : nome; refazer(); });
 
-  // histórico anual
+  // perfil por tipo × mesmo período do ano anterior (G1 e G3 em destaque)
+  const linhasTipo = Object.keys(G).filter(g => d.tipos[g] || d.tiposAnterior[g]);
+  const maxTipo = Math.max(1, ...linhasTipo.map(g => Math.max(d.tipos[g] || 0, d.tiposAnterior[g] || 0)));
+  const perfil = el('div', { class: 'ind-locais' }, linhasTipo.map(g => {
+    const n = d.tipos[g] || 0, ant = d.tiposAnterior[g] || 0, v = ant ? Math.round((n - ant) / ant * 100) : null;
+    return comDica(el('div', { class: 'ind-tipo-linha' + (['G1', 'G3'].includes(g) ? ' critico' : '') + (d.filtroTipos.includes(g) ? ' sel' : ''), role: 'button' },
+      el('span', { class: 'nome' }, el('i', { style: `background:${COR_TIPO[g]}` }), nomeTipo(g)),
+      el('div', { class: 'ind-trilho duplo' }, el('span', { style: `width:${n / maxTipo * 100}%;background:${COR_TIPO[g]}` }), el('span', { class: 'ant', style: `width:${ant / maxTipo * 100}%` })),
+      el('b', { text: String(n) }), el('small', { text: d.total ? `${Math.round(n / d.total * 100)}%` : '' })),
+      `${nomeTipo(g)} · ${n}`, [`${d.anoAnterior} (mesmo período): ${ant}`, v === null ? '' : seta(v, ant, d.anoAnterior)].filter(Boolean), () => alternarTipo(g));
+  }));
+
+  // reincidência: mesmo local e tipo em até 90 dias
+  const reinc = d.reincidencias.slice(0, S.indReincTudo ? 30 : 6);
+  const reincidencia = d.reincidencias.length ? el('div', { class: 'lista' }, reinc.map(r => el('button', { class: 'linha-op', onclick: ev => { ev.stopPropagation(); S.indLocal = r.local; S.indTipos = [r.tipo]; refazer(); } },
+    el('span', { class: 'ic', style: `color:${COR_TIPO[r.tipo]}`, text: '↻' }),
+    el('span', { style: 'min-width:0' }, el('div', { class: 'tit', text: `${r.local} · ${r.tipo} – ${G[r.tipo]}` }),
+      el('div', { class: 'sub', text: r.rois.map(x => `${x.numero} (${x.data.slice(0, 5)})`).join(' · ') })),
+    el('span', { class: 'etiqueta atencao', text: `${r.total}×` }))),
+    d.reincidencias.length > 6 ? el('button', { class: 'btn fantasma pequeno', onclick: ev => { ev.stopPropagation(); S.indReincTudo = !S.indReincTudo; refazer(); } }, S.indReincTudo ? 'Mostrar menos' : `Ver todos (${d.reincidencias.length})`) : null)
+    : el('div', { class: 'mudo pequeno', text: 'Nenhuma repetição do mesmo tipo no mesmo local em até 90 dias.' });
+
+  // histórico anual + tendência de 12 meses
   const maxAno = Math.max(1, ...d.porAno.map(a => a.total));
   const anos = el('div', { class: 'ind-colunas anos' }, d.porAno.map(a => comDica(
     el('div', { class: 'ind-col' + (a.ano === d.ano ? ' sel' : ''), role: 'button' },
       el('em', { text: String(a.total) }), el('div', { class: 'ind-barra' }, pilha(a.porTipo, maxAno)), el('small', { text: a.parcial ? a.ano + '*' : String(a.ano) })),
     `${a.ano}${a.parcial ? ' (até hoje)' : ''} · ${a.total} ROIs`, linhasTipos(a.porTipo, a.simulados),
     () => { S.indAno = a.ano; S.indMes = 0; refazer(); })));
+  const t = d.tendencia, vt = t.anteriores12 ? Math.round((t.ultimos12 - t.anteriores12) / t.anteriores12 * 100) : null;
 
   const legenda = el('div', { class: 'ind-legenda' }, Object.keys(G).map(g => el('button', {
     class: 'ind-tipo' + (d.filtroTipos.includes(g) ? ' sel' : d.filtroTipos.length ? ' apagado' : ''), title: 'Filtrar por este tipo',
     onclick: ev => { ev.stopPropagation(); alternarTipo(g); } }, el('i', { style: `background:${COR_TIPO[g]}` }), `${nomeTipo(g)} (${d.tiposTodos[g] || 0})`)));
+  const secao = (titulo, ...filhos) => el('section', { class: 'cartao' }, el('h3', { text: titulo }), ...filhos);
+  const lista = d.lista.slice(0, S.indListaTudo ? 200 : 10);
 
   c.replaceChildren(
     dica,
     el('section', { class: 'cartao' },
       el('button', { class: 'btn fantasma pequeno', style: 'justify-self:start', onclick: () => { S.indVista = 'inicio'; desenharPainelGerencial(); } }, '‹ Indicadores'),
       el('div', { class: 'cartao-topo' }, el('h2', { text: '📊 Indicadores › Ocorrências' }),
-        ehAdmin() ? el('button', { class: 'btn pequeno', onclick: abrirLocaisIndicador }, '📍 Locais') : null),
-      linhaAnos, linhaMeses, linhaAtivos,
-      el('div', { class: 'ind-kpis' },
-        kpi('ROIs no período', d.total, variacao === null ? `${periodoTxt}` : `${d.anterior} no mesmo período de ${d.anoAnterior} (${variacao > 0 ? '+' : ''}${variacao}%)`),
-        kpi(`${d.mesRef.nome}${d.mesRef.parcial ? ' (parcial)' : ''}`, d.mesRef.total, `média dos últimos 3 meses: ${String(d.mesRef.media.toFixed(1)).replace('.', ',')}`),
-        kpi('Tipo mais frequente', topTipo ? topTipo[0] : '—', topTipo ? `${G[topTipo[0]]} · ${topTipo[1]} (${Math.round(topTipo[1] / d.total * 100)}%)` : 'sem ROI'),
-        kpi('Simulados', d.simulados, ['contam no total, com o selo ', el('span', { class: 'etiqueta simulado', text: 'SIMULADO' })]))),
-    el('section', { class: 'cartao' }, el('h3', { text: `Por mês e tipo · ${d.ano}` }), legenda, colunas),
-    el('section', { class: 'cartao' }, el('h3', { text: `Locais com mais ocorrências · ${periodoTxt}` }),
-      top.length ? locais : el('div', { class: 'vazio', text: 'Nenhum ROI no período.' })),
-    el('section', { class: 'cartao' }, el('h3', { text: 'Leitura do período' }), d.frases.map(f => el('p', { class: 'ind-frase', text: f }))),
-    el('section', { class: 'cartao' }, el('h3', { text: 'Histórico por ano' }), anos,
-      el('p', { class: 'mudo pequeno', style: 'margin:0', text: 'Passe o mouse para ver os tipos e as quantidades; toque num mês, ano, tipo ou local para filtrar a tela. * ano em andamento.' })),
-    el('section', { class: 'cartao' }, el('h3', { text: `ROIs do período (${d.lista.length})` }),
-      el('div', { class: 'lista' }, d.lista.slice(0, 60).map(r => el('button', { class: 'linha-op', onclick: () => abrirRoi(r.id) },
+        el('div', { class: 'linha', style: 'gap:6px;justify-content:flex-end' },
+          el('button', { class: 'btn pequeno', onclick: ev => { ev.stopPropagation(); imprimirResumoIndicador(d); } }, '🖨️ Resumo para a gerência'),
+          ehAdmin() ? el('button', { class: 'btn pequeno', onclick: abrirLocaisIndicador }, '📍 Locais') : null))),
+    el('div', { class: 'ind-fixo' }, linhaAnos, linhaMeses, linhaAtivos),
+    el('div', { class: 'ind-kpis' }, kpis),
+    secao(`Por mês e tipo · ${d.ano}`, legenda, colunas),
+    el('div', { class: 'ind-duas' },
+      secao(`Pontos críticos (locais) · ${periodoTxt}`, topLocais.length ? locais : el('div', { class: 'vazio', text: 'Nenhum ROI no período.' })),
+      secao('Leitura do período', d.frases.map(f => el('p', { class: 'ind-frase', text: f })))),
+    el('div', { class: 'ind-duas' },
+      secao(`Perfil por tipo × ${d.anoAnterior}`, linhasTipo.length ? perfil : el('div', { class: 'vazio', text: 'Nenhum ROI no período.' }),
+        el('p', { class: 'mudo pequeno', style: 'margin:0', text: `Barra cinza = mesmo período de ${d.anoAnterior}. G1 e G3 em destaque.` })),
+      secao(`Empresas envolvidas · ${periodoTxt}`, topEmp.length ? empresas : el('div', { class: 'vazio', text: 'Sem empresa informada no período.' }))),
+    secao(`Reincidência (mesmo local e tipo em até 90 dias) · ${d.reincidencias.length}`, reincidencia),
+    secao('Histórico por ano', anos,
+      t.ultimos12 || t.anteriores12 ? el('p', { class: 'pequeno', style: 'margin:0', text: `Tendência: ${t.ultimos12} ROIs nos últimos 12 meses${vt === null ? '' : ` · ${seta(vt, t.anteriores12, '12 meses anteriores')}`}` }) : null,
+      el('p', { class: 'mudo pequeno', style: 'margin:0', text: 'Passe o mouse para ver os tipos; toque num mês, ano, tipo, local, empresa ou número do topo para filtrar. * ano em andamento.' })),
+    secao(`ROIs do período (${d.lista.length})`,
+      el('div', { class: 'lista' }, lista.map(r => el('button', { class: 'linha-op', onclick: () => abrirRoi(r.id) },
         el('span', { class: 'ic', style: `color:${COR_TIPO[r.tipo] || 'inherit'}`, text: '●' }),
         el('span', { style: 'min-width:0' }, el('div', { class: 'tit' }, `ROI ${r.numero} · ${r.tipo}`, ' ', r.simulado ? el('span', { class: 'etiqueta simulado', text: 'SIMULADO' }) : null),
           el('div', { class: 'sub', text: [r.data, r.local, r.descricao.length > 90 ? r.descricao.slice(0, 87) + '…' : r.descricao].filter(Boolean).join(' · ') })),
-        el('span')))))
+        el('span')))),
+      d.lista.length > 10 ? el('button', { class: 'btn fantasma pequeno', onclick: ev => { ev.stopPropagation(); S.indListaTudo = !S.indListaTudo; refazer(); } }, S.indListaTudo ? 'Mostrar menos' : `Ver todos (${d.lista.length})`) : null)
   );
   c.onclick = esconder;
 }
 
+
+// Resumo para a gerência (PDF pela impressão): números, frases, tipos, pontos críticos, reincidência e empresas
+function imprimirResumoIndicador(d) {
+  const G = d.grupos, per = d.mes ? `${MESES_ABREV[d.mes - 1]}/${d.ano}` : d.parcialAno ? `${d.ano} (até ${d.hoje.slice(0, 5)})` : String(d.ano);
+  const filtros = [...d.filtroTipos.map(g => `${g} – ${G[g]}`), d.filtroLocal && `Local: ${d.filtroLocal}`, d.filtroEmpresa && `Empresa: ${d.filtroEmpresa}`].filter(Boolean);
+  const tabela = (cab, linhas) => el('table', {}, el('tr', {}, cab.map(t => el('th', { text: t }))), linhas.map(l => el('tr', {}, l.map(v => el('td', { text: String(v ?? '') })))));
+  const v = d.anterior ? Math.round((d.total - d.anterior) / d.anterior * 100) : null;
+  $('#impressao').replaceChildren(el('div', { class: 'roi-imp' },
+    el('h1', { text: 'Indicador de Ocorrências (ROI) - CSE - Porto do Açu' }),
+    el('p', { text: `Período: ${per}${filtros.length ? ' · Filtros: ' + filtros.join(' · ') : ''} · emitido em ${agoraBR().data} ${agoraBR().hora}` }),
+    tabela(['ROIs no período', `Mesmo período de ${d.anoAnterior}`, 'Variação', `${d.mesRef.nome}${d.mesRef.parcial ? ' (parcial)' : ''}`, 'Média 3 meses anteriores', 'Simulados'],
+      [[d.total, d.anterior, v === null ? '—' : `${v > 0 ? '+' : ''}${v}%`, d.mesRef.total, String(d.mesRef.media.toFixed(1)).replace('.', ','), d.simulados]]),
+    el('h2', { text: 'Leitura do período' }), el('ul', {}, d.frases.map(f => el('li', { text: f }))),
+    el('h2', { text: `Perfil por tipo × ${d.anoAnterior}` }),
+    tabela(['Tipo', 'Qtd.', '%', d.anoAnterior], Object.keys(G).filter(g => d.tipos[g] || d.tiposAnterior[g]).map(g => [`${g} – ${G[g]}`, d.tipos[g] || 0, d.total ? Math.round((d.tipos[g] || 0) / d.total * 100) + '%' : '', d.tiposAnterior[g] || 0])),
+    el('h2', { text: 'Pontos críticos (locais)' }),
+    tabela(['Local', 'Qtd.', 'Tipos'], d.locais.slice(0, 8).map(l => [l.nome, l.total, Object.entries(l.porTipo).map(([g, n]) => `${g}: ${n}`).join(' · ')])),
+    el('h2', { text: 'Reincidência (mesmo local e tipo em até 90 dias)' }),
+    d.reincidencias.length ? tabela(['Local', 'Tipo', 'Vezes', 'ROIs'], d.reincidencias.slice(0, 8).map(r => [r.local, `${r.tipo} – ${G[r.tipo]}`, r.total, r.rois.map(x => x.numero).join(', ')])) : el('p', { text: 'Nenhum caso no período.' }),
+    el('h2', { text: 'Empresas envolvidas' }),
+    d.empresas.length ? tabela(['Empresa', 'Qtd.', 'Tipos'], d.empresas.slice(0, 8).map(l => [l.nome, l.total, Object.entries(l.porTipo).map(([g, n]) => `${g}: ${n}`).join(' · ')])) : el('p', { text: 'Sem empresa informada.' }),
+    el('div', { class: 'legenda-imp', text: 'G1 Acidentes · G2 Quebra de procedimento · G3 Atos ilícitos · G4 Ameaças e agressões · G5 Ação preventiva · G6 Outros. Simulados contam no total.' })));
+  window.print();
+}
 
 // Tela inicial de Indicadores: um cartão por indicador (toque para abrir)
 function desenharInicioIndicadores() {
@@ -2376,7 +2446,7 @@ function desenharInicioIndicadores() {
   const d = S.indResumo;
   const variacao = d.anterior ? Math.round((d.total - d.anterior) / d.anterior * 100) : null;
   const maxMes = Math.max(1, ...d.meses.map(m => m.total));
-  const abrir = () => { S.indVista = 'ocorrencias'; S.indAno = d.ano; S.indMes = 0; S.indTipos = []; S.indLocal = ''; desenharPainelGerencial(); };
+  const abrir = () => { S.indVista = 'ocorrencias'; S.indAno = d.ano; S.indMes = 0; S.indTipos = []; S.indLocal = ''; S.indEmpresa = ''; desenharPainelGerencial(); };
   c.replaceChildren(
     el('section', { class: 'cartao' }, el('h2', { text: '📊 Indicadores' }),
       el('p', { class: 'mudo pequeno', style: 'margin:0', text: 'Toque num indicador para ver os detalhes.' })),
