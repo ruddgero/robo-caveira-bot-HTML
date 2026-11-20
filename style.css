@@ -419,3 +419,12 @@ html, body { overflow-x: clip; }
 .ind-cartao-num span { color: var(--mudo); font-size: 13px; }
 .ind-mini { display: flex; align-items: flex-end; gap: 3px; height: 44px; }
 .ind-mini span { flex: 1; background: #e87ba4; border-radius: 3px 3px 0 0; }
+.ind-filtros { flex-wrap: nowrap; padding-bottom: 2px; }
+.ind-filtros .filtro { padding: 5px 11px; font-size: 12.5px; }
+.ind-tipo { display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; border-radius: 999px; border: 1px solid transparent; background: transparent; color: var(--mudo); font: inherit; font-size: 12px; cursor: pointer; }
+.ind-tipo:hover { border-color: var(--borda); }
+.ind-tipo.sel { border-color: var(--primario); color: var(--texto); background: rgba(79, 124, 255, .12); }
+.ind-tipo.apagado { opacity: .45; }
+.ind-tipo i { margin-right: 0; }
+.ind-local { padding: 3px 4px; border-radius: 8px; }
+.ind-local:hover, .ind-local.sel { background: rgba(79, 124, 255, .12); }

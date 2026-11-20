@@ -2252,10 +2252,13 @@ const MESES_ABREV = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Se
 function desenharPainelGerencial() {
   if (S.indVista !== 'ocorrencias') return desenharInicioIndicadores();
   const c = $('#aba-painel');
-  if (!S.ind || S.ind.__ano !== S.indAno || S.ind.__mes !== S.indMes) {
+  S.indTipos = S.indTipos || [];
+  const chave = JSON.stringify([S.indAno || 0, S.indMes || 0, S.indTipos, S.indLocal || '']);
+  if (!S.ind || S.ind.__chave !== chave) {
     if (!S.ind) c.replaceChildren(el('div', { class: 'vazio' }, 'Carregando indicadores…'));
     const q = new URLSearchParams(); if (S.indAno) q.set('ano', S.indAno); if (S.indMes) q.set('mes', S.indMes);
-    api('GET', '/api/indicadores/ocorrencias?' + q).then(d => { S.ind = Object.assign(d, { __ano: S.indAno, __mes: S.indMes }); if (S.aba === 'painel') desenharPainelGerencial(); })
+    if (S.indTipos.length) q.set('tipos', S.indTipos.join(',')); if (S.indLocal) q.set('local', S.indLocal);
+    api('GET', '/api/indicadores/ocorrencias?' + q).then(d => { S.ind = Object.assign(d, { __chave: chave }); if (S.aba === 'painel') desenharPainelGerencial(); })
       .catch(e => aviso(e.message, true));
     if (!S.ind) return;
   }
@@ -2274,21 +2277,27 @@ function desenharPainelGerencial() {
     dica.style.left = x + 'px'; dica.style.top = (alvo.top - caixa.top + c.scrollTop - 8) + 'px';
   };
   const esconder = () => { dica.hidden = true; };
-  const comDica = (no, titulo, linhas) => {
+  // passar o mouse mostra os tipos; tocar/clicar filtra a tela inteira
+  const comDica = (no, titulo, linhas, filtrar) => {
     no.addEventListener('mouseenter', ev => mostrar(ev, titulo, linhas));
     no.addEventListener('mouseleave', esconder);
-    no.addEventListener('click', ev => mostrar(ev, titulo, linhas));
+    no.addEventListener('click', ev => { ev.stopPropagation(); esconder(); filtrar ? filtrar() : mostrar(ev, titulo, linhas); });
     return no;
   };
+  const refazer = () => desenharPainelGerencial();
+  const alternarTipo = g => { S.indTipos = S.indTipos.includes(g) ? S.indTipos.filter(x => x !== g) : [...S.indTipos, g]; refazer(); };
   const pilha = (porTipo, max, horizontal) => el('div', { class: horizontal ? 'ind-pilha h' : 'ind-pilha' },
     ...Object.keys(G).filter(g => porTipo[g]).map(g => el('span', { style: `${horizontal ? 'width' : 'height'}:${porTipo[g] / max * 100}%;background:${COR_TIPO[g]}` })));
 
-  // filtros
-  const selAno = el('select', { onchange: e => { S.indAno = +e.target.value; S.indMes = 0; desenharPainelGerencial(); } }, d.anos.map(a => el('option', { value: a, text: String(a) })));
-  selAno.value = d.ano;
-  const selMes = el('select', { onchange: e => { S.indMes = +e.target.value; desenharPainelGerencial(); } },
-    el('option', { value: 0, text: 'Ano todo' }), ...d.meses.map(m => el('option', { value: m.mes, text: MESES_ABREV[m.mes - 1] })));
-  selMes.value = d.mes || 0;
+  // filtros: ano e mês em botões compactos + filtros escolhidos nos gráficos
+  const botao = (txt, ativo, fn) => el('button', { class: 'filtro' + (ativo ? ' ativo' : ''), onclick: ev => { ev.stopPropagation(); fn(); } }, txt);
+  const linhaAnos = el('div', { class: 'filtros ind-filtros' }, d.anos.slice().sort((a, b) => a - b).map(a => botao(String(a), a === d.ano, () => { S.indAno = a; S.indMes = 0; refazer(); })));
+  const linhaMeses = el('div', { class: 'filtros ind-filtros' }, botao('Ano todo', !d.mes, () => { S.indMes = 0; refazer(); }),
+    ...d.meses.map(m => botao(MESES_ABREV[m.mes - 1], d.mes === m.mes, () => { S.indMes = d.mes === m.mes ? 0 : m.mes; refazer(); })));
+  const ativos = [...d.filtroTipos.map(g => botao(`${nomeTipo(g)} ×`, true, () => alternarTipo(g))),
+    d.filtroLocal ? botao(`📍 ${d.filtroLocal} ×`, true, () => { S.indLocal = ''; refazer(); }) : null].filter(Boolean);
+  const linhaAtivos = ativos.length || d.mes ? el('div', { class: 'filtros ind-filtros' }, ...ativos,
+    el('button', { class: 'btn fantasma pequeno', onclick: ev => { ev.stopPropagation(); S.indMes = 0; S.indTipos = []; S.indLocal = ''; refazer(); } }, 'Limpar filtros')) : null;
 
   const variacao = d.anterior ? Math.round((d.total - d.anterior) / d.anterior * 100) : null;
   const topTipo = Object.entries(d.tipos).sort((a, b) => b[1] - a[1])[0];
@@ -2300,7 +2309,8 @@ function desenharPainelGerencial() {
   const colunas = el('div', { class: 'ind-colunas' }, d.meses.map(m => comDica(
     el('div', { class: 'ind-col' + (d.mes === m.mes ? ' sel' : ''), role: 'button', 'aria-label': `${MESES_ABREV[m.mes - 1]}: ${m.total}` },
       el('em', { text: m.total ? String(m.total) : '' }), el('div', { class: 'ind-barra' }, pilha(m.porTipo, maxMes)), el('small', { text: MESES_ABREV[m.mes - 1] })),
-    `${MESES_ABREV[m.mes - 1]}/${d.ano} · ${m.total} ROI${m.total === 1 ? '' : 's'}`, m.total ? linhasTipos(m.porTipo, m.simulados) : ['Sem ROI'])));
+    `${MESES_ABREV[m.mes - 1]}/${d.ano} · ${m.total} ROI${m.total === 1 ? '' : 's'}`, m.total ? linhasTipos(m.porTipo, m.simulados) : ['Sem ROI'],
+    () => { S.indMes = d.mes === m.mes ? 0 : m.mes; refazer(); })));
 
   // locais
   const top = d.locais.slice(0, 8), resto = d.locais.slice(8);
@@ -2309,18 +2319,22 @@ function desenharPainelGerencial() {
     top.push({ nome: `Outros ${resto.length} locais`, total: resto.reduce((s, l) => s + l.total, 0), porTipo: pt, simulados: resto.reduce((s, l) => s + l.simulados, 0), outros: resto });
   }
   const maxLocal = Math.max(1, ...top.map(l => l.total));
-  const locais = el('div', { class: 'ind-locais' }, top.map(l => comDica(el('div', { class: 'ind-local', role: 'button' },
+  const locais = el('div', { class: 'ind-locais' }, top.map(l => comDica(el('div', { class: 'ind-local' + (d.filtroLocal === l.nome ? ' sel' : ''), role: 'button' },
     el('span', { class: 'nome', text: l.nome }), el('div', { class: 'ind-trilho' }, pilha(l.porTipo, maxLocal, true)), el('b', { text: String(l.total) })),
-    `${l.nome} · ${l.total}`, [...linhasTipos(l.porTipo, l.simulados), ...(l.outros ? l.outros.map(o => `${o.nome}: ${o.total}`) : [])])));
+    `${l.nome} · ${l.total}`, [...linhasTipos(l.porTipo, l.simulados), ...(l.outros ? l.outros.map(o => `${o.nome}: ${o.total}`) : [])],
+    l.outros ? null : () => { S.indLocal = d.filtroLocal === l.nome ? '' : l.nome; refazer(); })));
 
   // histórico anual
   const maxAno = Math.max(1, ...d.porAno.map(a => a.total));
   const anos = el('div', { class: 'ind-colunas anos' }, d.porAno.map(a => comDica(
     el('div', { class: 'ind-col' + (a.ano === d.ano ? ' sel' : ''), role: 'button' },
       el('em', { text: String(a.total) }), el('div', { class: 'ind-barra' }, pilha(a.porTipo, maxAno)), el('small', { text: a.parcial ? a.ano + '*' : String(a.ano) })),
-    `${a.ano}${a.parcial ? ' (até hoje)' : ''} · ${a.total} ROIs`, linhasTipos(a.porTipo, a.simulados))));
+    `${a.ano}${a.parcial ? ' (até hoje)' : ''} · ${a.total} ROIs`, linhasTipos(a.porTipo, a.simulados),
+    () => { S.indAno = a.ano; S.indMes = 0; refazer(); })));
 
-  const legenda = el('div', { class: 'ind-legenda' }, Object.keys(G).map(g => el('span', {}, el('i', { style: `background:${COR_TIPO[g]}` }), nomeTipo(g))));
+  const legenda = el('div', { class: 'ind-legenda' }, Object.keys(G).map(g => el('button', {
+    class: 'ind-tipo' + (d.filtroTipos.includes(g) ? ' sel' : d.filtroTipos.length ? ' apagado' : ''), title: 'Filtrar por este tipo',
+    onclick: ev => { ev.stopPropagation(); alternarTipo(g); } }, el('i', { style: `background:${COR_TIPO[g]}` }), `${nomeTipo(g)} (${d.tiposTodos[g] || 0})`)));
 
   c.replaceChildren(
     dica,
@@ -2328,7 +2342,7 @@ function desenharPainelGerencial() {
       el('button', { class: 'btn fantasma pequeno', style: 'justify-self:start', onclick: () => { S.indVista = 'inicio'; desenharPainelGerencial(); } }, '‹ Indicadores'),
       el('div', { class: 'cartao-topo' }, el('h2', { text: '📊 Indicadores › Ocorrências' }),
         ehAdmin() ? el('button', { class: 'btn pequeno', onclick: abrirLocaisIndicador }, '📍 Locais') : null),
-      el('div', { class: 'grade-2' }, el('label', { class: 'campo' }, 'Ano', selAno), el('label', { class: 'campo' }, 'Mês', selMes)),
+      linhaAnos, linhaMeses, linhaAtivos,
       el('div', { class: 'ind-kpis' },
         kpi('ROIs no período', d.total, variacao === null ? `${periodoTxt}` : `${d.anterior} no mesmo período de ${d.anoAnterior} (${variacao > 0 ? '+' : ''}${variacao}%)`),
         kpi(`${d.mesRef.nome}${d.mesRef.parcial ? ' (parcial)' : ''}`, d.mesRef.total, `média dos últimos 3 meses: ${String(d.mesRef.media.toFixed(1)).replace('.', ',')}`),
@@ -2339,7 +2353,7 @@ function desenharPainelGerencial() {
       top.length ? locais : el('div', { class: 'vazio', text: 'Nenhum ROI no período.' })),
     el('section', { class: 'cartao' }, el('h3', { text: 'Leitura do período' }), d.frases.map(f => el('p', { class: 'ind-frase', text: f }))),
     el('section', { class: 'cartao' }, el('h3', { text: 'Histórico por ano' }), anos,
-      el('p', { class: 'mudo pequeno', style: 'margin:0', text: 'Passe o mouse ou toque nas barras para ver os tipos e as quantidades. * ano em andamento.' })),
+      el('p', { class: 'mudo pequeno', style: 'margin:0', text: 'Passe o mouse para ver os tipos e as quantidades; toque num mês, ano, tipo ou local para filtrar a tela. * ano em andamento.' })),
     el('section', { class: 'cartao' }, el('h3', { text: `ROIs do período (${d.lista.length})` }),
       el('div', { class: 'lista' }, d.lista.slice(0, 60).map(r => el('button', { class: 'linha-op', onclick: () => abrirRoi(r.id) },
         el('span', { class: 'ic', style: `color:${COR_TIPO[r.tipo] || 'inherit'}`, text: '●' }),
@@ -2362,7 +2376,7 @@ function desenharInicioIndicadores() {
   const d = S.indResumo;
   const variacao = d.anterior ? Math.round((d.total - d.anterior) / d.anterior * 100) : null;
   const maxMes = Math.max(1, ...d.meses.map(m => m.total));
-  const abrir = () => { S.indVista = 'ocorrencias'; S.indAno = d.ano; S.indMes = 0; desenharPainelGerencial(); };
+  const abrir = () => { S.indVista = 'ocorrencias'; S.indAno = d.ano; S.indMes = 0; S.indTipos = []; S.indLocal = ''; desenharPainelGerencial(); };
   c.replaceChildren(
     el('section', { class: 'cartao' }, el('h2', { text: '📊 Indicadores' }),
       el('p', { class: 'mudo pequeno', style: 'margin:0', text: 'Toque num indicador para ver os detalhes.' })),

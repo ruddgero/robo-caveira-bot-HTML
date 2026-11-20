@@ -644,14 +644,20 @@ const contarTipos = lista => Object.fromEntries(Object.keys(GRUPOS_ROI).map(g =>
 const pct = (a, b) => (b ? Math.round(a / b * 100) : 0);
 const fmt1 = n => n.toFixed(1).replace('.', ',');
 
-function indicadorOcorrencias({ ano, mes } = {}) {
+function indicadorOcorrencias({ ano, mes, tipos: filtroTipos, local: filtroLocal } = {}) {
     const hoje = agora().data, [dHoje, mHoje, aHoje] = hoje.split('/').map(Number);
-    const validos = estado.rois.filter(r => r.status === 'registrado').map(r => ({ ...r, ...mesAnoDe(r) }));
-    const anos = [...new Set([...validos.map(r => r.ano), aHoje])].sort((a, b) => b - a);
-    ano = +ano || (anos.includes(aHoje) ? aHoje : anos[0] || aHoje);
-    mes = +mes || 0;
     const mapa = mapaDeLocais();
     const localDe = r => mapa.get(limparLocal(r.local)) || limparLocal(r.local) || '(sem local)';
+    const todos = estado.rois.filter(r => r.status === 'registrado').map(r => ({ ...r, ...mesAnoDe(r), localNome: localDe(r) }));
+    const anos = [...new Set([...todos.map(r => r.ano), aHoje])].sort((a, b) => b - a);
+    ano = +ano || (anos.includes(aHoje) ? aHoje : anos[0] || aHoje);
+    mes = +mes || 0;
+    // filtros vindos do toque nos gráficos: tipo(s) e local
+    filtroTipos = String(filtroTipos || '').split(',').filter(g => GRUPOS_ROI[g]);
+    filtroLocal = limpo(filtroLocal);
+    const porTipo = r => !filtroTipos.length || filtroTipos.includes(r.tipo);
+    const semLocal = todos.filter(porTipo);                       // base dos locais (todos aparecem; o escolhido fica marcado)
+    const validos = semLocal.filter(r => !filtroLocal || r.localNome === filtroLocal);
     const doAno = validos.filter(r => r.ano === ano);
     const escopo = mes ? doAno.filter(r => r.mes === mes) : doAno;
     const anoCorrente = ano === aHoje;
@@ -675,9 +681,10 @@ function indicadorOcorrencias({ ano, mes } = {}) {
     });
     const tipos = contarTipos(escopo);
     const locaisMap = new Map();
-    for (const r of escopo) { const n = localDe(r); const l = locaisMap.get(n) || []; l.push(r); locaisMap.set(n, l); }
+    for (const r of semLocal.filter(r => r.ano === ano && (!mes || r.mes === mes))) { const n = r.localNome; const l = locaisMap.get(n) || []; l.push(r); locaisMap.set(n, l); }
     const locais = [...locaisMap].map(([nome, l]) => ({ nome, total: l.length, porTipo: contarTipos(l), simulados: l.filter(r => r.simulado).length }))
         .sort((a, b) => b.total - a.total || a.nome.localeCompare(b.nome));
+    const tiposTodos = contarTipos(todos.filter(r => r.ano === ano && (!mes || r.mes === mes) && (!filtroLocal || r.localNome === filtroLocal)));   // legenda: sem o filtro de tipo
     const porAno = anos.slice().sort().map(a => {
         const l = validos.filter(r => r.ano === a);
         return { ano: a, total: l.length, porTipo: contarTipos(l), simulados: l.filter(r => r.simulado).length, parcial: a === aHoje };
@@ -690,7 +697,11 @@ function indicadorOcorrencias({ ano, mes } = {}) {
     const periodo = mes ? `de ${MESES[mes - 1].toLowerCase()}` : 'do ano';
     const topTipo = Object.entries(tipos).sort((a, b) => b[1] - a[1])[0];
     if (topTipo) frases.push(`${GRUPOS_ROI[topTipo[0]]} (${topTipo[0]}) responde por ${pct(topTipo[1], total)}% dos ROIs ${periodo} (${topTipo[1]} de ${total}).`);
-    if (locais[0] && total > 1) {
+    if (filtroLocal) {
+        const l = locais.find(x => x.nome === filtroLocal), geral = l ? l.total : 0;
+        const totGeral = semLocal.filter(r => r.ano === ano && (!mes || r.mes === mes)).length;
+        if (totGeral) frases.push(`${filtroLocal} responde por ${geral} dos ${totGeral} ROIs ${periodo} (${pct(geral, totGeral)}%).`);
+    } else if (locais[0] && total > 1) {
         const l = locais[0], unico = Object.keys(l.porTipo).length === 1 ? Object.keys(l.porTipo)[0] : '';
         frases.push(`${l.nome} concentra ${l.total} dos ${total} ROIs (${pct(l.total, total)}%)${unico && l.total > 1 ? `, todos de ${GRUPOS_ROI[unico].toLowerCase()}` : ''}.`);
     }
@@ -707,10 +718,10 @@ function indicadorOcorrencias({ ano, mes } = {}) {
     if (!total) frases.push(`Nenhum ROI registrado ${periodo}.`);
 
     return {
-        ano, mes, anos, hoje, grupos: GRUPOS_ROI, total, anterior, anoAnterior: ano - 1, parcialAno: anoCorrente && !mes,
+        ano, mes, anos, hoje, grupos: GRUPOS_ROI, filtroTipos, filtroLocal, tiposTodos, total, anterior, anoAnterior: ano - 1, parcialAno: anoCorrente && !mes,
         mesRef: { mes: refMes, nome: nomeRef, total: noMes, media: Math.round(media * 10) / 10, parcial },
         tipos, simulados: simulados.length, meses, locais, porAno, frases,
-        lista: escopo.sort((a, b) => b.ano - a.ano || b.seq - a.seq).slice(0, 200).map(r => ({ id: r.id, numero: r.numero, tipo: r.tipo, data: r.data, local: localDe(r), simulado: !!r.simulado, descricao: r.descricao || r.oque || '' }))
+        lista: escopo.sort((a, b) => b.ano - a.ano || b.seq - a.seq).slice(0, 200).map(r => ({ id: r.id, numero: r.numero, tipo: r.tipo, data: r.data, local: r.localNome, simulado: !!r.simulado, descricao: r.descricao || r.oque || '' }))
     };
 }
 
