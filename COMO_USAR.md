@@ -76,7 +76,10 @@ Entrada na portaria: 14:50Hs
 ## Indicadores › Ocorrências
 - Total do período comparado com o **mesmo período do ano anterior**, o mês atual (parcial) contra a **média dos últimos 3 meses**, tipo mais frequente e simulados (contam no total, com o selo **SIMULADO**).
 - Ano e mês em botões no topo. **Passe o mouse** nas barras para ver os tipos e as quantidades; **toque** num mês, ano, tipo (legenda) ou local para filtrar a tela inteira. Os filtros aparecem no topo com × e **Limpar filtros**. Sem metas e sem separação por equipe ou turno.
+- Números do topo numa linha só (os sem informação ficam ocultos); tocar em "Tipo mais frequente" ou no mês também filtra. Os filtros ficam fixos ao rolar a tela.
+- **Pontos críticos** (locais), **Perfil por tipo** × ano anterior (G1 e G3 em destaque), **Empresas envolvidas**, **Reincidência** (mesmo local e tipo em até 90 dias) e **tendência dos últimos 12 meses**.
 - **Leitura do período**: as análises em frases são geradas sozinhas.
+- **🖨️ Resumo para a gerência**: uma página (PDF) com os números, as frases, os tipos, os pontos críticos, a reincidência e as empresas do recorte escolhido.
 - **📍 Locais** (admin): grafias parecidas e locais com complemento já vêm juntos; para juntar dois locais, dê o mesmo nome aos dois. O texto do ROI não muda.
 
 ## Errou a mensagem?

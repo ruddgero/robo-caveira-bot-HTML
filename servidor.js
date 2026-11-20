@@ -499,7 +499,7 @@ rota('GET', '/api/roi/:id/xlsx', async (req, res, { params }) => {
 // --- Indicadores › Ocorrências
 rota('GET', '/api/indicadores/ocorrencias', async req => {
     const q = new URL(req.url, 'http://x').searchParams;
-    return ROI.indicadorOcorrencias({ ano: q.get('ano'), mes: q.get('mes'), tipos: q.get('tipos'), local: q.get('local') });
+    return ROI.indicadorOcorrencias({ ano: q.get('ano'), mes: q.get('mes'), tipos: q.get('tipos'), local: q.get('local'), empresa: q.get('empresa') });
 });
 rota('GET', '/api/indicadores/locais', async () => ({ locais: ROI.listaDeLocais() }));
 rota('POST', '/api/indicadores/locais', async (req, res, { corpo, u }) => ({ locais: await ROI.renomearLocal(corpo.variantes, corpo.nome, u) }), { perfis: ['ADMIN'] });

@@ -644,19 +644,25 @@ const contarTipos = lista => Object.fromEntries(Object.keys(GRUPOS_ROI).map(g =>
 const pct = (a, b) => (b ? Math.round(a / b * 100) : 0);
 const fmt1 = n => n.toFixed(1).replace('.', ',');
 
-function indicadorOcorrencias({ ano, mes, tipos: filtroTipos, local: filtroLocal } = {}) {
+function indicadorOcorrencias({ ano, mes, tipos: filtroTipos, local: filtroLocal, empresa: filtroEmpresa } = {}) {
     const hoje = agora().data, [dHoje, mHoje, aHoje] = hoje.split('/').map(Number);
     const mapa = mapaDeLocais();
     const localDe = r => mapa.get(limparLocal(r.local)) || limparLocal(r.local) || '(sem local)';
-    const todos = estado.rois.filter(r => r.status === 'registrado').map(r => ({ ...r, ...mesAnoDe(r), localNome: localDe(r) }));
+    const registrados = estado.rois.filter(r => r.status === 'registrado');
+    const mapaEmp = new Map();
+    for (const g of agruparLocais(registrados.map(r => r.empresa))) for (const v of g.variantes) mapaEmp.set(v, g.nome);
+    const empresaDe = r => mapaEmp.get(limparLocal(r.empresa)) || limparLocal(r.empresa) || '';
+    const todos = registrados.map(r => ({ ...r, ...mesAnoDe(r), localNome: localDe(r), empresaNome: empresaDe(r) }));
     const anos = [...new Set([...todos.map(r => r.ano), aHoje])].sort((a, b) => b - a);
     ano = +ano || (anos.includes(aHoje) ? aHoje : anos[0] || aHoje);
     mes = +mes || 0;
     // filtros vindos do toque nos gráficos: tipo(s) e local
     filtroTipos = String(filtroTipos || '').split(',').filter(g => GRUPOS_ROI[g]);
     filtroLocal = limpo(filtroLocal);
-    const porTipo = r => !filtroTipos.length || filtroTipos.includes(r.tipo);
-    const semLocal = todos.filter(porTipo);                       // base dos locais (todos aparecem; o escolhido fica marcado)
+    filtroEmpresa = limpo(filtroEmpresa);
+    const porTipo = r => (!filtroTipos.length || filtroTipos.includes(r.tipo));
+    const porEmpresa = r => !filtroEmpresa || r.empresaNome === filtroEmpresa;
+    const semLocal = todos.filter(r => porTipo(r) && porEmpresa(r));                       // base dos locais (todos aparecem; o escolhido fica marcado)
     const validos = semLocal.filter(r => !filtroLocal || r.localNome === filtroLocal);
     const doAno = validos.filter(r => r.ano === ano);
     const escopo = mes ? doAno.filter(r => r.mes === mes) : doAno;
@@ -691,6 +697,36 @@ function indicadorOcorrencias({ ano, mes, tipos: filtroTipos, local: filtroLocal
     });
     const simulados = escopo.filter(r => r.simulado);
 
+    // perfil por tipo × mesmo período do ano anterior
+    const tiposAnterior = contarTipos(validos.filter(r => r.ano === ano - 1 && noPeriodo(r)));
+
+    // tendência: últimos 12 meses × 12 meses anteriores (até o mês de referência)
+    const idx = r => r.ano * 12 + r.mes - 1, fim = ano * 12 + refMes - 1;
+    const ultimos12 = validos.filter(r => idx(r) > fim - 12 && idx(r) <= fim).length;
+    const anteriores12 = validos.filter(r => idx(r) > fim - 24 && idx(r) <= fim - 12).length;
+
+    // empresas envolvidas (sem o filtro de empresa, para comparar)
+    const empMap = new Map();
+    for (const r of todos.filter(r => porTipo(r) && (!filtroLocal || r.localNome === filtroLocal) && r.ano === ano && (!mes || r.mes === mes) && r.empresaNome)) {
+        const l = empMap.get(r.empresaNome) || []; l.push(r); empMap.set(r.empresaNome, l);
+    }
+    const empresas = [...empMap].map(([nome, l]) => ({ nome, total: l.length, porTipo: contarTipos(l) })).sort((a, b) => b.total - a.total || a.nome.localeCompare(b.nome));
+
+    // reincidência: mesmo local + mesmo tipo repetido em até 90 dias (pelo menos uma ocorrência no período)
+    const dia = r => { const m = String(r.data).match(/^(\d{2})\/(\d{2})\/(\d{4})$/); return m ? Date.UTC(+m[3], +m[2] - 1, +m[1]) / 864e5 : null; };
+    const noEscopo = new Set(escopo.map(r => r.id));
+    const chaves = new Map();
+    for (const r of validos) { if (dia(r) === null || r.localNome === '(sem local)') continue; const k = `${r.localNome}|${r.tipo}`; const l = chaves.get(k) || []; l.push(r); chaves.set(k, l); }
+    const reincidencias = [];
+    for (const [k, l] of chaves) {
+        l.sort((a, b) => dia(a) - dia(b));
+        let grupo = [l[0]];
+        const fechar = () => { if (grupo.length > 1 && grupo.some(r => noEscopo.has(r.id))) reincidencias.push({ local: k.split('|')[0], tipo: k.split('|')[1], total: grupo.length, rois: grupo.map(r => ({ id: r.id, numero: r.numero, data: r.data })) }); };
+        for (const r of l.slice(1)) { if (dia(r) - dia(grupo[grupo.length - 1]) <= 90) grupo.push(r); else { fechar(); grupo = [r]; } }
+        fechar();
+    }
+    reincidencias.sort((a, b) => b.total - a.total || b.rois[b.rois.length - 1].data.split('/').reverse().join('').localeCompare(a.rois[a.rois.length - 1].data.split('/').reverse().join('')));
+
     // análises em frases
     const frases = [];
     const total = escopo.length;
@@ -714,11 +750,27 @@ function indicadorOcorrencias({ ano, mes, tipos: filtroTipos, local: filtroLocal
         const pico = meses.slice().sort((a, b) => b.total - a.total)[0];
         if (pico && pico.total) frases.push(`${MESES[pico.mes - 1]} foi o mês com mais registros (${pico.total}).`);
     }
+    const criticos = ['G1', 'G3'].filter(g => tipos[g] || tiposAnterior[g]);
+    if (criticos.length) {
+        const nomes = { G1: 'acidentes', G3: 'atos ilícitos' };
+        const em = mes ? `em ${MESES[mes - 1].toLowerCase()}` : 'no ano';
+        frases.push(`Tipos que mais preocupam ${em}: ${criticos.map(g => `${tipos[g] || 0} de ${nomes[g]} (${g})`).join(' e ')}; no mesmo período de ${ano - 1} foram ${criticos.map(g => tiposAnterior[g] || 0).join(' e ')}.`);
+    }
+    if (reincidencias.length) {
+        const r0 = reincidencias[0];
+        frases.push(`${reincidencias.length} ${reincidencias.length === 1 ? 'caso' : 'casos'} de reincidência (mesmo local e tipo em até 90 dias); o maior: ${r0.local}, ${r0.tipo}, ${r0.total} vezes.`);
+    }
+    if (!mes && (ultimos12 || anteriores12)) {
+        const v = anteriores12 ? Math.round((ultimos12 - anteriores12) / anteriores12 * 100) : null;
+        frases.push(`Nos últimos 12 meses foram ${ultimos12} ROIs${v === null ? '' : `, ${Math.abs(v)}% ${v < 0 ? 'a menos' : v > 0 ? 'a mais' : 'igual'} que nos 12 meses anteriores (${anteriores12})`}.`);
+    }
+    if (empresas[0] && !filtroEmpresa && total > 1) frases.push(`A empresa mais citada ${periodo} é ${empresas[0].nome} (${empresas[0].total} ROI${empresas[0].total === 1 ? '' : 's'}).`);
     if (simulados.length) frases.push(`${simulados.length} dos ${total} ROIs ${periodo} são simulados (contam no total).`);
     if (!total) frases.push(`Nenhum ROI registrado ${periodo}.`);
 
     return {
-        ano, mes, anos, hoje, grupos: GRUPOS_ROI, filtroTipos, filtroLocal, tiposTodos, total, anterior, anoAnterior: ano - 1, parcialAno: anoCorrente && !mes,
+        ano, mes, anos, hoje, grupos: GRUPOS_ROI, filtroTipos, filtroLocal, filtroEmpresa, tiposTodos, tiposAnterior, empresas, reincidencias: reincidencias.slice(0, 30),
+        tendencia: { ultimos12, anteriores12 }, total, anterior, anoAnterior: ano - 1, parcialAno: anoCorrente && !mes,
         mesRef: { mes: refMes, nome: nomeRef, total: noMes, media: Math.round(media * 10) / 10, parcial },
         tipos, simulados: simulados.length, meses, locais, porAno, frases,
         lista: escopo.sort((a, b) => b.ano - a.ano || b.seq - a.seq).slice(0, 200).map(r => ({ id: r.id, numero: r.numero, tipo: r.tipo, data: r.data, local: r.localNome, simulado: !!r.simulado, descricao: r.descricao || r.oque || '' }))
