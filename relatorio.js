@@ -650,8 +650,7 @@ function textoAviso(p) {
 // ---------------------------------------------------------------------
 // Padrão oficial do relatório (modelo da US):
 //   subnúmeros (5.1, 5.2…) só nos avisos · itens da seção 4 e 7 terminam com ";" ·
-//   movimentações de navio entram na seção 4 ("NAVIO - TERMINAL - Embarque de 04 Tripulantes. Vide e-mail;") ·
-//   seção 6 só com os nomes dos navios · avisos só com título + texto (atualizações ficam no histórico)
+//   seção 6 com cada navio e as movimentações embaixo ("Desembarque definitivo de 02 Tripulantes. Vide e-mail;") · avisos só com título + texto (atualizações ficam no histórico)
 // ---------------------------------------------------------------------
 // item de lista: sem marcador, "Vide e-mail" no fim e terminando com ";"
 function itemPadrao(t) {
@@ -702,9 +701,25 @@ function atividadesDosNavios(f) {
     }
     return saida;
 }
-function naviosPadrao(lista) {
-    const nomes = (lista || []).map(n => String(n.navio || '').trim().toUpperCase()).filter(Boolean);
-    return nomes.length ? [...new Set(nomes)].map(n => '✓ ' + n).join('\n') : '✓ Sem navio';
+// seção 6: cada navio com as suas movimentações embaixo (no padrão dos itens: ";" e "Vide e-mail")
+function naviosPadrao(lista, b) {
+    const itens = (lista || []).filter(n => (n.navio || '').trim());
+    if (!itens.length) return '✓ Sem navio';
+    return itens.map(n => {
+        const linhas = [...new Set((n.linhas || []).map(l => movimentoPadrao(l)).filter(Boolean))];
+        return [b(n.navio.trim().toUpperCase()), ...(linhas.length ? linhas : ['Sem movimentações operacionais;']).map(l => '✓ ' + l)].join('\n');
+    }).join('\n\n');   // um navio por bloco, como no critério anterior
+}
+function movimentoPadrao(linha) {
+    let l = limparMarcador(String(linha || '')).trim();
+    if (!l || ehSemAlteracao(l)) return '';
+    if (/^sem movimenta/i.test(semAcento(l))) return 'Sem movimentações operacionais;';
+    l = l.replace(/\s*\.?\s*(Em andamento)\.?$/i, '. $1');
+    l = l.replace(/\btripulantes?\b/g, m => m.charAt(0).toUpperCase() + m.slice(1));
+    const comEmail = /tripulante|rancho|provis|entrega|retirada|abastec|inspe[cç]|mergulho|lacre|materia|pe[cç]a|[aá]gua|\bdta\b/i.test(semAcento(l));
+    l = l.replace(/[\s.;,:]+$/, '');
+    if (comEmail && !/vide e-?mail/i.test(l)) l += '. Vide e-mail';
+    return l + ';';
 }
 const equipePadrao = t => { const x = String(t || '').trim().replace(/[\s.;,]+$/, ''); return '✓ ' + (x || 'Conforme escala') + '.'; };
 
@@ -714,7 +729,7 @@ function formatarRelatorio(f, avisos = [], { negrito = true } = {}) {
     const blocoAvisos = abertos.length
         ? abertos.map((a, i) => [`✓ ${b(`5.${i + 1}. ${tituloAvisoPadrao(a.titulo)}`)}`, textoAvisoPadrao(a)].filter(Boolean).join('\n')).join('\n')
         : '✓ S/A';
-    const atividades = [...(f.atividades || []).map(a => itemPadrao(typeof a === 'string' ? a : a.texto)).filter(Boolean), ...atividadesDosNavios(f)];
+    const atividades = (f.atividades || []).map(a => itemPadrao(typeof a === 'string' ? a : a.texto)).filter(Boolean);   // movimentações de navio ficam na seção 6
 
     return [
         b(`RELATÓRIO DO TURNO - ${f.turno}`),
@@ -746,10 +761,10 @@ function formatarRelatorio(f, avisos = [], { negrito = true } = {}) {
         '',
         b('6. NAVIOS'),
         b('T-ORE'),
-        naviosPadrao(f.navios?.tore),
+        naviosPadrao(f.navios?.tore, b),
         '',
         b('T-OIL'),
-        naviosPadrao(f.navios?.toil),
+        naviosPadrao(f.navios?.toil, b),
         '',
         b('7. OCORRÊNCIAS'),
         listaPadrao(f.ocorrencias),

@@ -298,11 +298,11 @@ const relido = R.lerRelatorio(texto);
 assert.ok(R.ehRelatorioDeTurno(texto));
 assert.strictEqual(relido.dados.vtr.kmFinal, 19372);
 assert.strictEqual(relido.dados.avisos[0].titulo, 'URNAS DA CIPA');
-// padrão da US: seção 6 só com os nomes; a movimentação vai para a seção 4
+// seção 6: cada navio com as movimentações embaixo (nada de navio na seção 4)
 assert.ok(relido.dados.navios.toil.some(n => n.navio === 'BARCELONA SPIRIT'));
-assert.ok(texto.includes('✓ BARCELONA SPIRIT - T-OIL - Fornecimento de Rancho. Vide e-mail;'));
-assert.ok(texto.includes('✓ LILA PSARA - T-ORE - Desembarque de 02 Tripulantes. Vide e-mail;'));
-assert.ok(texto.includes('*6. NAVIOS*\n*T-ORE*\n✓ LILA PSARA'));
+assert.ok(texto.includes('*BARCELONA SPIRIT*\n✓ Fornecimento de Rancho. Vide e-mail;'));
+assert.ok(texto.includes('*6. NAVIOS*\n*T-ORE*\n*LILA PSARA*\n✓ Atracado às 08:54;\n✓ Desembarque de 02 Tripulantes. Vide e-mail;'));
+assert.ok(!/4\. ATIVIDADES[\s\S]*LILA PSARA[\s\S]*5\. AVISOS/.test(texto), 'navio não vai para a seção 4');
 assert.ok(texto.includes('*3. SISTEMAS*\n*CFTV*') && texto.includes('*CA - CONTROLE DE ACESSO*') && texto.includes('*OCR – RECONHECIMENTO DE PLACAS*') && !/\*[368]\.\d/.test(texto), 'subnúmero só no item 5');
 assert.ok(texto.includes('✓ *5.1. URNAS DA CIPA*\nVerificar status das chaves.') && !texto.includes('Atualização ('), 'aviso só com título e texto');
 assert.ok(texto.includes('✓ Realizada ronda no perímetro;'));
