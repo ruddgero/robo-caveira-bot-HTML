@@ -2552,25 +2552,91 @@ function desenharInicioIndicadores() {
   );
 }
 
-// Admin: conferir/ajustar os locais do indicador (o texto do ROI não muda)
+// Admin: padronizar os nomes dos locais do indicador (o texto do ROI não muda)
 async function abrirLocaisIndicador() {
-  try {
-    const { locais } = await api('GET', '/api/indicadores/locais');
-    const lista = el('div', { class: 'lista' });
-    const desenhar = itens => lista.replaceChildren(...itens.map(l => {
-      const [c, i] = campoLinha(`${l.total} ROI${l.total === 1 ? '' : 's'}`, l.nome);
-      return el('div', { class: 'faixa' }, c,
-        el('div', { class: 'mudo pequeno', text: 'Grafias: ' + l.variantes.map(v => `${v.nome} (${v.total})`).join(' | ') }),
-        el('div', { class: 'linha' }, el('button', { class: 'btn pequeno', onclick: async () => {
-          try { desenhar((await api('POST', '/api/indicadores/locais', { variantes: l.variantes.map(v => v.nome), nome: i.value })).locais); S.ind = null; aviso('Local ajustado ✓'); }
-          catch (e) { aviso(e.message, true); }
-        } }, 'Salvar nome')));
-    }));
-    desenhar(locais);
-    abrirModal('📍 Locais do indicador', [
-      el('p', { class: 'mudo', text: 'Grafias parecidas e locais com complemento já vêm juntos. Para juntar dois locais, dê o mesmo nome aos dois. O texto dos ROIs não muda.' }), lista],
-      [el('button', { class: 'btn primario', 'data-fechar': true, onclick: () => { S.ind = null; if (S.aba === 'painel') desenharPainelGerencial(); } }, 'Fechar')]);
-  } catch (e) { aviso(e.message, true); }
+  const corpo = el('div', { class: 'padr' }, el('div', { class: 'vazio', text: 'Analisando os nomes…' }));
+  abrirPainel('🔤 Padronizar nomes dos locais', corpo, () => { S.ind = null; });
+  let dados = null, busca = '';
+  const aplicar = async (variantes, nome, msg) => {
+    try {
+      await api('POST', '/api/indicadores/locais', { variantes, nome });
+      S.ind = null; aviso(msg || 'Nome padronizado ✓');
+      await carregar();
+    } catch (e) { aviso(e.message, true); }
+  };
+  const ignorar = async corpoReq => {
+    try { dados = await api('POST', '/api/indicadores/locais/ignorar', corpoReq); desenhar(); aviso('Ok, não vou sugerir de novo'); }
+    catch (e) { aviso(e.message, true); }
+  };
+  async function carregar() {
+    try { dados = await api('GET', '/api/indicadores/locais/padronizar'); desenhar(); }
+    catch (e) { corpo.replaceChildren(el('div', { class: 'vazio', text: e.message })); }
+  }
+  const qtd = n => `${n} ROI${n === 1 ? '' : 's'}`;
+
+  function cartaoGrupo(g) {
+    const marcados = g.nomes.map(() => true);
+    const [campo, entrada] = campoLinha('Nome padrão', g.sugestao);
+    return el('div', { class: 'padr-cartao' },
+      el('div', { class: 'padr-cab' }, el('strong', { text: `${g.nomes.length} nomes parecidos` }), el('span', { class: 'mudo pequeno', text: qtd(g.total) })),
+      el('div', { class: 'padr-nomes' }, g.nomes.map((n, k) => el('label', { class: 'padr-nome' },
+        el('input', { type: 'checkbox', checked: true, onchange: e => { marcados[k] = e.target.checked; } }),
+        el('span', { class: 'padr-txt', text: n.nome }), el('span', { class: 'mudo pequeno', text: qtd(n.total) })))),
+      campo,
+      el('div', { class: 'linha', style: 'gap:6px;flex-wrap:wrap' },
+        el('button', { class: 'btn primario pequeno', onclick: () => {
+          const sel = g.nomes.filter((_, k) => marcados[k]);
+          const nome = entrada.value.trim();
+          if (!nome) return aviso('Informe o nome padrão.', true);
+          if (!sel.length) return aviso('Marque pelo menos um nome.', true);
+          aplicar(sel.flatMap(n => n.variantes), nome, `${sel.length} nome${sel.length === 1 ? '' : 's'} → "${nome}" ✓`);
+        } }, 'Juntar com este nome'),
+        el('button', { class: 'btn fantasma pequeno', onclick: () => ignorar({ nomes: g.nomes.map(n => n.nome) }) }, 'São lugares diferentes')));
+  }
+
+  function cartaoEscrita(x) {
+    const [campo, entrada] = campoLinha(null, x.sugestao);
+    campo.replaceChildren(entrada);
+    return el('div', { class: 'padr-cartao padr-linha' },
+      el('div', { class: 'padr-antes' }, el('span', { class: 'padr-txt', text: x.nome }), el('span', { class: 'mudo pequeno', text: qtd(x.total) })),
+      el('span', { class: 'padr-seta', 'aria-hidden': 'true', text: '→' }),
+      campo,
+      el('div', { class: 'linha', style: 'gap:6px' },
+        el('button', { class: 'btn primario pequeno', onclick: () => { const n = entrada.value.trim(); if (n) aplicar(x.variantes, n); } }, 'Aplicar'),
+        el('button', { class: 'btn fantasma pequeno', onclick: () => ignorar({ escrita: x.nome }) }, 'Manter')));
+  }
+
+  function linhaLocal(l) {
+    const [campo, entrada] = campoLinha(null, l.nome);
+    campo.replaceChildren(entrada);
+    return el('div', { class: 'padr-cartao padr-linha' },
+      el('div', { class: 'padr-antes' }, campo,
+        el('span', { class: 'mudo pequeno', text: `${qtd(l.total)}${l.variantes.length > 1 ? ' · grafias: ' + l.variantes.map(v => `${v.nome} (${v.total})`).join(' | ') : ''}` })),
+      el('button', { class: 'btn pequeno', onclick: () => { const n = entrada.value.trim(); if (n && n !== l.nome) aplicar(l.variantes.map(v => v.nome), n, 'Nome salvo ✓'); } }, 'Salvar'));
+  }
+
+  function desenhar() {
+    const { parecidos, escrita, locais } = dados;
+    const filtro = semAcento(busca).toLowerCase();
+    const visiveis = locais.filter(l => !filtro || semAcento(l.nome + ' ' + l.variantes.map(v => v.nome).join(' ')).toLowerCase().includes(filtro));
+    const caixaBusca = el('input', { type: 'search', placeholder: 'Buscar local…', value: busca, oninput: e => { busca = e.target.value; const pos = e.target.selectionStart; desenhar(); const b = corpo.querySelector('.padr-busca input'); b.focus(); b.setSelectionRange(pos, pos); } });
+    corpo.replaceChildren(
+      el('p', { class: 'mudo', style: 'margin:0', text: 'Padronizar muda só o nome usado nos indicadores e no mapa. O texto original dos ROIs não muda. Para juntar dois locais, dê o mesmo nome aos dois.' }),
+      el('div', { class: 'padr-resumo' },
+        el('div', {}, el('strong', { text: String(locais.length) }), el('span', { text: 'locais' })),
+        el('div', {}, el('strong', { text: String(parecidos.length) }), el('span', { text: 'grupos parecidos' })),
+        el('div', {}, el('strong', { text: String(escrita.length) }), el('span', { text: 'ajustes de escrita' }))),
+      el('section', { class: 'cartao' }, el('h3', { text: `1. Nomes parecidos (${parecidos.length})` }),
+        el('p', { class: 'mudo pequeno', style: 'margin:0', text: 'Podem ser o mesmo lugar escrito de jeitos diferentes. Desmarque o que não for igual, ajuste o nome padrão e junte. Se forem lugares diferentes, toque em "São lugares diferentes".' }),
+        parecidos.length ? parecidos.map(cartaoGrupo) : el('div', { class: 'vazio', text: 'Nenhum grupo de nomes parecidos ✓' })),
+      el('section', { class: 'cartao' }, el('h3', { text: `2. Ajustes de escrita (${escrita.length})` }),
+        el('p', { class: 'mudo pequeno', style: 'margin:0', text: 'Número com 2 dígitos, acentos, maiúsculas e travessão entre as partes. Edite a sugestão se precisar.' }),
+        escrita.length ? escrita.map(cartaoEscrita) : el('div', { class: 'vazio', text: 'Todos os nomes já estão no padrão ✓' })),
+      el('section', { class: 'cartao' }, el('h3', { text: `3. Todos os locais (${locais.length})` }),
+        el('label', { class: 'campo padr-busca' }, caixaBusca),
+        visiveis.length ? visiveis.map(linhaLocal) : el('div', { class: 'vazio', text: 'Nenhum local encontrado.' })));
+  }
+  carregar();
 }
 
 // =====================================================================
@@ -2605,7 +2671,7 @@ function abrirMenu() {
       item('✨', `Fundo animado: ${Fundo.ativo() ? 'ligado' : 'desligado'}`, () => { Fundo.ligar(!Fundo.ativo()); aviso(Fundo.ativo() ? 'Fundo animado ligado' : 'Fundo animado desligado (economiza bateria)'); }),
       item('🧑‍🤝‍🧑', 'Organograma, escala e férias', abrirOrganograma),
       item('🖨️', 'Resumo de ocorrências para a gerência', resumoGerenciaDoMenu),
-      ehAdmin() ? item('📍', 'Locais do indicador de ocorrências', abrirLocaisIndicador) : null,
+      ehAdmin() ? item('🔤', 'Padronizar nomes dos locais', abrirLocaisIndicador) : null,
       ehAdmin() ? item('👥', 'Usuários', abrirUsuarios) : null,
       ehAdmin() ? item('⚙️', 'Configurações', abrirConfig) : null,
       item('🚪', 'Sair', async () => { await api('POST', '/api/logout'); mostrarLogin(); }))

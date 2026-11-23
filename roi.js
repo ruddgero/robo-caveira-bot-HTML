@@ -18,7 +18,7 @@ const GRUPOS_ROI = {
 const MAX_FOTOS = 8;
 const CONTROLE_INICIAL = { 2026: 30 };     // último número do controle anual entregue pela equipe (030/2026)
 
-const estado = { rois: [], controle: { ...CONTROLE_INICIAL }, locais: {}, mapa: { area: null, pontos: {}, areas: [] }, carregado: false };   // mapa.pontos: nome → { lat, lng, tipo }; mapa.areas: contornos   // locais: grafia → nome confirmado
+const estado = { rois: [], controle: { ...CONTROLE_INICIAL }, locais: {}, mapa: { area: null, pontos: {}, areas: [] }, ignorados: { pares: [], escrita: [] }, carregado: false };   // mapa.pontos: nome → { lat, lng, tipo }; mapa.areas: contornos   // locais: grafia → nome confirmado
 let marca = 0;
 const nucleo = () => require('./nucleo');   // carregado sob demanda (evita dependência circular)
 
@@ -121,6 +121,8 @@ async function carregar() {
     estado.rois = await store.get('rois', []) || [];
     estado.controle = { ...CONTROLE_INICIAL, ...(await store.get('rois_controle', {}) || {}) };
     estado.locais = await store.get('rois_locais', {}) || {};
+    const ig = await store.get('rois_locais_ignorados', null) || {};
+    estado.ignorados = { pares: ig.pares || [], escrita: ig.escrita || [] };
     const m = await store.get('rois_mapa', null) || {};
     estado.mapa = { area: m.area || null, pontos: m.pontos || {}, areas: Array.isArray(m.areas) ? m.areas : [] };
     estado.carregado = true;
@@ -779,6 +781,99 @@ function ladrilhoPermitido(z, x, y) {
     return x >= tx(a.w - folga) && x <= tx(a.e + folga) && y >= ty(a.n + folga) && y <= ty(a.s - folga);
 }
 
+// ------------------------- Padronizar nomes dos locais -------------------------
+const PALAVRAS_LIGACAO = new Set(['de', 'da', 'do', 'das', 'dos', 'e', 'em', 'a', 'o', 'as', 'os', 'ao', 'aos', 'na', 'no', 'nas', 'nos', 'para', 'por', 'com']);
+const ACENTOS = {
+    predio: 'prédio', patio: 'pátio', minerio: 'minério', vestiario: 'vestiário', portao: 'portão', portoes: 'portões', area: 'área', pier: 'píer',
+    subestacao: 'subestação', manutencao: 'manutenção', administracao: 'administração', administrativo: 'administrativo', balanca: 'balança', galpao: 'galpão',
+    eletrica: 'elétrica', mecanica: 'mecânica', refeitorio: 'refeitório', escritorio: 'escritório', estacao: 'estação', operacao: 'operação', ferrovia: 'ferrovia',
+    ferroviaria: 'ferroviária', rodoviaria: 'rodoviária', cais: 'cais', acesso: 'acesso', guarita: 'guarita', proximo: 'próximo', agua: 'água', agencia: 'agência',
+    deposito: 'depósito', laboratorio: 'laboratório', almoxarifado: 'almoxarifado', saida: 'saída', ambulatorio: 'ambulatório', patrimonio: 'patrimônio',
+    seguranca: 'segurança', transferencia: 'transferência', subestacoes: 'subestações', sanitario: 'sanitário', veiculos: 'veículos', onibus: 'ônibus'
+};
+const palavrasDe = nome => semAcento(nome).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().split(' ').filter(Boolean);
+const numerosDe = nome => palavrasDe(nome).filter(w => /^\d+$/.test(w)).map(Number).join(',');
+const termosDe = nome => palavrasDe(nome).filter(w => !/^\d+$/.test(w) && !PALAVRAS_LIGACAO.has(w));
+
+// Escrita no padrão: número com 2 dígitos, acentos comuns, maiúsculas, travessão entre partes
+function sugerirNome(nome) {
+    let t = limparLocal(nome).replace(/\s+[-–—]\s+|\s+[-–—]|[-–—]\s+/g, ' – ');
+    return t.split(' ').map((w, i) => {
+        if (w === '–') return w;
+        const m = w.match(/^([(\["']*)(.*?)([)\]"'.,;:]*)$/);
+        let [, a, meio, z] = m;
+        if (/^\d$/.test(meio)) return a + '0' + meio + z;
+        if (/^\d+$/.test(meio) || !meio) return a + meio + z;
+        const chave = semAcento(meio).toLowerCase();
+        let palavra = ACENTOS[chave] && semAcento(meio).toLowerCase() === meio.toLowerCase() ? ACENTOS[chave] : meio;
+        if (/^[A-Z0-9]{2,4}$/.test(meio)) return a + meio + z;                     // sigla (ADM, CT, SE)
+        if (/\d/.test(meio)) return a + meio.toUpperCase() + z;                    // código (CT02, B3)
+        if (i > 0 && PALAVRAS_LIGACAO.has(chave)) return a + palavra.toLowerCase() + z;
+        palavra = palavra.toLowerCase();
+        return a + palavra.charAt(0).toUpperCase() + palavra.slice(1) + z;
+    }).join(' ');
+}
+
+function termosIguais(x, y) {
+    if (x === y) return true;
+    const n = Math.min(x.length, y.length);
+    if (n >= 4 && (x.startsWith(y) || y.startsWith(x))) return true;              // abreviação (Port. / Portaria)
+    if (n >= 5) return distancia(x, y) <= (n >= 8 ? 2 : 1);                         // erro de digitação
+    return false;
+}
+function saoParecidos(a, b) {
+    const na = numerosDe(a), nb = numerosDe(b);
+    if (na && nb && na !== nb) return false;                                         // ADM 02 ≠ ADM 03
+    const ta = termosDe(a), tb = termosDe(b);
+    if (!ta.length || !tb.length) return false;
+    const livres = tb.slice(); let iguais = 0;
+    for (const x of ta) { const k = livres.findIndex(y => termosIguais(x, y)); if (k >= 0) { livres.splice(k, 1); iguais++; } }
+    const menor = Math.min(ta.length, tb.length), maior = Math.max(ta.length, tb.length);
+    if (iguais / maior >= 0.75) return true;
+    if (iguais === menor && menor >= 2 && iguais / maior >= 0.6) return true;      // um contém o outro (com pouca coisa a mais)
+    if (iguais === menor && menor === 1 && maior === 2 && (ta.length === 1 ? ta[0] : tb[0]).length >= 5) return true;
+    return false;
+}
+const chavePar = (a, b) => [chaveLocal(a), chaveLocal(b)].sort().join(' | ');
+
+function padronizacaoDeLocais() {
+    const locais = listaDeLocais();
+    const ign = new Set(estado.ignorados.pares);
+    // grupos de nomes parecidos (união de pares)
+    const pai = locais.map((_, i) => i);
+    const raiz = i => (pai[i] === i ? i : (pai[i] = raiz(pai[i])));
+    for (let i = 0; i < locais.length; i++) for (let j = i + 1; j < locais.length; j++)
+        if (saoParecidos(locais[i].nome, locais[j].nome) && !ign.has(chavePar(locais[i].nome, locais[j].nome))) pai[raiz(i)] = raiz(j);
+    const grupos = new Map();
+    locais.forEach((l, i) => { const r = raiz(i); grupos.set(r, [...(grupos.get(r) || []), l]); });
+    const parecidos = [...grupos.values()].filter(g => g.length > 1).map(g => {
+        g.sort((a, b) => b.total - a.total);
+        return { nomes: g.map(l => ({ nome: l.nome, total: l.total, variantes: l.variantes.map(v => v.nome) })), sugestao: sugerirNome(g[0].nome), total: g.reduce((s, l) => s + l.total, 0) };
+    }).sort((a, b) => b.total - a.total);
+    const emGrupo = new Set(parecidos.flatMap(g => g.nomes.map(n => n.nome)));
+    const ignEsc = new Set(estado.ignorados.escrita);
+    const escrita = locais.filter(l => !emGrupo.has(l.nome) && !ignEsc.has(chaveLocal(l.nome)) && sugerirNome(l.nome) !== l.nome)
+        .map(l => ({ nome: l.nome, total: l.total, variantes: l.variantes.map(v => v.nome), sugestao: sugerirNome(l.nome) }));
+    return { locais, parecidos, escrita };
+}
+
+// "São diferentes" / "Manter como está": não sugere de novo
+async function ignorarSugestao({ nomes, escrita }, u) {
+    if (Array.isArray(nomes) && nomes.length > 1) {
+        for (let i = 0; i < nomes.length; i++) for (let j = i + 1; j < nomes.length; j++) {
+            const k = chavePar(nomes[i], nomes[j]);
+            if (!estado.ignorados.pares.includes(k)) estado.ignorados.pares.push(k);
+        }
+        nucleo().auditar(u, 'Indicador: locais marcados como diferentes', nomes.join(' | '));
+    } else if (escrita) {
+        const k = chaveLocal(escrita);
+        if (!estado.ignorados.escrita.includes(k)) estado.ignorados.escrita.push(k);
+        nucleo().auditar(u, 'Indicador: nome mantido como está', escrita);
+    } else throw erro('Nada para ignorar.', 400);
+    await store.set('rois_locais_ignorados', estado.ignorados);
+    return padronizacaoDeLocais();
+}
+
 function mesAnoDe(r) {
     const m = String(r.data || '').match(/^\d{2}\/(\d{2})\/(\d{4})$/);
     return m ? { mes: +m[1], ano: +m[2] } : { mes: 0, ano: r.ano };
@@ -925,7 +1020,7 @@ function indicadorOcorrencias({ ano, mes, tipos: filtroTipos, local: filtroLocal
 }
 
 module.exports = {
-    indicadorOcorrencias, listaDeLocais, renomearLocal, mapaDeLocais, dadosDoMapa, posicionarLocal, salvarArea, salvarContorno, apagarContorno, areaDoPonto, ladrilhoPermitido,
+    indicadorOcorrencias, listaDeLocais, renomearLocal, mapaDeLocais, padronizacaoDeLocais, ignorarSugestao, sugerirNome, saoParecidos, dadosDoMapa, posicionarLocal, salvarArea, salvarContorno, apagarContorno, areaDoPonto, ladrilhoPermitido,
     GRUPOS_ROI, MAX_FOTOS, estado, carregar, marcaRois, listar, detalhe, criar, editar, registrar, cancelar,
     adicionarFoto, removerFoto, lerFoto, importarControle, lerControle, resumoGeral, locaisConhecidos, proximoNumero,
     xlsxDoRoi, xlsxControle, xlsxControleTodos, montarXlsxRoi, linhaItem7, linhaControle, codigoDoTipo, adivinharTipo, agruparLocais, lerNumero, numeroRoi

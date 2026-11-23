@@ -502,6 +502,8 @@ rota('GET', '/api/indicadores/ocorrencias', async req => {
     return ROI.indicadorOcorrencias({ ano: q.get('ano'), mes: q.get('mes'), tipos: q.get('tipos'), local: q.get('local'), empresa: q.get('empresa') });
 });
 rota('GET', '/api/indicadores/locais', async () => ({ locais: ROI.listaDeLocais() }));
+rota('GET', '/api/indicadores/locais/padronizar', async () => ROI.padronizacaoDeLocais(), { perfis: ['ADMIN'] });
+rota('POST', '/api/indicadores/locais/ignorar', async (req, res, { corpo, u }) => ROI.ignorarSugestao(corpo, u), { perfis: ['ADMIN'] });
 rota('POST', '/api/indicadores/locais', async (req, res, { corpo, u }) => ({ locais: await ROI.renomearLocal(corpo.variantes, corpo.nome, u) }), { perfis: ['ADMIN'] });
 
 // --- Indicadores › Ocorrências › Mapa de calor (líder e admin)

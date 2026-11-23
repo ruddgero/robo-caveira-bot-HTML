@@ -536,3 +536,25 @@ html, body { overflow-x: clip; }
 .mapa-tela .leaflet-tooltip.rotulo-area { background: none; border: 0; box-shadow: none; padding: 0; color: #fff; font: 700 12px system-ui, sans-serif; text-shadow: 0 0 3px #000, 0 0 6px #000, 0 1px 2px #000; white-space: nowrap; pointer-events: none; }
 .mapa-tela .leaflet-tooltip.rotulo-area::before { display: none; }
 .mapa-tela .leaflet-control-scale-line { background: rgba(11, 17, 32, .8); color: #e6eaf3; border-color: #e6eaf3; }
+/* Padronizar nomes dos locais */
+.padr { display: grid; gap: 14px; max-width: 860px; margin: 0 auto; padding-bottom: 40px; }
+.padr .cartao { display: grid; gap: 10px; }
+.padr-resumo { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.padr-resumo div { display: grid; padding: 10px 12px; border-radius: 12px; background: var(--superficie); border: 1px solid var(--borda); }
+.padr-resumo strong { font-size: 22px; font-variant-numeric: tabular-nums; }
+.padr-resumo span { font-size: 12.5px; color: var(--mudo); }
+.padr-cartao { display: grid; gap: 8px; padding: 10px 12px; border-radius: 12px; background: var(--superficie-2); border: 1px solid var(--borda); }
+.padr-cab { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.padr-nomes { display: grid; gap: 4px; }
+.padr-nome { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+.padr-txt { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.padr-linha { grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto; align-items: center; }
+.padr-linha:has(> .padr-antes:only-of-type) { grid-template-columns: minmax(0, 1fr) auto; }
+.padr-antes { display: grid; gap: 2px; min-width: 0; }
+.padr-seta { color: var(--mudo); }
+@media (max-width: 640px) {
+  .padr-linha { grid-template-columns: minmax(0, 1fr) auto; }
+  .padr-linha .padr-seta { display: none; }
+  .padr-linha > .campo { grid-column: 1 / -1; order: 3; }
+  .padr-linha > .linha { grid-column: 1 / -1; order: 4; }
+}
