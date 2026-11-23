@@ -471,25 +471,38 @@ html, body { overflow-x: clip; }
 .mapa-modo button.ativo { background: var(--primario); color: #fff; }
 .mapa-filtros { display: grid; gap: 6px; padding: 8px 14px; border-bottom: 1px solid var(--borda); background: rgba(16, 24, 44, .96); }
 .mapa-filtros .filtro { padding: 5px 10px; font-size: 12.5px; display: inline-flex; align-items: center; gap: 6px; }
-.mapa-corpo { display: grid; grid-template-rows: minmax(0, 1fr) minmax(0, 38%); min-height: 0; }
-.mapa-mapa { min-height: 0; background: #0a1322; }
-.mapa-lado { overflow-y: auto; padding: 12px 14px calc(12px + env(safe-area-inset-bottom)); display: grid; gap: 10px; align-content: start; border-top: 1px solid var(--borda); background: var(--superficie); }
-.mapa-lado h3 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--mudo); }
-@media (min-width: 900px) {
-  .mapa-corpo { grid-template-rows: none; grid-template-columns: minmax(0, 1fr) 340px; }
-  .mapa-lado { border-top: 0; border-left: 1px solid var(--borda); }
+.mapa-corpo { position: relative; min-height: 0; overflow: hidden; }
+.mapa-mapa { position: absolute; inset: 0; background: #0a1322; }
+/* gaveta de locais: fechada por padrão; no computador entra pela direita, no celular sobe de baixo */
+.mapa-lado { position: absolute; z-index: 1000; right: 0; top: 0; bottom: 0; width: min(360px, 92vw); overflow-y: auto; overflow-x: hidden;
+  padding: 12px 14px calc(12px + env(safe-area-inset-bottom)); display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; align-content: start;
+  background: rgba(17, 26, 46, .97); border-left: 1px solid var(--borda); box-shadow: -12px 0 30px rgba(0,0,0,.4);
+  transform: translateX(105%); visibility: hidden; transition: transform .22s ease, visibility 0s linear .22s; }
+.mapa-tela.lado-aberto .mapa-lado { transform: none; visibility: visible; transition: transform .22s ease; }
+@media (max-width: 899px) {
+  .mapa-lado { top: auto; left: 0; width: auto; height: 58%; border-left: 0; border-top: 1px solid var(--borda); border-radius: 16px 16px 0 0; box-shadow: 0 -12px 30px rgba(0,0,0,.4); transform: translateY(105%); }
 }
-.mapa-lista { display: grid; gap: 4px; }
+@media (prefers-reduced-motion: reduce) { .mapa-lado { transition: none; } }
+.mapa-lado h3 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--mudo); }
+.mapa-lado-topo { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.mapa-fechar { width: 32px; height: 32px; font-size: 14px; }
+.mapa-bt-gaveta { display: inline-flex; align-items: center; gap: 6px; padding: 7px 11px; border-radius: 10px; border: 1px solid var(--borda); background: rgba(17, 26, 46, .95); color: var(--texto); font: 600 13px system-ui, sans-serif; cursor: pointer; box-shadow: 0 2px 10px rgba(0,0,0,.35); }
+.mapa-bt-gaveta:hover, .mapa-bt-gaveta[aria-expanded="true"] { border-color: var(--primario); }
+.mapa-bt-gaveta .ic { font-size: 14px; }
+.mapa-lista { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; }
 .mapa-local, .mapa-roi { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; padding: 9px 10px; border-radius: 10px; border: 1px solid var(--borda); background: var(--superficie-2); cursor: pointer; }
 .mapa-local:hover, .mapa-roi:hover { border-color: #34497a; }
+.mapa-local strong { flex: none; font-variant-numeric: tabular-nums; }
 .mapa-local-nome { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mapa-pino { color: #f97316; }
 .mapa-pino.sem { color: var(--mudo); }
 .mapa-roi .tit { font-size: 13.5px; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
-.mapa-roi .sub { font-size: 12.5px; color: var(--mudo); }
+.mapa-roi .sub { font-size: 12.5px; color: var(--mudo); overflow-wrap: anywhere; }
 .mapa-tipos { display: flex; flex-wrap: wrap; gap: 6px 12px; font-size: 13px; }
 .mapa-tipo { display: inline-flex; align-items: center; gap: 6px; }
 .mapa-admin { display: grid; gap: 6px; padding-top: 8px; border-top: 1px dashed var(--borda); }
+.mapa-admin summary { cursor: pointer; font-size: 13px; color: var(--mudo); text-transform: uppercase; letter-spacing: .04em; font-weight: 700; }
+.mapa-admin[open] summary { margin-bottom: 6px; }
 .mapa-faixa { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; padding: 10px 14px calc(10px + env(safe-area-inset-bottom)); background: #2a2010; border-top: 1px solid #5a4313; color: #fcd34d; }
 .mapa-tela.marcando .mapa-mapa { cursor: crosshair; }
 .mapa-calor-canvas { position: absolute; pointer-events: none; }
