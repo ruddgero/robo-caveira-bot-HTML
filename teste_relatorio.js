@@ -298,8 +298,15 @@ const relido = R.lerRelatorio(texto);
 assert.ok(R.ehRelatorioDeTurno(texto));
 assert.strictEqual(relido.dados.vtr.kmFinal, 19372);
 assert.strictEqual(relido.dados.avisos[0].titulo, 'URNAS DA CIPA');
-assert.strictEqual(relido.dados.navios.toil.find(n => n.navio === 'BARCELONA SPIRIT').linhas[0], 'Fornecimento de Rancho.');
-assert.ok(texto.includes('Assertividade: 88,05%;') && texto.includes('Total de leituras: 188 veículos.'));
+// padrão da US: seção 6 só com os nomes; a movimentação vai para a seção 4
+assert.ok(relido.dados.navios.toil.some(n => n.navio === 'BARCELONA SPIRIT'));
+assert.ok(texto.includes('✓ BARCELONA SPIRIT - T-OIL - Fornecimento de Rancho. Vide e-mail;'));
+assert.ok(texto.includes('✓ LILA PSARA - T-ORE - Desembarque de 02 Tripulantes. Vide e-mail;'));
+assert.ok(texto.includes('*6. NAVIOS*\n*6.1 - T-ORE*\n✓ LILA PSARA'));
+assert.ok(texto.includes('*3.1 - CFTV*') && texto.includes('*3.2 - CA - CONTROLE DE ACESSO*') && texto.includes('*3.3 - OCR – RECONHECIMENTO DE PLACAS*'));
+assert.ok(texto.includes('✓ *5.1. URNAS DA CIPA*\nVerificar status das chaves.') && !texto.includes('Atualização ('), 'aviso só com título e texto');
+assert.ok(texto.includes('✓ Realizada ronda no perímetro;'));
+assert.ok(texto.includes('Assertividade: 88,05%\n') && texto.includes('Total de leituras: 188 veículos.'));
 
 // ---- Relatório no formato do robô antigo (5.1. AVISO)
 const antigo = `*RELATÓRIO DO TURNO - NOTURNO*\nData: 13/11/2026\n\n*1. EFETIVO CCOS*\n✓ S/A\n\n*2. VIATURA – VTR*\nKM inicial: 19.228\nKM final: 19.235\n\n*3. SISTEMAS*\n*CFTV*\n✓ S/A\n\n*4. ATIVIDADES REALIZADAS*\n✓ X\n\n*5. AVISOS E AÇÕES DE ACOMPANHAMENTO*\n\n*5.1. AVISO*\nBagagens na Receita Federal (T-OIL): Acompanhar liberação.\n\n*6. MOVIMENTAÇÃO DE NAVIOS*\n\n*T-ORE*\n\n*MARAN COURAGE*\n✓ Fornecimento de Rancho.\n\n*T-OIL*\n\n✓ S/A\n\n*7. OCORRÊNCIAS:*\n✓ S/A\n\n*8. PASSAGEM DE TURNO*\n\n*EQUIPE SAINDO:*\nConforme escala\n\n*EQUIPE ASSUMINDO:*\nConforme escala`;
@@ -318,7 +325,12 @@ assert.deepStrictEqual(R.separarNomes('Wallace Ferroport e Equipe US'), ['Wallac
 assert.strictEqual(R.juntarNomes(['Gustavo Ramos', 'Ítalo']), 'Gustavo Ramos e Ítalo');
 assert.throws(() => R.lerEquipesComPipe('Gustavo e Ítalo'));
 assert.strictEqual(R.lerEquipesComPipe('Gustavo Ramos e Ítalo | Renan Neves e Ewerton').assumindo, 'Renan Neves e Ewerton');
-assert.ok(R.formatarRelatorio(R.fichaVazia(), []).includes('*8. PASSAGEM DE TURNO*\n\n*EQUIPE SAINDO:*\nConforme escala\n\n*EQUIPE ASSUMINDO:*\nConforme escala'));
+assert.ok(R.formatarRelatorio(R.fichaVazia(), []).includes('*8. PASSAGEM DE TURNO*\n*8.1 - EQUIPE SAINDO:*\n✓ Conforme escala.\n\n*8.2 - EQUIPE ASSUMINDO:*\n✓ Conforme escala.'));
+assert.ok(R.formatarRelatorio(R.fichaVazia(), []).includes('*6.1 - T-ORE*\n✓ Sem navio'));
+// lista de avisos colada num aviso: sai só a parte dele, e a conferência avisa
+const avLista = [{ titulo: '5.1. FM-200 SALA DE CRISE*', texto: 'Sistema retirado para manutenção.\n5.2. DOCK STATION*\nConsultar o e-mail.' }];
+assert.ok(R.formatarRelatorio(R.fichaVazia(), avLista).includes('✓ *5.1. FM-200 SALA DE CRISE*\nSistema retirado para manutenção.\n\n*6.'));
+assert.ok(R.conferirFicha(R.fichaVazia(), [], avLista).some(a => /lista de outros avisos/.test(a)));
 
 // ---- ROI (Relatório de Ocorrência Interna)
 const ROI = require('./roi');

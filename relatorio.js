@@ -471,7 +471,7 @@ function lerRelatorio(textoOriginal) {
     {
         let sub = null; const partes = { cftv: [], ca: [] };
         for (const l of limpo(blocos.sistemas)) {
-            const n = normalizar(l);
+            const n = normalizar(l).replace(/^3\s*\.\s*\d\s*[-–.]?\s*/, '');   // "3.1 - CFTV" → "CFTV"
             if (/^CFTV\b/.test(n) && n.length < 30) { sub = 'cftv'; continue; }
             if ((/^CA\b/.test(n) || /CONTROLE DE ACESSO/.test(n)) && n.length < 40) { sub = 'ca'; continue; }
             if (/^OCR\b/.test(n) || /RECONHECIMENTO DE PLACAS/.test(n)) { sub = 'ocr'; continue; }
@@ -491,7 +491,7 @@ function lerRelatorio(textoOriginal) {
     {
         let av = null;
         for (const l of limpo(blocos.avisos)) {
-            const m = l.replace(/[*_]/g, '').match(/^5\.\d+\.?\s*(.+)$/);
+            const m = limparMarcador(l.replace(/[*_]/g, '')).match(/^5\.\d+\.?\s*(.+)$/);
             if (m) { av = { titulo: m[1].trim(), texto: '' }; dados.avisos.push(av); continue; }
             if (ehSemAlteracao(l)) continue;
             if (!av) { av = { titulo: '', texto: '' }; dados.avisos.push(av); }
@@ -510,9 +510,10 @@ function lerRelatorio(textoOriginal) {
     {
         let sub = null; const p = { tore: [], toil: [] };
         for (const l of limpo(blocos.navios)) {
-            const n = normalizar(l).replace(/[^A-Z\-]/g, '');
+            const n = normalizar(l).replace(/^6\s*\.\s*\d\s*[-–.]?\s*/, '').replace(/[^A-Z\-]/g, '');   // "6.1 - T-ORE"
             if (n === 'T-ORE' || n === 'TORE') { sub = 'tore'; continue; }
             if (n === 'T-OIL' || n === 'TOIL') { sub = 'toil'; continue; }
+            if (/^SEM NAVIO/.test(normalizar(limparMarcador(l)))) continue;
             if (sub) p[sub].push(l);
         }
         dados.navios.tore = naviosDeTexto(p.tore.join('\n'));
@@ -525,7 +526,7 @@ function lerRelatorio(textoOriginal) {
         let sub = null; const p = { saindo: [], assumindo: [] };
         for (const l of limpo(blocos.passagem)) {
             const n = normalizar(l);
-            const m = l.replace(/[*_]/g, '').match(/^EQUIPE\s+(SAINDO|ASSUMINDO)\s*:?\s*(.*)$/i);
+            const m = l.replace(/[*_]/g, '').replace(/^\s*8\s*\.\s*\d\s*[-–.]?\s*/, '').match(/^EQUIPE\s+(SAINDO|ASSUMINDO)\s*:?\s*(.*)$/i);
             if (m) {
                 sub = normalizar(m[1]) === 'SAINDO' ? 'saindo' : 'assumindo';
                 if (m[2].trim()) p[sub].push(limparMarcador(m[2]));
@@ -646,12 +647,74 @@ function textoAviso(p) {
     return ultima ? `${base}${base ? '\n' : ''}Atualização (${ultima.data} ${ultima.hora}h): ${ultima.texto}` : base;
 }
 
+// ---------------------------------------------------------------------
+// Padrão oficial do relatório (modelo da US):
+//   3.1/3.2/3.3 nos sistemas · itens da seção 4 e 7 terminam com ";" ·
+//   movimentações de navio entram na seção 4 ("NAVIO - TERMINAL - Embarque de 04 Tripulantes. Vide e-mail;") ·
+//   seção 6 só com os nomes dos navios · avisos só com título + texto (atualizações ficam no histórico)
+// ---------------------------------------------------------------------
+// item de lista: sem marcador, "Vide e-mail" no fim e terminando com ";"
+function itemPadrao(t) {
+    let l = padronizarAtividade(t);
+    if (!l) return l;
+    l = l.replace(/\s*\.?\s*Detalhes no e-mail encaminhado\.?$/i, '. Vide e-mail');
+    l = l.replace(/[\s.;,:]+$/, '');
+    return l + ';';
+}
+function listaPadrao(itens) {
+    const lista = (itens || []).map(i => itemPadrao(typeof i === 'string' ? i : i?.texto)).filter(Boolean);
+    return lista.length ? lista.map(t => '✓ ' + t).join('\n') : '✓ S/A';
+}
+// título do aviso: sem numeração colada ("5.1."), sem * do WhatsApp, em maiúsculas
+function tituloAvisoPadrao(t) {
+    return String(t || '').replace(/[*_~]/g, '').replace(/^\s*(?:[✓✔•\-]\s*)?(?:\d+(?:\.\d+)*\.?\s*[-–]?\s*)+/, '').replace(/\s+/g, ' ').trim().toUpperCase() || 'AVISO';
+}
+// texto do aviso: só a descrição (sem linhas "Atualização (...)" e sem uma lista de outros avisos colada junto)
+function textoAvisoPadrao(p) {
+    const linhas = String(p.texto || '').replace(/[*_~]/g, '').split('\n').map(l => limparMarcador(l).trim()).filter(Boolean);
+    const saida = [];
+    for (const l of linhas) {
+        if (/^\d+\.\d+\.?\s+\S/.test(l)) break;             // começou outro aviso numerado (lista colada)
+        if (/^atualiza[cç][aã]o\s*\(/i.test(l)) continue;   // atualização: fica no histórico da pendência
+        saida.push(l);
+    }
+    return saida.join(' ').replace(/\s+/g, ' ').trim();
+}
+const avisoTemLista = p => String(p.texto || '').split('\n').filter(l => /^\s*(?:[✓✔•\-]\s*)?\d+\.\d+\.?\s+\S/.test(l.replace(/[*_~]/g, ''))).length >= 1;
+// movimentação do navio vira atividade da seção 4
+function linhaNavioNaAtividade(navio, terminal, linha) {
+    let l = limparMarcador(String(linha || '')).trim();
+    if (!l || ehSemAlteracao(l) || /^sem movimenta/i.test(semAcento(l))) return '';
+    l = l.replace(/\s*\.?\s*(Em andamento)\.?$/i, '. $1');
+    l = l.replace(/\btripulantes?\b/g, m => m.charAt(0).toUpperCase() + m.slice(1));
+    const comEmail = /tripulante|rancho|provis|entrega|retirada|abastec|inspe[cç]|mergulho|lacre|materia|pe[cç]a|[aá]gua|\bdta\b/i.test(semAcento(l));
+    l = l.replace(/[\s.;,:]+$/, '');
+    if (comEmail && !/vide e-?mail/i.test(l)) l += '. Vide e-mail';
+    return `${String(navio || '').trim().toUpperCase()} - ${terminal} - ${l};`;
+}
+function atividadesDosNavios(f) {
+    const saida = [];
+    for (const [chave, term] of [['tore', 'T-ORE'], ['toil', 'T-OIL']]) {
+        for (const n of f.navios?.[chave] || []) {
+            if (!(n.navio || '').trim()) continue;
+            for (const l of n.linhas || []) { const x = linhaNavioNaAtividade(n.navio, term, l); if (x && !saida.includes(x)) saida.push(x); }
+        }
+    }
+    return saida;
+}
+function naviosPadrao(lista) {
+    const nomes = (lista || []).map(n => String(n.navio || '').trim().toUpperCase()).filter(Boolean);
+    return nomes.length ? [...new Set(nomes)].map(n => '✓ ' + n).join('\n') : '✓ Sem navio';
+}
+const equipePadrao = t => { const x = String(t || '').trim().replace(/[\s.;,]+$/, ''); return '✓ ' + (x || 'Conforme escala') + '.'; };
+
 function formatarRelatorio(f, avisos = [], { negrito = true } = {}) {
     const b = s => (negrito ? `*${s}*` : s);
     const abertos = (avisos || []).filter(a => (a.titulo || a.texto || '').trim());
     const blocoAvisos = abertos.length
-        ? abertos.map((a, i) => [b(`5.${i + 1}. ${(a.titulo || 'AVISO').trim()}`), textoAviso(a)].filter(Boolean).join('\n')).join('\n\n')
+        ? abertos.map((a, i) => [`✓ ${b(`5.${i + 1}. ${tituloAvisoPadrao(a.titulo)}`)}`, textoAvisoPadrao(a)].filter(Boolean).join('\n')).join('\n')
         : '✓ S/A';
+    const atividades = [...(f.atividades || []).map(a => itemPadrao(typeof a === 'string' ? a : a.texto)).filter(Boolean), ...atividadesDosNavios(f)];
 
     return [
         b(`RELATÓRIO DO TURNO - ${f.turno}`),
@@ -660,46 +723,43 @@ function formatarRelatorio(f, avisos = [], { negrito = true } = {}) {
         b('1. EFETIVO CCOS'),
         blocoTexto(f.efetivo),
         '',
-        b('2. VIATURA – VTR'),
+        b('2. VIATURA – VTR🚔'),
         `Veículo: ${f.vtr?.modelo || '—'}`,
         `Placa: ${f.vtr?.placa || '—'}`,
         `KM inicial: ${formatarKm(f.vtr?.kmInicial)}`,
         `KM final: ${formatarKm(f.vtr?.kmFinal)}`,
         '',
         b('3. SISTEMAS'),
-        b('CFTV'),
+        b('3.1 - CFTV'),
         blocoTexto(f.sistemas?.cftv),
-        '',
-        b('CA - CONTROLE DE ACESSO'),
+        b('3.2 - CA - CONTROLE DE ACESSO'),
         blocoTexto(f.sistemas?.ca),
-        '',
-        b('OCR – RECONHECIMENTO DE PLACAS'),
-        `Assertividade: ${f.sistemas?.ocrAssertividade || '—'};`,
+        b('3.3 - OCR – RECONHECIMENTO DE PLACAS'),
+        `Assertividade: ${f.sistemas?.ocrAssertividade || '—'}`,
         `Total de leituras: ${f.sistemas?.ocrLeituras || '—'} veículos.`,
         '',
         b('4. ATIVIDADES REALIZADAS'),
-        blocoLista((f.atividades || []).map(a => padronizarAtividade(typeof a === 'string' ? a : a.texto))),
+        atividades.length ? atividades.map(t => '✓ ' + t).join('\n') : '✓ S/A',
         '',
         b('5. AVISOS E AÇÕES DE ACOMPANHAMENTO'),
         blocoAvisos,
         '',
-        b('6. MOVIMENTAÇÃO DE NAVIOS'),
-        b('T-ORE'),
-        blocoNavios(f.navios?.tore, b),
+        b('6. NAVIOS'),
+        b('6.1 - T-ORE'),
+        naviosPadrao(f.navios?.tore),
         '',
-        b('T-OIL'),
-        blocoNavios(f.navios?.toil, b),
+        b('6.2 - T-OIL'),
+        naviosPadrao(f.navios?.toil),
         '',
         b('7. OCORRÊNCIAS'),
-        blocoLista(f.ocorrencias),
+        listaPadrao(f.ocorrencias),
         '',
         b('8. PASSAGEM DE TURNO'),
+        b('8.1 - EQUIPE SAINDO:'),
+        equipePadrao(f.equipes?.saindo),
         '',
-        b('EQUIPE SAINDO:'),
-        (f.equipes?.saindo || '').trim() || 'Conforme escala',
-        '',
-        b('EQUIPE ASSUMINDO:'),
-        (f.equipes?.assumindo || '').trim() || 'Conforme escala'
+        b('8.2 - EQUIPE ASSUMINDO:'),
+        equipePadrao(f.equipes?.assumindo)
     ].join('\n');
 }
 
@@ -719,6 +779,9 @@ function conferirFicha(f, operacoes = [], avisos = [], hoje = agora()) {
     const [dH, mH, aH] = hoje.data.split('/').map(Number);
     const minHoje = (() => { const [h, m] = hoje.hora.split(':').map(Number); return h * 60 + m; })();
     const comparar = (d, m) => { const dif = (m - mH) * 31 + (d - dH); return dif < -200 ? 1 : dif > 200 ? -1 : Math.sign(dif); };   // virada de ano
+    (avisos || []).forEach((a, i) => {
+        if (avisoTemLista(a)) alertas.push(`Aviso 5.${i + 1} (${tituloAvisoPadrao(a.titulo)}) tem uma lista de outros avisos colada no texto — no relatório sai só a parte dele; separe os demais em avisos próprios.`);
+    });
     (avisos || []).forEach((a, i) => {
         const texto = textoAviso(a);
         const re = /(previs|para|agendad|marcad|alinhad|ser[aá]|retirada|segunda|ter[cç]a|quarta|quinta|sexta|s[aá]bado|domingo)[^.\n]{0,40}?\(?(\d{1,2})\/(\d{1,2})(?:\/\d{2,4})?\)?/gi;
@@ -1286,7 +1349,7 @@ module.exports = {
     proximoTurno, turnoAnterior, linhasExcel,
     ehMensagemDeSaida, TIPOS_OPERACAO, MOVIMENTOS, NAVIOS_PADRAO,
     fichaVazia, naviosDeTexto, arrumarNavios, ehNomeDeNavio, linhaNoPadrao, ehOperacaoConcluida, adicionarLinhaNavio, ehRelatorioDeTurno, lerRelatorio, fichaHerdada,
-    formatarRelatorio, conferirFicha, formatarPassagemEscala, textoAviso, padronizarLinhaNavio, padronizarAtividade,
+    formatarRelatorio, conferirFicha, avisoTemLista, itemPadrao, linhaNavioNaAtividade, formatarPassagemEscala, textoAviso, padronizarLinhaNavio, padronizarAtividade,
     lerMensagemPadrao, classificarMensagem, extrairCampos, rascunhosOperacao, atividadeDasOperacoes, ehDesembarque, ehEmbarque, ajustarDesembarque,
     tipoOperacaoDoTexto, movimentoDoTexto, resumoNavio, minutaEmail, mensagemPadrao, manobraDoTexto, linhaManobra, numeroKm, navioConhecido, terminalDoNavio,
     formatarQtdTripulantes, ehSemAlteracao, separarNomes, juntarNomes, nomeProprio, lerEquipesComPipe, nomeNavioLimpo, chaveNavio, acharNavio, trocarLinhaNavio
