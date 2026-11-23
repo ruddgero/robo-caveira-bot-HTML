@@ -742,3 +742,22 @@ body:has(#app:not([hidden])) #fundo-animado { opacity: .12; }
 .perm-fixa { margin-top: 8px; opacity: .8; }
 .perm-pessoa { display: grid; grid-template-columns: minmax(0, 1fr) 230px; gap: 10px; align-items: center; padding: 8px 0; border-top: 1px solid var(--borda); }
 @media (max-width: 600px) { .perm-pessoa { grid-template-columns: 1fr; } .perm-cab, .perm-linha { grid-template-columns: minmax(150px, 1fr) repeat(var(--cols), 64px); } }
+
+/* ---------- Menu lateral que se esconde (computador) ---------- */
+.btn-menu-lateral { display: none; margin-right: 4px; }
+.btn-menu-lateral .ic-svg { width: 20px; height: 20px; }
+.topo .marca { margin-right: auto; }
+.topo { gap: 12px; }
+.menu-fundo { position: fixed; inset: 61px 0 0 0; z-index: 19; background: rgba(3, 7, 18, .45); }
+.menu-fixar { display: none !important; }
+@media (min-width: 1024px) {
+  .btn-menu-lateral { display: inline-grid; }
+  .abas { transition: transform .2s ease, box-shadow .2s ease; }
+  main, main.largo { transition: margin-left .2s ease; }
+  body.menu-oculto .abas { transform: translateX(-100%); }
+  body.menu-oculto main, body.menu-oculto main.largo { margin-left: 0; }
+  body.menu-oculto.menu-sobre .abas { transform: none; z-index: 21; box-shadow: 18px 0 40px rgba(0,0,0,.45); }
+  body.menu-oculto.menu-sobre .menu-fixar { display: block !important; margin-top: auto; border: 1px dashed var(--borda); background: none; color: var(--mudo); font-size: 12.5px; padding: 8px 10px; border-radius: 10px; text-align: center; justify-content: center; }
+  body.menu-oculto.menu-sobre .menu-fixar:hover { color: var(--texto); border-color: var(--primario); }
+}
+@media (prefers-reduced-motion: reduce) { .abas, main, main.largo { transition: none; } }

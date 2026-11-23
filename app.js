@@ -431,6 +431,40 @@ function desenharSubabas() {
     ROTULOS_SUB[v], contagem[v] ? el('span', { class: 'n', text: contagem[v] > 99 ? '99+' : String(contagem[v]) }) : null)));
 }
 
+// ---- Menu lateral (computador): aberto no Plantão e nas Pendências, escondido nos Indicadores.
+// ☰ (ou a tecla [) mostra/esconde; com ele escondido, abre por cima da tela e fecha ao escolher.
+const MenuLateral = (() => {
+  const PADRAO = { plantao: 'fixo', pendencias: 'fixo', painel: 'oculto' };
+  let pref = {}; try { pref = JSON.parse(localStorage.getItem('caveira.menuLateral') || '{}'); } catch (_) {}
+  const grande = () => window.matchMedia('(min-width: 1024px)').matches;
+  const modo = g => pref[g] || PADRAO[g] || 'fixo';
+  const fundo = el('div', { class: 'menu-fundo', hidden: true, onclick: () => fecharSobre() });
+  document.body.append(fundo);
+  function aplicar() {
+    const g = grupoDa(S.aba), oculto = grande() && modo(g) === 'oculto';
+    document.body.classList.toggle('menu-oculto', oculto);
+    if (!oculto) fecharSobre();
+    const bt = $('#btn-menu-lateral'); if (bt) { bt.setAttribute('aria-expanded', String(!oculto)); bt.title = (oculto ? 'Mostrar o menu lateral' : 'Esconder o menu lateral') + ' ( [ )'; bt.classList.toggle('ativo', !oculto); }
+  }
+  function abrirSobre() { document.body.classList.add('menu-sobre'); fundo.hidden = false; }
+  function fecharSobre() { document.body.classList.remove('menu-sobre'); fundo.hidden = true; }
+  function alternar() {
+    if (!grande()) return;
+    const g = grupoDa(S.aba);
+    if (document.body.classList.contains('menu-oculto')) { document.body.classList.contains('menu-sobre') ? fecharSobre() : abrirSobre(); return; }
+    pref[g] = 'oculto'; try { localStorage.setItem('caveira.menuLateral', JSON.stringify(pref)); } catch (_) {}
+    aplicar();
+  }
+  function fixar() { const g = grupoDa(S.aba); pref[g] = 'fixo'; try { localStorage.setItem('caveira.menuLateral', JSON.stringify(pref)); } catch (_) {} fecharSobre(); aplicar(); }
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && document.body.classList.contains('menu-sobre')) return fecharSobre();
+    if (e.key === '[' && !/^(INPUT|TEXTAREA|SELECT)$/.test((document.activeElement || {}).tagName || '') && !modalAberto() && !document.querySelector('.mapa-tela')) { e.preventDefault(); alternar(); }
+  });
+  window.addEventListener('resize', aplicar);
+  return { aplicar, alternar, fixar, fecharSobre };
+})();
+document.getElementById('btn-menu-lateral')?.addEventListener('click', () => MenuLateral.alternar());
+
 function trocarAba(nome) {
   if (S.indPop) { S.indPop = ''; if (S.popIndEl) S.popIndEl.hidden = true; }
   if (nome === 'plantao' || nome === 'pendencias-grupo') nome = S.ultimaAba[nome === 'plantao' ? 'plantao' : 'pendencias'] || (nome === 'plantao' ? 'central' : 'pendencias');
@@ -438,7 +472,7 @@ function trocarAba(nome) {
   if (S.usuario && !vistaPermitida(S.aba)) S.aba = Object.values(GRUPOS).flat().find(vistaPermitida) || S.aba;
   const g = grupoDa(S.aba);
   // menu de baixo/lateral: só o que a pessoa pode ver; quem só registra ROI vê "ROI"
-  document.querySelectorAll('.abas button').forEach(b => {
+  document.querySelectorAll('.abas button[data-grupo]').forEach(b => {
     const vs = GRUPOS[b.dataset.grupo].filter(vistaPermitida);
     b.hidden = !vs.length;
     if (b.dataset.grupo === 'plantao') { const t = [...b.childNodes].find(n => n.nodeType === 3 && n.nodeValue.trim()); if (t) t.nodeValue = vs.length === 1 && vs[0] === 'roi' ? 'ROI' : 'Plantão'; }
@@ -448,11 +482,14 @@ function trocarAba(nome) {
   document.querySelectorAll('.aba').forEach(x => { x.hidden = x.id !== `aba-${S.aba}`; });
   $('#conteudo').classList.toggle('largo', S.aba === 'central' || S.aba === 'historico' || S.aba === 'painel');
   desenharSubabas();
+  MenuLateral.aplicar();
   redesenharAba();
   window.scrollTo(0, 0);
 }
 
-document.querySelectorAll('.abas button').forEach(b => b.addEventListener('click', () => {
+document.querySelector('.abas')?.append(el('button', { type: 'button', class: 'menu-fixar', title: 'Deixar o menu sempre aberto nesta tela', onclick: ev => { ev.stopPropagation(); MenuLateral.fixar(); } }, 'Manter aberto aqui'));
+document.querySelectorAll('.abas button:not(.menu-fixar)').forEach(b => b.addEventListener('click', () => {
+  MenuLateral.fecharSobre();
   const g = b.dataset.grupo;
   if (g === 'painel') S.indVista = 'inicio';
   trocarAba(S.ultimaAba[g] || GRUPOS[g][0]);
