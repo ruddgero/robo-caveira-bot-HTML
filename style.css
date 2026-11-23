@@ -448,3 +448,9 @@ html, body { overflow-x: clip; }
 .ind-trilho.duplo span { display: block; height: 9px; border-radius: 0 3px 3px 0; min-width: 0; }
 .ind-trilho.duplo span.ant { height: 5px; background: var(--mudo); opacity: .45; }
 #impressao .roi-imp ul { margin: 4px 0 8px 18px; padding: 0; }
+
+/* Gráfico por mês: cada cor é clicável; lista do mês com filtro por tipo */
+.ind-col:focus-visible { outline: 2px solid var(--primario); outline-offset: 2px; }
+@media (hover: hover) { .ind-col .ind-pilha span { cursor: pointer; } .ind-col .ind-pilha span:hover { filter: brightness(1.25); } }
+.ponto-tipo { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
+.ind-dica { width: 260px; }

@@ -2273,7 +2273,7 @@ function desenharPainelGerencial() {
     dica.replaceChildren(el('strong', { text: titulo }), ...linhas.map(t => el('div', { text: t })));
     dica.hidden = false;
     const caixa = c.getBoundingClientRect(), alvo = ev.currentTarget.getBoundingClientRect();
-    const x = Math.min(Math.max(alvo.left - caixa.left + alvo.width / 2 - 100, 4), caixa.width - 208);
+    const x = Math.min(Math.max(alvo.left - caixa.left + alvo.width / 2 - 130, 4), caixa.width - 268);
     dica.style.left = x + 'px'; dica.style.top = (alvo.top - caixa.top + c.scrollTop - 8) + 'px';
   };
   const esconder = () => { dica.hidden = true; };
@@ -2327,12 +2327,37 @@ function desenharPainelGerencial() {
   if (d.simulados) kpis.push(kpi('Simulados', d.simulados, ['contam no total, com o selo ', el('span', { class: 'etiqueta simulado', text: 'SIMULADO' })]));
 
   // mês a mês (colunas empilhadas por tipo)
+  // passar o mouse mostra os ROIs do mês; clicar abre a lista (clicar numa cor já abre filtrado no tipo).
+  // No celular (sem mouse), o toque abre o mês inteiro, com filtros por tipo no topo da lista.
+  const semMouse = window.matchMedia('(hover: none)').matches;
+  const linhaRoi = r => `ROI ${r.numero} · ${r.tipo} · ${r.local || 'sem local'} · ${String(r.data || '').slice(0, 5)}${r.simulado ? ' · SIMULADO' : ''}`;
+  const dicaMes = (m, g) => {
+    const lista = (m.rois || []).filter(r => !g || r.tipo === g);
+    const linhas = lista.slice(0, 5).map(linhaRoi);
+    if (lista.length > 5) linhas.push(`+ ${lista.length - 5} outros`);
+    linhas.push(lista.length ? (semMouse ? 'Toque para abrir a lista' : 'Clique para abrir a lista') : 'Sem ROI');
+    return [`${MESES_ABREV[m.mes - 1]}/${d.ano}${g ? ` · ${nomeTipo(g)}` : ''} · ${lista.length} ROI${lista.length === 1 ? '' : 's'}`, linhas];
+  };
   const maxMes = Math.max(1, ...d.meses.map(m => m.total));
-  const colunas = el('div', { class: 'ind-colunas' }, d.meses.map(m => comDica(
-    el('div', { class: 'ind-col' + (d.mes === m.mes ? ' sel' : ''), role: 'button', 'aria-label': `${MESES_ABREV[m.mes - 1]}: ${m.total}` },
-      el('em', { text: m.total ? String(m.total) : '' }), el('div', { class: 'ind-barra' }, pilha(m.porTipo, maxMes)), el('small', { text: MESES_ABREV[m.mes - 1] })),
-    `${MESES_ABREV[m.mes - 1]}/${d.ano} · ${m.total} ROI${m.total === 1 ? '' : 's'}`, m.total ? linhasTipos(m.porTipo, m.simulados) : ['Sem ROI'],
-    () => { S.indMes = d.mes === m.mes ? 0 : m.mes; refazer(); })));
+  const colunas = el('div', { class: 'ind-colunas' }, d.meses.map(m => {
+    const col = el('div', { class: 'ind-col' + (d.mes === m.mes ? ' sel' : ''), role: 'button', tabindex: '0', 'aria-label': `${MESES_ABREV[m.mes - 1]}: ${m.total} ROIs. Abrir a lista.` });
+    const sobre = g => { const [t, l] = dicaMes(m, g); mostrar({ stopPropagation() {}, currentTarget: col }, t, l); };
+    const pil = el('div', { class: 'ind-pilha' }, ...Object.keys(G).filter(g => m.porTipo[g]).map(g => {
+      const seg = el('span', { style: `height:${m.porTipo[g] / maxMes * 100}%;background:${COR_TIPO[g]}`, title: semMouse ? null : nomeTipo(g) });
+      if (!semMouse) {
+        seg.addEventListener('mouseenter', ev => { ev.stopPropagation(); sobre(g); });
+        seg.addEventListener('mouseleave', () => sobre(null));
+        seg.addEventListener('click', ev => { ev.stopPropagation(); esconder(); abrirRoisDoMes(d, m, g); });
+      }
+      return seg;
+    }));
+    col.append(el('em', { text: m.total ? String(m.total) : '' }), el('div', { class: 'ind-barra' }, pil), el('small', { text: MESES_ABREV[m.mes - 1] }));
+    if (!semMouse) { col.addEventListener('mouseenter', () => sobre(null)); col.addEventListener('mouseleave', esconder); }
+    const abrir = ev => { ev.stopPropagation(); esconder(); if (m.total) abrirRoisDoMes(d, m, null); };
+    col.addEventListener('click', abrir);
+    col.addEventListener('keydown', ev => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); abrir(ev); } });
+    return col;
+  }));
 
   // pontos críticos (locais) e empresas
   const topLocais = agrupar(d.locais, 8, 'locais');
@@ -2398,7 +2423,7 @@ function desenharPainelGerencial() {
     secao(`Reincidência (mesmo local e tipo em até 90 dias) · ${d.reincidencias.length}`, reincidencia),
     secao('Histórico por ano', anos,
       t.ultimos12 || t.anteriores12 ? el('p', { class: 'pequeno', style: 'margin:0', text: `Tendência: ${t.ultimos12} ROIs nos últimos 12 meses${vt === null ? '' : ` · ${seta(vt, t.anteriores12, '12 meses anteriores')}`}` }) : null,
-      el('p', { class: 'mudo pequeno', style: 'margin:0', text: 'Passe o mouse para ver os tipos; toque num mês, ano, tipo, local, empresa ou número do topo para filtrar. * ano em andamento.' })),
+      el('p', { class: 'mudo pequeno', style: 'margin:0', text: 'No gráfico por mês, passe o mouse para ver os ROIs e clique para abrir a lista. Toque num ano, tipo, local, empresa ou número do topo para filtrar. * ano em andamento.' })),
     secao(`ROIs do período (${d.lista.length})`,
       el('div', { class: 'lista' }, lista.map(r => el('button', { class: 'linha-op', onclick: () => abrirRoi(r.id) },
         el('span', { class: 'ic', style: `color:${COR_TIPO[r.tipo] || 'inherit'}`, text: '●' }),
@@ -2410,6 +2435,35 @@ function desenharPainelGerencial() {
   c.onclick = esconder;
 }
 
+
+// Lista dos ROIs de um mês (aberta pelo gráfico "Por mês e tipo")
+function abrirRoisDoMes(d, m, tipoInicial) {
+  const G = d.grupos;
+  let tipo = tipoInicial;
+  const titulo = `ROIs de ${MESES_ABREV[m.mes - 1]}/${d.ano}`;
+  const chips = el('div', { class: 'filtros' });
+  const lista = el('div', { class: 'lista' });
+  const desenhar = () => {
+    const contagem = {}; (m.rois || []).forEach(r => { contagem[r.tipo] = (contagem[r.tipo] || 0) + 1; });
+    chips.replaceChildren(
+      el('button', { class: 'filtro' + (!tipo ? ' ativo' : ''), onclick: () => { tipo = null; desenhar(); } }, `Todos (${(m.rois || []).length})`),
+      ...Object.keys(G).filter(g => contagem[g]).map(g => el('button', { class: 'filtro' + (tipo === g ? ' ativo' : ''), onclick: () => { tipo = g; desenhar(); } },
+        el('i', { class: 'ponto-tipo', style: `background:${COR_TIPO[g]}` }), `${g} – ${G[g]} (${contagem[g]})`)));
+    const itens = (m.rois || []).filter(r => !tipo || r.tipo === tipo);
+    lista.replaceChildren(...(itens.length ? itens.map(r => el('button', { class: 'linha-op', onclick: () => { fecharModal(); abrirRoi(r.id); } },
+      el('span', { class: 'ic', style: `color:${COR_TIPO[r.tipo] || 'inherit'}`, text: '●' }),
+      el('span', { style: 'min-width:0' }, el('div', { class: 'tit' }, `ROI ${r.numero} · ${r.tipo} – ${G[r.tipo] || ''}`, ' ', r.simulado ? el('span', { class: 'etiqueta simulado', text: 'SIMULADO' }) : null),
+        el('div', { class: 'sub', text: [r.data, r.local, r.descricao && (r.descricao.length > 90 ? r.descricao.slice(0, 87) + '…' : r.descricao)].filter(Boolean).join(' · ') })),
+      el('span', { class: 'seta', text: '›' }))) : [el('div', { class: 'vazio', text: 'Nenhum ROI deste tipo no mês.' })]));
+  };
+  desenhar();
+  abrirModal(titulo, [
+    chips, lista
+  ], [
+    el('button', { class: 'btn fantasma', onclick: () => { fecharModal(); S.indMes = m.mes; desenharPainelGerencial(); } }, `Filtrar a tela por ${MESES_ABREV[m.mes - 1]}`),
+    el('button', { class: 'btn primario', 'data-fechar': true }, 'Fechar')
+  ]);
+}
 
 // Resumo para a gerência (PDF pela impressão): números, frases, tipos, pontos críticos, reincidência e empresas
 function imprimirResumoIndicador(d) {

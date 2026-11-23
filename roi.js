@@ -683,7 +683,11 @@ function indicadorOcorrencias({ ano, mes, tipos: filtroTipos, local: filtroLocal
 
     const meses = Array.from({ length: anoCorrente ? mHoje : 12 }, (_, i) => {
         const lista = doAno.filter(r => r.mes === i + 1);
-        return { mes: i + 1, nome: MESES[i].slice(0, 3), total: lista.length, porTipo: contarTipos(lista), simulados: lista.filter(r => r.simulado).length };
+        return {
+            mes: i + 1, nome: MESES[i].slice(0, 3), total: lista.length, porTipo: contarTipos(lista), simulados: lista.filter(r => r.simulado).length,
+            // ROIs do mês para o balão e a lista do gráfico (mais recentes primeiro)
+            rois: lista.slice().sort((a, b) => b.seq - a.seq).map(r => ({ id: r.id, numero: r.numero, tipo: r.tipo, data: r.data, local: r.localNome, simulado: !!r.simulado, descricao: String(r.descricao || r.oque || '').slice(0, 120) }))
+        };
     });
     const tipos = contarTipos(escopo);
     const locaisMap = new Map();
