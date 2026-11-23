@@ -605,7 +605,7 @@ function blocoTexto(texto, vazio = '✓ S/A') {
     const linhas = String(texto || '').split('\n').map(l => l.trim()).filter(Boolean);
     if (!linhas.length) return vazio;
     if (!/^[✓✔•\-]/.test(linhas[0])) linhas[0] = '✓ ' + linhas[0];
-    return linhas.join('\n');
+    return linhas.map(l => /^\d{1,2}\.\s/.test(l) ? '✓ ' + l : l).join('\n');   // linha numerada não pode parecer tópico
 }
 
 function blocoLista(itens) {
@@ -652,9 +652,43 @@ function textoAviso(p) {
 //   subnúmeros (5.1, 5.2…) só nos avisos · itens da seção 4 e 7 terminam com ";" ·
 //   seção 6 com cada navio e as movimentações embaixo ("Desembarque definitivo de 02 Tripulantes. Vide e-mail;") · avisos só com título + texto (atualizações ficam no histórico)
 // ---------------------------------------------------------------------
+// ======================= PADRÃO DO RELATÓRIO · VERSÃO 1 =======================
+// BLINDADO: tópicos, números, títulos e ordem só mudam aqui (e no gabarito de testes/gabarito-relatorio.txt).
+// O conteúdo de cada turno nunca escreve título: passa por conteudoSeguro() antes de entrar.
+const PADRAO_RELATORIO = Object.freeze({
+    versao: 1,
+    secoes: Object.freeze([
+        '1. EFETIVO CCOS', '2. VIATURA – VTR🚔', '3. SISTEMAS', '4. ATIVIDADES REALIZADAS',
+        '5. AVISOS E AÇÕES DE ACOMPANHAMENTO', '6. NAVIOS', '7. OCORRÊNCIAS', '8. PASSAGEM DE TURNO']),
+    sistemas: Object.freeze(['CFTV', 'CA - CONTROLE DE ACESSO', 'OCR – RECONHECIMENTO DE PLACAS']),
+    terminais: Object.freeze(['T-ORE', 'T-OIL']),
+    equipes: Object.freeze(['EQUIPE SAINDO:', 'EQUIPE ASSUMINDO:'])
+});
+const T = PADRAO_RELATORIO;
+// conteúdo não pode virar título: tira * _ ~, numeração de tópico colada e cabeçalhos de seção
+const RE_TOPICO = /^\s*(?:[✓✔•\-]\s*)?\d{1,2}\s*[.)]\s*(\d{1,2}\s*[.)-]?\s*)?(EFETIVO|VIATURA|SISTEMAS|ATIVIDADES|AVISOS|NAVIOS|MOVIMENTA|OCORR|PASSAGEM)/i;
+function conteudoSeguro(t) {
+    return String(t || '').replace(/[*_~]/g, '').split('\n')
+        .map(l => l.replace(/^\s*(?:[✓✔•]\s*)?\d{1,2}\.\d{1,2}\.?\s*[-–]?\s+(?=\S)/, '').trimEnd())
+        .filter(l => !RE_TOPICO.test(l) && !/^\s*RELAT[OÓ]RIO D[OE] TURNO/i.test(l))
+        .join('\n').trim();
+}
+// frases que dizem a mesma coisa: fica a mais completa (a mais recente, se empatar)
+function semRepeticao(texto) {
+    const chave = f => new Set(semAcento(f).toLowerCase().replace(/[^a-z0-9 ]/g, ' ').split(/\s+/).filter(w => w.length >= 4 || /\d/.test(w)));
+    const frases = String(texto || '').split(/(?<=[.!?;])\s+/).map(f => f.trim()).filter(Boolean);
+    const fica = [];
+    for (const f of frases) {
+        const k = chave(f);
+        const i = fica.findIndex(x => { const kx = chave(x); const comum = [...k].filter(w => kx.has(w)).length; return comum && comum / Math.min(k.size, kx.size) >= 0.75; });
+        if (i < 0) fica.push(f);
+        else if (f.length >= fica[i].length) fica[i] = f;   // a nova é mais completa (ou igual e mais recente)
+    }
+    return fica.join(' ');
+}
 // item de lista: sem marcador, "Vide e-mail" no fim e terminando com ";"
 function itemPadrao(t) {
-    let l = padronizarAtividade(t);
+    let l = padronizarAtividade(conteudoSeguro(t).replace(/\n+/g, ' '));
     if (!l) return l;
     l = l.replace(/\s*\.?\s*Detalhes no e-mail encaminhado\.?$/i, '. Vide e-mail');
     l = l.replace(/[\s.;,:]+$/, '');
@@ -666,7 +700,7 @@ function listaPadrao(itens) {
 }
 // título do aviso: sem numeração colada ("5.1."), sem * do WhatsApp, em maiúsculas
 function tituloAvisoPadrao(t) {
-    return String(t || '').replace(/[*_~]/g, '').replace(/^\s*(?:[✓✔•\-]\s*)?(?:\d+(?:\.\d+)*\.?\s*[-–]?\s*)+/, '').replace(/\s+/g, ' ').trim().toUpperCase() || 'AVISO';
+    return conteudoSeguro(String(t || '').split('\n')[0]).replace(/[*_~]/g, '').replace(/^\s*(?:[✓✔•\-]\s*)?(?:\d+(?:\.\d+)*\.?\s*[-–]?\s*)+/, '').replace(/\s+/g, ' ').trim().toUpperCase() || 'AVISO';
 }
 // texto do aviso: só a descrição (sem linhas "Atualização (...)" e sem uma lista de outros avisos colada junto)
 function textoAvisoPadrao(p) {
@@ -675,9 +709,10 @@ function textoAvisoPadrao(p) {
     for (const l of linhas) {
         if (/^\d+\.\d+\.?\s+\S/.test(l)) break;             // começou outro aviso numerado (lista colada)
         if (/^atualiza[cç][aã]o\s*\(/i.test(l)) continue;   // atualização: fica no histórico da pendência
+        if (RE_TOPICO.test(l)) continue;                     // título de tópico colado não entra
         saida.push(l);
     }
-    return saida.join(' ').replace(/\s+/g, ' ').trim();
+    return semRepeticao(conteudoSeguro(saida.join(' ')).replace(/\s+/g, ' ').trim());
 }
 const avisoTemLista = p => String(p.texto || '').split('\n').filter(l => /^\s*(?:[✓✔•\-]\s*)?\d+\.\d+\.?\s+\S/.test(l.replace(/[*_~]/g, ''))).length >= 1;
 // movimentação do navio vira atividade da seção 4
@@ -711,7 +746,7 @@ function naviosPadrao(lista, b) {
     }).join('\n\n');   // um navio por bloco, como no critério anterior
 }
 function movimentoPadrao(linha) {
-    let l = limparMarcador(String(linha || '')).trim();
+    let l = limparMarcador(conteudoSeguro(linha).replace(/\n+/g, ' ')).trim();
     if (!l || ehSemAlteracao(l)) return '';
     if (/^sem movimenta/i.test(semAcento(l))) return 'Sem movimentações operacionais;';
     l = l.replace(/\s*\.?\s*(Em andamento)\.?$/i, '. $1');
@@ -721,7 +756,7 @@ function movimentoPadrao(linha) {
     if (comEmail && !/vide e-?mail/i.test(l)) l += '. Vide e-mail';
     return l + ';';
 }
-const equipePadrao = t => { const x = String(t || '').trim().replace(/[\s.;,]+$/, ''); return '✓ ' + (x || 'Conforme escala') + '.'; };
+const equipePadrao = t => { const x = conteudoSeguro(t).replace(/\n+/g, ' ').trim().replace(/[\s.;,]+$/, ''); return '✓ ' + (x || 'Conforme escala') + '.'; };
 
 function formatarRelatorio(f, avisos = [], { negrito = true } = {}) {
     const b = s => (negrito ? `*${s}*` : s);
@@ -731,51 +766,66 @@ function formatarRelatorio(f, avisos = [], { negrito = true } = {}) {
         : '✓ S/A';
     const atividades = (f.atividades || []).map(a => itemPadrao(typeof a === 'string' ? a : a.texto)).filter(Boolean);   // movimentações de navio ficam na seção 6
 
-    return [
+    const texto = [
         b(`RELATÓRIO DO TURNO - ${f.turno}`),
         `Data: ${f.data}`,
         '',
-        b('1. EFETIVO CCOS'),
-        blocoTexto(f.efetivo),
+        b(T.secoes[0]),
+        blocoTexto(conteudoSeguro(f.efetivo)),
         '',
-        b('2. VIATURA – VTR🚔'),
+        b(T.secoes[1]),
         `Veículo: ${f.vtr?.modelo || '—'}`,
         `Placa: ${f.vtr?.placa || '—'}`,
         `KM inicial: ${formatarKm(f.vtr?.kmInicial)}`,
         `KM final: ${formatarKm(f.vtr?.kmFinal)}`,
         '',
-        b('3. SISTEMAS'),
-        b('CFTV'),
-        blocoTexto(f.sistemas?.cftv),
-        b('CA - CONTROLE DE ACESSO'),
-        blocoTexto(f.sistemas?.ca),
-        b('OCR – RECONHECIMENTO DE PLACAS'),
+        b(T.secoes[2]),
+        b(T.sistemas[0]),
+        blocoTexto(conteudoSeguro(f.sistemas?.cftv)),
+        b(T.sistemas[1]),
+        blocoTexto(conteudoSeguro(f.sistemas?.ca)),
+        b(T.sistemas[2]),
         `Assertividade: ${f.sistemas?.ocrAssertividade || '—'}`,
         `Total de leituras: ${f.sistemas?.ocrLeituras || '—'} veículos.`,
         '',
-        b('4. ATIVIDADES REALIZADAS'),
+        b(T.secoes[3]),
         atividades.length ? atividades.map(t => '✓ ' + t).join('\n') : '✓ S/A',
         '',
-        b('5. AVISOS E AÇÕES DE ACOMPANHAMENTO'),
+        b(T.secoes[4]),
         blocoAvisos,
         '',
-        b('6. NAVIOS'),
-        b('T-ORE'),
+        b(T.secoes[5]),
+        b(T.terminais[0]),
         naviosPadrao(f.navios?.tore, b),
         '',
-        b('T-OIL'),
+        b(T.terminais[1]),
         naviosPadrao(f.navios?.toil, b),
         '',
-        b('7. OCORRÊNCIAS'),
+        b(T.secoes[6]),
         listaPadrao(f.ocorrencias),
         '',
-        b('8. PASSAGEM DE TURNO'),
-        b('EQUIPE SAINDO:'),
+        b(T.secoes[7]),
+        b(T.equipes[0]),
         equipePadrao(f.equipes?.saindo),
         '',
-        b('EQUIPE ASSUMINDO:'),
+        b(T.equipes[1]),
         equipePadrao(f.equipes?.assumindo)
     ].join('\n');
+    const erros = validarPadrao(texto);
+    if (erros.length) throw Object.assign(new Error('Relatório fora do padrão: ' + erros.join(' · ')), { status: 500 });
+    return texto;
+}
+// confere o texto pronto contra o molde: tópicos na ordem, números certos, subnúmero só no 5, nada duplicado
+function validarPadrao(texto) {
+    const linhas = String(texto || '').split('\n').map(l => l.replace(/[*]/g, '').trim());
+    const erros = [];
+    const topicos = linhas.filter(l => /^\d{1,2}\.\s/.test(l));
+    if (JSON.stringify(topicos) !== JSON.stringify([...T.secoes])) erros.push(`tópicos diferentes do padrão (${topicos.join(' | ')})`);
+    const sub = linhas.filter(l => /^(?:✓\s*)?\d{1,2}\.\d{1,2}/.test(l));
+    if (sub.some(l => !/^✓\s*5\.\d+\.\s/.test(l))) erros.push('subnúmero fora do item 5');
+    sub.forEach((l, i) => { if (!l.startsWith(`✓ 5.${i + 1}. `)) erros.push(`aviso fora de ordem (${l.slice(0, 20)})`); });
+    for (const t of [...T.sistemas, ...T.terminais, ...T.equipes]) if (linhas.filter(l => l === t).length !== 1) erros.push(`subtítulo "${t}" ausente ou repetido`);
+    return erros;
 }
 
 function conferirFicha(f, operacoes = [], avisos = [], hoje = agora()) {
@@ -1364,7 +1414,7 @@ module.exports = {
     proximoTurno, turnoAnterior, linhasExcel,
     ehMensagemDeSaida, TIPOS_OPERACAO, MOVIMENTOS, NAVIOS_PADRAO,
     fichaVazia, naviosDeTexto, arrumarNavios, ehNomeDeNavio, linhaNoPadrao, ehOperacaoConcluida, adicionarLinhaNavio, ehRelatorioDeTurno, lerRelatorio, fichaHerdada,
-    formatarRelatorio, conferirFicha, avisoTemLista, itemPadrao, linhaNavioNaAtividade, formatarPassagemEscala, textoAviso, padronizarLinhaNavio, padronizarAtividade,
+    formatarRelatorio, conferirFicha, validarPadrao, PADRAO_RELATORIO, conteudoSeguro, semRepeticao, tituloAvisoPadrao, avisoTemLista, itemPadrao, linhaNavioNaAtividade, formatarPassagemEscala, textoAviso, padronizarLinhaNavio, padronizarAtividade,
     lerMensagemPadrao, classificarMensagem, extrairCampos, rascunhosOperacao, atividadeDasOperacoes, ehDesembarque, ehEmbarque, ajustarDesembarque,
     tipoOperacaoDoTexto, movimentoDoTexto, resumoNavio, minutaEmail, mensagemPadrao, manobraDoTexto, linhaManobra, numeroKm, navioConhecido, terminalDoNavio,
     formatarQtdTripulantes, ehSemAlteracao, separarNomes, juntarNomes, nomeProprio, lerEquipesComPipe, nomeNavioLimpo, chaveNavio, acharNavio, trocarLinhaNavio

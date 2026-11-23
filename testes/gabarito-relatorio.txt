@@ -1,0 +1,52 @@
+RELATÓRIO DO TURNO - NOTURNO
+Data: 22/11/2026
+
+1. EFETIVO CCOS
+✓ S/A
+
+2. VIATURA – VTR🚔
+Veículo: L200
+Placa: TDG-8C89
+KM inicial: 19.503
+KM final: 19.504
+
+3. SISTEMAS
+CFTV
+✓ 01 câmera ausente: Fixa - Portão 04 da Filtragem.
+CA - CONTROLE DE ACESSO
+✓ S/A
+OCR – RECONHECIMENTO DE PLACAS
+Assertividade: 96,83%
+Total de leituras: 63 veículos.
+
+4. ATIVIDADES REALIZADAS
+✓ Realizadas atividades administrativas;
+✓ Executada ronda em todo o terminal, com apoio do Supervisor Sunset;
+✓ Realizada a solicitação de desentupimento do esgoto do Gate 01. Vide e-mail;
+
+5. AVISOS E AÇÕES DE ACOMPANHAMENTO
+✓ 5.1. DOCK STATION
+Consultar o e-mail encaminhado para conhecimento dos detalhes e acompanhamento das tratativas.
+✓ 5.2. FM-200 SALA DE CRISE / DATA CENTER
+Sistema retirado para manutenção, com previsão de retorno de 15 a 30 dias.
+
+6. NAVIOS
+T-ORE
+✓ Sem navio
+
+T-OIL
+ERIETTA LATSI
+✓ Sem movimentações operacionais;
+
+EAGLE PILLAR
+✓ Desembarque definitivo de 02 Tripulantes. Vide e-mail;
+
+7. OCORRÊNCIAS
+✓ S/A
+
+8. PASSAGEM DE TURNO
+EQUIPE SAINDO:
+✓ Ruddgero Ribeiro, Felipe Furtado e Laís Campos.
+
+EQUIPE ASSUMINDO:
+✓ Gustavo Ramos, Rodrigo Chaves e Marcos Duarte.

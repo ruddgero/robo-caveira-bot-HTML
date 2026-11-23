@@ -1,12 +1,12 @@
 {
   "name": "caveira-bot-ccos",
-  "version": "7.8.0",
+  "version": "7.9.0",
   "description": "Central do plantão do CCOS (Porto do Açu): lê o grupo do WhatsApp, herda o relatório da equipe anterior, gera e-mails de bordo e a passagem da escala.",
   "main": "index.js",
   "private": true,
   "scripts": {
     "start": "node index.js",
-    "test": "node teste_relatorio.js",
+    "test": "node teste_relatorio.js && node teste_padrao.js",
     "teste-grupo": "node teste_grupo.js"
   },
   "engines": {

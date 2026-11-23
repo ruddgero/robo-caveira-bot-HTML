@@ -890,6 +890,7 @@ function arrumarPendencias() {
         }
         if (antes !== JSON.stringify([p.tratativa, p.responsavel, p.etapas, p.historico])) mudou = true;
     }
+    if (separarListasColadas()) mudou = true;
     const abertas = [];
     for (const p of [...estado.pendencias].sort((a, b) => String(a.criadoEm).localeCompare(String(b.criadoEm)))) {
         if (p.status !== 'ABERTA') continue;
@@ -909,6 +910,33 @@ function arrumarPendencias() {
         dono.historico.push({ tipo: 'SISTEMA', em: t.iso, data: t.data.slice(0, 5), hora: t.hora, por: 'Robô',
             texto: `Pendência repetida juntada a esta (${p.origem || 'origem não informada'}).${textoAntigo && dono.texto !== textoAntigo && !dono.texto.includes(textoAntigo) ? ` Texto anterior: ${textoAntigo}` : ''}` });
         estado.pendencias = estado.pendencias.filter(x => x.id !== p.id);
+        mudou = true;
+    }
+    return mudou;
+}
+function separarListasColadas() {
+    let mudou = false;
+    for (const p of [...estado.pendencias]) {
+        if (p.status !== 'ABERTA' || p.tipo !== 'AVISO') continue;
+        if (/^\s*\d+\.\d|[*_~]/.test(p.titulo || '')) { p.titulo = R.tituloAvisoPadrao(p.titulo); mudou = true; }
+        if (!R.avisoTemLista(p)) continue;
+        const proprio = [], itens = [];
+        let atual = null;
+        for (const bruta of String(p.texto || '').split('\n')) {
+            const l = bruta.replace(/[*_~]/g, '').trim();
+            if (!l) continue;
+            const m = l.match(/^(?:[✓✔•]\s*)?\d+\.\d+\.?\s+(.+)$/);
+            if (m) { atual = { titulo: R.tituloAvisoPadrao(m[1]), texto: '' }; itens.push(atual); continue; }
+            if (atual) atual.texto = `${atual.texto} ${l}`.trim(); else proprio.push(l);
+        }
+        p.texto = proprio.join('\n');
+        const t = agora();
+        for (const it of itens) {
+            const dono = estado.pendencias.find(x => x !== p && x.status === 'ABERTA' && x.tipo === 'AVISO' && (chavePendencia(x.titulo) === chavePendencia(it.titulo) || mesmoAssunto(x, it)));
+            if (dono) { if (it.texto) registrarNoHistorico(dono, it.texto, 'Robô', 'lista'); }
+            else estado.pendencias.push(novaPendencia({ tipo: 'AVISO', titulo: it.titulo, texto: it.texto }, null, `Separado do aviso "${p.titulo}"`));
+        }
+        p.historico.push({ tipo: 'SISTEMA', em: t.iso, data: t.data.slice(0, 5), hora: t.hora, por: 'Robô', texto: `Lista de ${itens.length} aviso(s) colada no texto foi separada: ${itens.map(i => i.titulo).join(', ')}.` });
         mudou = true;
     }
     return mudou;
@@ -969,12 +997,13 @@ async function atualizarPendencia(id, texto, usuario, { origem = '' } = {}) {
     if (!String(texto || '').trim()) throw erro('Escreva a atualização.');
     const t = agora();
     p.historico.push({ tipo: 'ATUALIZACAO', em: t.iso, data: t.data.slice(0, 5), hora: t.hora, por: usuario?.nome || 'Robô', texto: maiusculaInicial(texto), ...(origem ? { origem } : {}) });
+    sugerirTextoConsolidado(p, maiusculaInicial(texto));
     await salvarPendencias();
     auditar(usuario, 'Atualizou pendência', p.titulo);
     return p;
 }
 
-async function editarPendencia(id, { titulo, texto, tipo, tratativa, responsavel, prazo, etapas }, usuario) {
+async function editarPendencia(id, { titulo, texto, tipo, tratativa, responsavel, prazo, etapas, descartarSugestao }, usuario) {
     const p = pendencia(id);
     if (responsavel !== undefined) p.responsavel = maiusculaInicial(responsavel);
     if (prazo !== undefined) p.prazo = String(prazo || '').trim();
@@ -996,7 +1025,8 @@ async function editarPendencia(id, { titulo, texto, tipo, tratativa, responsavel
         if (!String(titulo).trim()) throw erro('O título não pode ficar vazio.');
         p.titulo = String(titulo).trim().toUpperCase();
     }
-    if (texto !== undefined) p.texto = maiusculaInicial(texto);
+    if (texto !== undefined) { p.texto = maiusculaInicial(texto); delete p.textoSugerido; }
+    if (descartarSugestao) delete p.textoSugerido;
     if (TIPOS_PENDENCIA.includes(tipo)) p.tipo = tipo;
     if (tratativa !== undefined && p.status === 'CONCLUIDA') {
         if (!String(tratativa).trim()) throw erro('Informe como foi resolvido.');
@@ -1071,11 +1101,20 @@ function pendenciaDoAssunto(texto) {
 const RE_RESOLVIDO = /\b(reparad[oa]s?|resolvid[oa]s?|normalizad[oa]s?|conclu[ií]d[oa]s?|sanad[oa]s?|instalad[oa]s?|substitu[ií]d[oa]s?|liberad[oa]s?|operacional|funcionando|restabelecid[oa]s?|corrigid[oa]s?)\b/i;
 const RE_ACOMPANHAR = /favor acompanhar|acompanhar|aguardando|aguarda|pr[oó]xima semana|pr[oó]ximos passos|definir[aá]|ir[aá] (marcar|agendar|enviar|retornar|verificar)|pendente|em andamento|previs[aã]o de retorno|agendad[oa]/i;
 
+// texto do aviso + novidade, num parágrafo só e sem frases repetidas (o líder confirma antes de valer)
+function sugerirTextoConsolidado(p, novidade) {
+    if (p.tipo !== 'AVISO' || !novidade || textoDeVariosAssuntos(novidade)) return;
+    const base = R.conteudoSeguro(p.textoSugerido || p.texto || '').replace(/\n+/g, ' ');
+    const proposta = R.semRepeticao(`${base} ${R.conteudoSeguro(novidade).replace(/\n+/g, ' ')}`.trim());
+    if (proposta && proposta !== (p.texto || '').replace(/\n+/g, ' ').trim()) p.textoSugerido = proposta;
+}
 function registrarNoHistorico(p, texto, por, origem) {
     const limpo = maiusculaInicial(texto);
-    if (!limpo || p.historico.some(h => h.texto === limpo)) return false;
+    const norm = t => semAcento(String(t || '')).toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (!limpo || p.historico.some(h => h.texto === limpo) || (norm(limpo).length > 10 && norm(p.texto).includes(norm(limpo)))) return false;   // já está no texto do aviso
     const t = agora();
     p.historico.push({ tipo: 'ATUALIZACAO', em: t.iso, data: t.data.slice(0, 5), hora: t.hora, por, texto: limpo, origem });
+    sugerirTextoConsolidado(p, limpo);
     // texto diz que foi resolvido: sugere concluir (a baixa só sai com a tratativa confirmada pelo líder)
     if (RE_RESOLVIDO.test(semAcento(limpo)) || RE_RESOLVIDO.test(limpo)) p.sugestaoConclusao = { texto: limpo, por, em: t.iso };
     return true;
@@ -1115,8 +1154,15 @@ async function descartarSugestao(id, usuario) {
 }
 
 // Mensagem do grupo sobre um assunto que já tem pendência: entra no histórico dela
+// texto com vários assuntos (passagem de turno, relatório colado, lista numerada): não é atualização de um aviso só
+function textoDeVariosAssuntos(t) {
+    const linhas = String(t || '').replace(/[*_~]/g, '').split('\n').map(l => l.trim()).filter(Boolean);
+    const topo = semAcento(linhas.slice(0, 2).join(' ')).toUpperCase();
+    return /PASSAGEM DE TURNO|RELATORIO D[OE] TURNO/.test(topo) || linhas.filter(l => /^(?:[✓✔•]\s*)?\d{1,2}(\.\d{1,2})?\.?\s+\S/.test(l)).length >= 2;
+}
 async function mensagemNaPendencia(item) {
     if (!['DIGITAL', 'AVISO', 'ATIVIDADE', 'OCORRENCIA'].includes(item.sugestao) || item.urgente) return false;
+    if (textoDeVariosAssuntos(item.texto)) return false;   // fica na Entrada para o líder decidir
     const p = pendenciaDoAssunto(item.texto);
     if (!p) return false;
     if (!registrarNoHistorico(p, item.texto, `${item.autor || 'Grupo'} (grupo)`, 'grupo')) return false;
@@ -1771,7 +1817,7 @@ function textoPassagem({ negrito = true } = {}) {
 }
 
 module.exports = {
-    estado, carregar, aoAlerta, aoMudarPlantao, aoPrecisarMinutaWhatsapp, auditar, minutasPendentes,
+    estado, carregar, textoDeVariosAssuntos, aoAlerta, aoMudarPlantao, aoPrecisarMinutaWhatsapp, auditar, minutasPendentes,
     salvarConfig, liderDePlantao, assumirPlantao, nomesDaEquipe, adicionarNomeEquipe, removerNomeEquipe,
     salvarFicha, alterarFicha, herdar, novaFichaEmBranco, marcarPublicado, textoRelatorio, conferencia, avisosAbertos, operacoesDaFicha,
     registrarRelatorio, dispensarRelatorioPendente, aposPublicar, equipeDoUsuario, salvarEquipe, excluirEquipe,
