@@ -2615,6 +2615,27 @@ async function abrirLocaisIndicador() {
       el('button', { class: 'btn pequeno', onclick: () => { const n = entrada.value.trim(); if (n && n !== l.nome) aplicar(l.variantes.map(v => v.nome), n, 'Nome salvo ✓'); } }, 'Salvar'));
   }
 
+  function secaoRegras() {
+    const regras = dados.regras.map(r => ({ termos: r.termos.join('; '), nome: r.nome }));
+    const lista = el('div', { class: 'padr-regras' });
+    const salvar = async () => {
+      try { dados = await api('PUT', '/api/indicadores/locais/regras', { regras: regras.map(r => ({ termos: r.termos.split(';'), nome: r.nome })) }); S.ind = null; aviso('Regras salvas ✓'); desenhar(); }
+      catch (e) { aviso(e.message, true); }
+    };
+    const desenharRegras = () => lista.replaceChildren(...regras.map((r, k) => el('div', { class: 'padr-cartao padr-regra' },
+      el('label', { class: 'campo' }, 'Se o nome tiver (separe com ;)', el('input', { type: 'text', value: r.termos, placeholder: 'ponte; eixo', oninput: e => { r.termos = e.target.value; } })),
+      el('span', { class: 'padr-seta', 'aria-hidden': 'true', text: '→' }),
+      el('label', { class: 'campo' }, 'O local passa a ser', el('input', { type: 'text', value: r.nome, placeholder: 'Ponte', oninput: e => { r.nome = e.target.value; } })),
+      el('button', { class: 'btn-icone', title: 'Tirar esta regra', 'aria-label': 'Tirar esta regra', onclick: () => { regras.splice(k, 1); desenharRegras(); } }, '✕'))));
+    desenharRegras();
+    return el('section', { class: 'cartao' }, el('h3', { text: `4. Regras por palavra (${dados.regras.length})` }),
+      el('p', { class: 'mudo pequeno', style: 'margin:0', text: 'Valem para os nomes de hoje e os que vierem. A primeira regra que servir vale, então deixe as mais específicas em cima. O que você juntou ou renomeou acima vale por cima das regras.' }),
+      lista,
+      el('div', { class: 'linha', style: 'gap:6px;flex-wrap:wrap' },
+        el('button', { class: 'btn pequeno', onclick: () => { regras.push({ termos: '', nome: '' }); desenharRegras(); } }, '➕ Nova regra'),
+        el('button', { class: 'btn primario pequeno', onclick: salvar }, 'Salvar regras')));
+  }
+
   function desenhar() {
     const { parecidos, escrita, locais } = dados;
     const filtro = semAcento(busca).toLowerCase();
@@ -2634,7 +2655,8 @@ async function abrirLocaisIndicador() {
         escrita.length ? escrita.map(cartaoEscrita) : el('div', { class: 'vazio', text: 'Todos os nomes já estão no padrão ✓' })),
       el('section', { class: 'cartao' }, el('h3', { text: `3. Todos os locais (${locais.length})` }),
         el('label', { class: 'campo padr-busca' }, caixaBusca),
-        visiveis.length ? visiveis.map(linhaLocal) : el('div', { class: 'vazio', text: 'Nenhum local encontrado.' })));
+        visiveis.length ? visiveis.map(linhaLocal) : el('div', { class: 'vazio', text: 'Nenhum local encontrado.' })),
+      secaoRegras());
   }
   carregar();
 }

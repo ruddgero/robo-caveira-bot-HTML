@@ -558,3 +558,7 @@ html, body { overflow-x: clip; }
   .padr-linha > .campo { grid-column: 1 / -1; order: 3; }
   .padr-linha > .linha { grid-column: 1 / -1; order: 4; }
 }
+.padr-regras { display: grid; gap: 8px; }
+.padr-regra { grid-template-columns: minmax(0, 1.4fr) auto minmax(0, 1fr) auto; align-items: end; }
+.padr-regra .padr-seta { padding-bottom: 10px; }
+@media (max-width: 640px) { .padr-regra { grid-template-columns: minmax(0, 1fr) auto; } .padr-regra .padr-seta { display: none; } .padr-regra > .campo:first-child { grid-column: 1 / -1; } }

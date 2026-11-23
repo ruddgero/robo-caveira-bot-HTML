@@ -18,7 +18,7 @@ const GRUPOS_ROI = {
 const MAX_FOTOS = 8;
 const CONTROLE_INICIAL = { 2026: 30 };     // último número do controle anual entregue pela equipe (030/2026)
 
-const estado = { rois: [], controle: { ...CONTROLE_INICIAL }, locais: {}, mapa: { area: null, pontos: {}, areas: [] }, ignorados: { pares: [], escrita: [] }, carregado: false };   // mapa.pontos: nome → { lat, lng, tipo }; mapa.areas: contornos   // locais: grafia → nome confirmado
+const estado = { rois: [], controle: { ...CONTROLE_INICIAL }, locais: {}, mapa: { area: null, pontos: {}, areas: [] }, ignorados: { pares: [], escrita: [] }, regras: [], carregado: false };   // mapa.pontos: nome → { lat, lng, tipo }; mapa.areas: contornos   // locais: grafia → nome confirmado
 let marca = 0;
 const nucleo = () => require('./nucleo');   // carregado sob demanda (evita dependência circular)
 
@@ -121,6 +121,8 @@ async function carregar() {
     estado.rois = await store.get('rois', []) || [];
     estado.controle = { ...CONTROLE_INICIAL, ...(await store.get('rois_controle', {}) || {}) };
     estado.locais = await store.get('rois_locais', {}) || {};
+    const regras = await store.get('rois_locais_regras', null);
+    estado.regras = Array.isArray(regras) ? regras : REGRAS_PADRAO;
     const ig = await store.get('rois_locais_ignorados', null) || {};
     estado.ignorados = { pares: ig.pares || [], escrita: ig.escrita || [] };
     const m = await store.get('rois_mapa', null) || {};
@@ -609,6 +611,7 @@ function mapaDeLocais(rois = estado.rois) {
     }
     const mapa = new Map();
     for (const g of grupos) for (const v of g.variantes) mapa.set(v, destino.get(g).nome);
+    for (const [v] of mapa) { const r = regraDoLocal(v); if (r) mapa.set(v, r.nome); }
     for (const [v, nome] of Object.entries(estado.locais || {})) if (nome) mapa.set(v, nome);
     return mapa;
 }
@@ -836,6 +839,31 @@ function saoParecidos(a, b) {
 }
 const chavePar = (a, b) => [chaveLocal(a), chaveLocal(b)].sort().join(' | ');
 
+// Regras por palavra (admin): "se o nome tiver X, o local é Y". A primeira que servir vale.
+// As decisões feitas uma a uma (renomear/juntar) vêm por cima das regras.
+const REGRAS_PADRAO = [
+    { termos: ['contratadas anglo', 'contratadas aa', 'anglo american contratadas'], nome: 'Área das Contratadas AA' },
+    { termos: ['canteiro contratadas', 'predio contratadas', 'casa branca'], nome: 'Área das Contratadas' },
+    { termos: ['ponte'], nome: 'Ponte' }
+];
+const textoRegra = t => ' ' + palavrasDe(t).filter(w => !PALAVRAS_LIGACAO.has(w)).join(' ') + ' ';
+function regraDoLocal(nome) {
+    const t = textoRegra(nome);
+    return estado.regras.find(r => r.termos.some(x => { const k = textoRegra(x); return k.trim() && t.includes(k); })) || null;
+}
+async function salvarRegras(regras, u) {
+    if (!Array.isArray(regras) || regras.length > 100) throw erro('Regras inválidas.', 400);
+    const limpas = regras.map(r => ({
+        termos: [...new Set((Array.isArray(r.termos) ? r.termos : String(r.termos || '').split(/[;\n]/)).map(x => limparLocal(x).slice(0, 60)).filter(Boolean))].slice(0, 20),
+        nome: limparLocal(r.nome).slice(0, 80)
+    })).filter(r => r.termos.length && r.nome);
+    estado.regras = limpas;
+    await store.set('rois_locais_regras', limpas);
+    marca++;
+    nucleo().auditar(u, 'Indicador: regras de nomes salvas', limpas.map(r => `${r.termos.join('/')} → ${r.nome}`).join(' | '));
+    return padronizacaoDeLocais();
+}
+
 function padronizacaoDeLocais() {
     const locais = listaDeLocais();
     const ign = new Set(estado.ignorados.pares);
@@ -854,7 +882,7 @@ function padronizacaoDeLocais() {
     const ignEsc = new Set(estado.ignorados.escrita);
     const escrita = locais.filter(l => !emGrupo.has(l.nome) && !ignEsc.has(chaveLocal(l.nome)) && sugerirNome(l.nome) !== l.nome)
         .map(l => ({ nome: l.nome, total: l.total, variantes: l.variantes.map(v => v.nome), sugestao: sugerirNome(l.nome) }));
-    return { locais, parecidos, escrita };
+    return { locais, parecidos, escrita, regras: estado.regras };
 }
 
 // "São diferentes" / "Manter como está": não sugere de novo
@@ -1020,7 +1048,7 @@ function indicadorOcorrencias({ ano, mes, tipos: filtroTipos, local: filtroLocal
 }
 
 module.exports = {
-    indicadorOcorrencias, listaDeLocais, renomearLocal, mapaDeLocais, padronizacaoDeLocais, ignorarSugestao, sugerirNome, saoParecidos, dadosDoMapa, posicionarLocal, salvarArea, salvarContorno, apagarContorno, areaDoPonto, ladrilhoPermitido,
+    indicadorOcorrencias, listaDeLocais, renomearLocal, mapaDeLocais, padronizacaoDeLocais, ignorarSugestao, salvarRegras, regraDoLocal, sugerirNome, saoParecidos, dadosDoMapa, posicionarLocal, salvarArea, salvarContorno, apagarContorno, areaDoPonto, ladrilhoPermitido,
     GRUPOS_ROI, MAX_FOTOS, estado, carregar, marcaRois, listar, detalhe, criar, editar, registrar, cancelar,
     adicionarFoto, removerFoto, lerFoto, importarControle, lerControle, resumoGeral, locaisConhecidos, proximoNumero,
     xlsxDoRoi, xlsxControle, xlsxControleTodos, montarXlsxRoi, linhaItem7, linhaControle, codigoDoTipo, adivinharTipo, agruparLocais, lerNumero, numeroRoi

@@ -1,6 +1,6 @@
 // Service worker: guarda só a "casca" do app para abrir rápido.
 // Dados (/api) nunca ficam em cache.
-const CACHE = 'caveira-v6-8-1';
+const CACHE = 'caveira-v6-8-2';
 const CASCA = ['/', '/index.html', '/style.css', '/app.js', '/manifest.json', '/icon.svg', '/logo.svg'];
 
 self.addEventListener('install', e => {
