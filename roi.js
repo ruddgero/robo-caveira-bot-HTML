@@ -164,6 +164,14 @@ function limparDados(d = {}) {
         matricula: limpo(e.matricula), nome: limpo(e.nome), cargo: limpo(e.cargo), empresa: limpo(e.empresa), telefone: limpo(e.telefone)
     })).filter(e => e.nome || e.matricula || e.cargo).slice(0, 10);
     if (d.fotosLegendas && typeof d.fotosLegendas === 'object') o.fotosLegendas = d.fotosLegendas;
+    // ponto exato da ocorrência (opcional): marcado no mapa ou pelo GPS do celular
+    if (d.geo !== undefined) {
+        const lat = Number(d.geo?.lat), lng = Number(d.geo?.lng);
+        o.geo = d.geo && isFinite(lat) && isFinite(lng) && dentro(lat, lng)
+            ? { lat: +lat.toFixed(6), lng: +lng.toFixed(6), origem: d.geo.origem === 'gps' ? 'gps' : 'mapa', ...(isFinite(Number(d.geo.precisao)) && d.geo.origem === 'gps' ? { precisao: Math.round(Number(d.geo.precisao)) } : {}) }
+            : null;
+    }
+    if (d.areaMapa !== undefined) o.areaMapa = limpo(d.areaMapa).slice(0, 60);
     return o;
 }
 
@@ -712,6 +720,14 @@ function dadosDoMapa(filtros = {}) {
         const pLocal = estado.mapa.pontos[r.localNome];
         const aLocal = areaPorNome.get(chaveLocal(r.localNome)) || (pLocal ? areaDoPonto(pLocal.lat, pLocal.lng) : null);
         let alvo = null;
+        if (r.geo && isFinite(r.geo.lat) && isFinite(r.geo.lng)) {
+            // ponto exato marcado no ROI (agrupado a cada ~10 m)
+            const aG = areaDoPonto(r.geo.lat, r.geo.lng);
+            alvo = pino(`g:${r.geo.lat.toFixed(4)},${r.geo.lng.toFixed(4)}`, { nome: `${r.localNome} · ponto exato`, lat: r.geo.lat, lng: r.geo.lng, tipo: 'exato', empresa: '', area: aG ? aG.nome : '', areaId: aG ? aG.id : '' });
+            somar(alvo, r); if (alvo.rois.length < 100) alvo.rois.push(resumo(r));
+            if (aG) somar(areaPorId.get(aG.id), r);
+            continue;
+        }
         if (r.empresaNome && (aLocal || pLocal)) {
             const cand = empresasNoMapa.filter(p => mesmaEmpresa(p.empresa, r.empresaNome)
                 && (aLocal ? p.areaId === aLocal.id : metros([p.lat, p.lng], [pLocal.lat, pLocal.lng]) <= 500));
@@ -741,6 +757,18 @@ function dadosDoMapa(filtros = {}) {
         semPosicao: [...semPos.values()].sort((a, b) => b.total - a.total)
     };
 }
+
+// Para o formulário do ROI: a área do ponto e os locais/empresas cadastrados mais perto
+function pontoDoRoi(lat, lng) {
+    lat = num(lat); lng = num(lng);
+    if (!isFinite(lat) || !isFinite(lng) || !dentro(lat, lng)) throw erro('Ponto fora da área do Porto do Açu.', 400);
+    const a = areaDoPonto(lat, lng);
+    const sugestoes = Object.entries(estado.mapa.pontos)
+        .map(([nome, p]) => ({ nome, tipo: p.tipo || 'local', empresa: p.empresa || '', metros: Math.round(metros([lat, lng], [p.lat, p.lng])), area: (areaDoPonto(p.lat, p.lng) || {}).nome || '' }))
+        .filter(x => x.metros <= 400 && (!a || x.area === a.nome)).sort((x, y) => x.metros - y.metros).slice(0, 5);
+    return { area: a ? a.nome : '', sugestoes };
+}
+const mapaBase = () => ({ area: estado.mapa.area || AREA_PADRAO });
 
 async function posicionarLocal(nome, lat, lng, u, extra = {}) {
     nome = limparLocal(nome);
@@ -1079,7 +1107,7 @@ function indicadorOcorrencias({ ano, mes, tipos: filtroTipos, local: filtroLocal
 }
 
 module.exports = {
-    indicadorOcorrencias, listaDeLocais, renomearLocal, mapaDeLocais, padronizacaoDeLocais, ignorarSugestao, salvarRegras, regraDoLocal, sugerirNome, saoParecidos, dadosDoMapa, posicionarLocal, salvarArea, salvarContorno, apagarContorno, areaDoPonto, ladrilhoPermitido,
+    indicadorOcorrencias, listaDeLocais, renomearLocal, mapaDeLocais, pontoDoRoi, mapaBase, padronizacaoDeLocais, ignorarSugestao, salvarRegras, regraDoLocal, sugerirNome, saoParecidos, dadosDoMapa, posicionarLocal, salvarArea, salvarContorno, apagarContorno, areaDoPonto, ladrilhoPermitido,
     GRUPOS_ROI, MAX_FOTOS, estado, carregar, marcaRois, listar, detalhe, criar, editar, registrar, cancelar,
     adicionarFoto, removerFoto, lerFoto, importarControle, lerControle, resumoGeral, locaisConhecidos, proximoNumero,
     xlsxDoRoi, xlsxControle, xlsxControleTodos, montarXlsxRoi, linhaItem7, linhaControle, codigoDoTipo, adivinharTipo, agruparLocais, lerNumero, numeroRoi

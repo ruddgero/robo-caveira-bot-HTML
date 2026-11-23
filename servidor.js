@@ -23,7 +23,7 @@ const PERM = require('./permissoes');
 const PERM_ROTAS = [
     ['*', /^\/api\/indicadores\/mapa\/areas/, 'mapa.areas'], ['PUT', /^\/api\/indicadores\/mapa\/area$/, 'mapa.areas'],
     ['PUT', /^\/api\/indicadores\/mapa\/ponto$/, 'mapa.marcar'],
-    ['GET', /^\/api\/indicadores\/mapa$/, 'mapa.ver'], ['GET', /^\/api\/mapa\/ladrilho\//, 'mapa.ver'],
+    ['GET', /^\/api\/indicadores\/mapa$/, 'mapa.ver'], ['GET', /^\/api\/mapa\/ladrilho\//, ['mapa.ver', 'roi.registrar']],
     ['*', /^\/api\/indicadores\/locais\/(padronizar|ignorar|regras)$/, 'locais.padronizar'], ['POST', /^\/api\/indicadores\/locais$/, 'locais.padronizar'],
     ['GET', /^\/api\/indicadores\//, 'indicadores.ver'],
     ['POST', /^\/api\/roi\/importar$/, null],
@@ -483,6 +483,8 @@ rota('POST', '/api/operacoes/:id/marcar', async (req, res, { corpo, params, u })
 
 // --- ROI (Relatório de Ocorrência Interna)
 rota('GET', '/api/roi', async () => ({ rois: ROI.listar(), proximo: ROI.proximoNumero(), grupos: ROI.GRUPOS_ROI, locais: ROI.locaisConhecidos(), maxFotos: ROI.MAX_FOTOS }));
+rota('GET', '/api/roi/mapa-base', async () => ROI.mapaBase());
+rota('GET', '/api/roi/ponto', async req => { const q = new URL(req.url, 'http://x').searchParams; return ROI.pontoDoRoi(q.get('lat'), q.get('lng')); });
 rota('GET', '/api/roi/resumo', async () => ROI.resumoGeral());
 rota('GET', '/api/roi/controle/:ano/xlsx', async (req, res, { params }) => {
     const arq = params.ano === 'todos' ? ROI.xlsxControleTodos() : ROI.xlsxControle(+params.ano);
@@ -671,7 +673,7 @@ async function tratar(req, res) {
             const soAdmin = r.perfis && r.perfis.length === 1 && r.perfis[0] === 'ADMIN';
             if ((chave === undefined || chave === 'plantao.ver') && soLideres) chave = 'plantao.liderar';   // o que era só de líder segue a permissão de liderar
             if (chave === 'plantao.ver' && soAdmin) chave = undefined;                                       // o que era só do admin continua só do admin
-            if (chave) { if (!PERM.pode(u, chave)) return enviarJson(res, 403, { erro: 'Você não tem permissão para esta ação.', permissao: chave }); }
+            if (chave) { if (![].concat(chave).some(k => PERM.pode(u, k))) return enviarJson(res, 403, { erro: 'Você não tem permissão para esta ação.', permissao: chave }); }
             else if (r.perfis && !r.perfis.includes(u.perfil)) return enviarJson(res, 403, { erro: 'Seu perfil não tem permissão para esta ação.' });
         }
         if (req.method !== 'GET' && req.headers['x-caveira'] !== '1') return enviarJson(res, 403, { erro: 'Requisição recusada.' });

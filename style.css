@@ -761,3 +761,24 @@ body:has(#app:not([hidden])) #fundo-animado { opacity: .12; }
   body.menu-oculto.menu-sobre .menu-fixar:hover { color: var(--texto); border-color: var(--primario); }
 }
 @media (prefers-reduced-motion: reduce) { .abas, main, main.largo { transition: none; } }
+/* ROI · ponto exato */
+.roi-ponto { display: grid; gap: 8px; padding: 10px 12px; border-radius: 12px; border: 1px dashed var(--borda); background: var(--fundo); }
+.roi-ponto-cab { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.roi-ponto-ok { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 14px; }
+.roi-ponto-sug { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.roi-ponto-sug .filtro small { margin-left: 4px; }
+.ponto-tela { position: fixed; inset: 0; z-index: 57; display: grid; grid-template-rows: auto minmax(0, 1fr); background: var(--fundo); padding-top: env(safe-area-inset-top); }
+.pt-topo { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; padding: 10px 14px; border-bottom: 1px solid var(--borda); background: rgba(11, 17, 32, .96); }
+.pt-tit { display: grid; min-width: 0; }
+.pt-corpo { position: relative; min-height: 0; }
+.pt-mapa { position: absolute; inset: 0; background: #0a1322; }
+.pt-mapa .leaflet-tile-pane { filter: brightness(.9); }
+.pt-alvo { position: absolute; left: 50%; top: 50%; z-index: 500; width: 44px; height: 44px; transform: translate(-50%, -50%); pointer-events: none; }
+.pt-alvo i { position: absolute; inset: 0; border: 2px solid #fff; border-radius: 50%; box-shadow: 0 0 0 2px rgba(0,0,0,.5), inset 0 0 0 2px rgba(0,0,0,.35); }
+.pt-alvo b { position: absolute; left: 50%; top: 50%; width: 8px; height: 8px; margin: -4px 0 0 -4px; border-radius: 50%; background: #f97316; box-shadow: 0 0 0 2px #fff; }
+.pt-alvo::before, .pt-alvo::after { content: ''; position: absolute; background: #fff; box-shadow: 0 0 2px rgba(0,0,0,.8); }
+.pt-alvo::before { left: 50%; top: -10px; bottom: -10px; width: 2px; margin-left: -1px; clip-path: polygon(0 0, 100% 0, 100% 22%, 0 22%, 0 78%, 100% 78%, 100% 100%, 0 100%); }
+.pt-alvo::after { top: 50%; left: -10px; right: -10px; height: 2px; margin-top: -1px; clip-path: polygon(0 0, 22% 0, 22% 100%, 0 100%, 0 0, 100% 0, 100% 100%, 78% 100%, 78% 0); }
+.ponto-tela .leaflet-container .leaflet-control-attribution { background: rgba(11, 17, 32, .8); color: #b9c3d8; }
+.ponto-tela .leaflet-bar a { background: var(--superficie); color: var(--texto); border-bottom-color: var(--borda); }
+.ponto-tela .leaflet-control-scale-line { background: rgba(11, 17, 32, .8); color: #e6eaf3; border-color: #e6eaf3; }

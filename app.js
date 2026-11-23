@@ -2600,6 +2600,16 @@ function iconeMapaCalor() {
 
 // Carrega o Leaflet e o mapa só na primeira vez que o mapa é aberto
 let carregandoMapa = null;
+function garantirMapa() {
+  if (typeof MapaCalor !== 'undefined') return Promise.resolve();
+  const v = encodeURIComponent(S.meta?.versao || '1');
+  carregandoMapa = carregandoMapa || new Promise((ok, falha) => {
+    document.head.append(el('link', { rel: 'stylesheet', href: '/leaflet.css?v=' + v }));
+    const js = src => new Promise((ok2, falha2) => { const s = el('script', { src }); s.onload = ok2; s.onerror = falha2; document.head.append(s); });
+    js('/leaflet.js?v=' + v).then(() => js('/mapa.js?v=' + v)).then(ok, falha);
+  });
+  return carregandoMapa.catch(e => { carregandoMapa = null; throw e; });
+}
 function abrirMapaCalor() {
   const v = encodeURIComponent(S.meta?.versao || '1');
   if (typeof MapaCalor === 'undefined') carregandoMapa = carregandoMapa || new Promise((ok, falha) => {
@@ -3413,6 +3423,45 @@ function abrirFormRoi(r) {
     return el('label', { class: 'campo' }, rotulo, s);
   };
   const simulado = el('input', { type: 'checkbox', checked: !!r.simulado, disabled: somenteLeitura });
+
+  // ponto exato da ocorrência (opcional): marcar no mapa ou usar o GPS do celular
+  let geo = r.geo ? { ...r.geo } : null, areaMapa = r.areaMapa || '', sugestoes = [];
+  const blocoPonto = el('div', { class: 'roi-ponto' });
+  const resolver = async () => {
+    if (!geo) { areaMapa = ''; sugestoes = []; return desenharPonto(); }
+    try { const x = await api('GET', `/api/roi/ponto?lat=${geo.lat}&lng=${geo.lng}`); areaMapa = x.area; sugestoes = x.sugestoes; } catch (e) { aviso(e.message, true); }
+    desenharPonto();
+  };
+  const marcar = async () => {
+    try { await garantirMapa(); } catch (_) { return aviso('Não foi possível abrir o mapa. Verifique a conexão.', true); }
+    const p = await MapaCalor.escolherPonto(geo);
+    if (p) { geo = p; await resolver(); }
+  };
+  const usarGps = () => {
+    if (!navigator.geolocation) return aviso('Este aparelho não informa a localização.', true);
+    aviso('Buscando sua localização…');
+    navigator.geolocation.getCurrentPosition(async pos => {
+      geo = { lat: pos.coords.latitude, lng: pos.coords.longitude, origem: 'gps', precisao: Math.round(pos.coords.accuracy) };
+      try { await api('GET', `/api/roi/ponto?lat=${geo.lat}&lng=${geo.lng}`); } catch (e) { geo = null; return aviso('Você não está no Porto do Açu. Marque o ponto no mapa.', true); }
+      await resolver(); aviso('Localização marcada ✓');
+    }, err => aviso(err.code === 1 ? 'Permita o uso da localização no navegador para usar o GPS.' : 'Não foi possível pegar a localização. Marque no mapa.', true), { enableHighAccuracy: true, timeout: 15000, maximumAge: 30000 });
+  };
+  function desenharPonto() {
+    const usarSugestao = x => { campos.local.value = x.nome; if (x.tipo === 'empresa' && x.empresa && !campos.empresa.value.trim()) campos.empresa.value = x.empresa; aviso('Local preenchido ✓'); desenharPonto(); };
+    blocoPonto.replaceChildren(...[
+      el('div', { class: 'roi-ponto-cab' }, el('strong', { text: 'Ponto exato no mapa' }), el('span', { class: 'mudo pequeno', text: 'opcional' })),
+      geo ? el('div', { class: 'roi-ponto-ok' },
+        el('span', { class: 'etiqueta ok', text: geo.origem === 'gps' ? `📡 GPS${geo.precisao ? ' ± ' + geo.precisao + ' m' : ''}` : '📍 Marcado no mapa' }),
+        el('span', { text: areaMapa ? `Área: ${areaMapa}` : 'Fora das áreas desenhadas' })) : el('p', { class: 'mudo pequeno', style: 'margin:0', text: 'Marque onde a ocorrência aconteceu. A área é preenchida sozinha e o mapa de calor fica mais preciso.' }),
+      geo && sugestoes.length && !somenteLeitura ? el('div', { class: 'roi-ponto-sug' }, el('span', { class: 'mudo pequeno', text: 'Local mais perto:' }),
+        sugestoes.slice(0, 3).map(x => el('button', { type: 'button', class: 'filtro' + (campos.local?.value === x.nome ? ' ativo' : ''), title: `${x.metros} m`, onclick: () => usarSugestao(x) },
+          `${x.tipo === 'empresa' ? '◆' : '●'} ${x.nome}`, el('small', { class: 'mudo', text: ` ${x.metros} m` })))) : null,
+      somenteLeitura ? null : el('div', { class: 'linha', style: 'gap:6px;flex-wrap:wrap' },
+        el('button', { type: 'button', class: 'btn pequeno', onclick: marcar }, geo ? '📍 Ajustar no mapa' : '📍 Marcar no mapa'),
+        navigator.geolocation && window.isSecureContext ? el('button', { type: 'button', class: 'btn pequeno', onclick: usarGps }, '📡 Usar minha localização') : null,
+        geo ? el('button', { type: 'button', class: 'btn fantasma pequeno', onclick: () => { geo = null; resolver(); } }, 'Tirar ponto') : null)].filter(Boolean));
+  }
+  desenharPonto();
   const datalist = el('datalist', { id: 'roi-locais' }, (meta.locais || []).map(l => el('option', { value: l })));
 
   // envolvidos e/ou testemunhas (até 10 linhas, como no modelo)
@@ -3468,6 +3517,7 @@ function abrirFormRoi(r) {
     d.envolvidos = envolvidos;
     d.autoridades = aut;
     d.fotosLegendas = legendas;
+    d.geo = geo; d.areaMapa = areaMapa;
     return d;
   };
   const salvar = async () => {
@@ -3498,6 +3548,7 @@ function abrirFormRoi(r) {
       linha('Área responsável', 'area')),
     secao('Dados e informações pertinentes',
       linha('Local (setor) — usado no item 7 e no indicador', 'local', { lista: 'roi-locais', placeholder: 'Ex.: Canteiro das Contratadas' }),
+      blocoPonto,
       el('div', { class: 'grade-2' }, linha('Data', 'data', { placeholder: 'dd/mm/aaaa' }), linha('Hora', 'hora', { placeholder: 'hh:mm' })),
       ...Object.entries(ROI_CAMPOS_TEXTO).map(([k, t]) => linha(t, k, { texto: true, linhas: k === 'redacao' ? 5 : 2 }))),
     secao('Comunicação',
@@ -3665,11 +3716,12 @@ function importarControleRoi() {
     enviar: '<path d="M22 2L11 13M22 2l-7 20-4-9-9-4z"/>',
     calendario: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/>',
     cadeado: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
+    gps: '<circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="8"/><path d="M12 1v3M12 20v3M1 12h3M20 12h3"/>',
     camera: '<rect x="3" y="7" width="18" height="13" rx="2"/><circle cx="12" cy="13" r="3.5"/><path d="M8 7l2-3h4l2 3"/>'
   };
   const MAPA = { '🧭': 'plantao', '📌': 'pend', '📊': 'graf', '🙋': 'assumir', '📑': 'fechar', '📦': 'caixa', '🗂️': 'pasta', '🗂': 'pasta', '📋': 'colar', '🖨️': 'imprimir', '🖨': 'imprimir',
     '📍': 'pino', '🔤': 'texto', '✏️': 'lapis', '✏': 'lapis', '➕': 'mais', '⬇️': 'baixar', '⬇': 'baixar', '📥': 'baixar', '👤': 'usuario', '🗃️': 'arquivo', '🗃': 'arquivo', '✨': 'brilho',
-    '🧑‍🤝‍🧑': 'equipe', '👥': 'equipe', '⚙️': 'config', '⚙': 'config', '🚪': 'sair', '⌖': 'mira', '✉️': 'email', '✉': 'email', '🚨': 'alerta', '📷': 'camera', '📝': 'lapis', '🗺️': 'pino', '🏁': 'bandeira', '🚢': 'navio', '📧': 'email', '👁️': 'olho', '👁': 'olho', '📄': 'doc', '🚀': 'enviar', '📤': 'enviar', '🔁': 'mira', '📅': 'calendario', '🔐': 'cadeado' };
+    '🧑‍🤝‍🧑': 'equipe', '👥': 'equipe', '⚙️': 'config', '⚙': 'config', '🚪': 'sair', '⌖': 'mira', '✉️': 'email', '✉': 'email', '🚨': 'alerta', '📷': 'camera', '📝': 'lapis', '🗺️': 'pino', '🏁': 'bandeira', '🚢': 'navio', '📧': 'email', '👁️': 'olho', '👁': 'olho', '📄': 'doc', '🚀': 'enviar', '📤': 'enviar', '🔁': 'mira', '📅': 'calendario', '🔐': 'cadeado', '📡': 'gps' };
   const CHAVES = Object.keys(MAPA).sort((a, b) => b.length - a.length);
   const svg = nome => { const t = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); t.setAttribute('viewBox', '0 0 24 24'); t.setAttribute('fill', 'none'); t.setAttribute('stroke', 'currentColor'); t.setAttribute('stroke-width', '1.8'); t.setAttribute('stroke-linecap', 'round'); t.setAttribute('stroke-linejoin', 'round'); t.setAttribute('class', 'ic-svg'); t.setAttribute('aria-hidden', 'true'); t.innerHTML = P[nome]; return t; };
   function trocar(raiz) {

@@ -5,6 +5,7 @@
 // =====================================================================
 const MapaCalor = (() => {
   const ATRIBUICAO = 'Imagens: Esri, Maxar, Earthstar Geographics, and the GIS User Community';
+  const URL_LADRILHO = '/api/mapa/ladrilho/{z}/{x}/{y}';
   let M = null;           // estado da tela aberta
   const limites = a => L.latLngBounds([a.s, a.w], [a.n, a.e]);
 
@@ -120,7 +121,7 @@ const MapaCalor = (() => {
 
     M.map = L.map(M.caixaMapa, { zoomControl: true, attributionControl: true, minZoom: 13, maxZoom: 19, zoomSnap: 0.5 });
     M.map.attributionControl.setPrefix('Leaflet');
-    M.ladrilhos = L.tileLayer('/api/mapa/ladrilho/{z}/{x}/{y}', { maxNativeZoom: 18, maxZoom: 19, minZoom: 13, attribution: ATRIBUICAO, crossOrigin: false }).addTo(M.map);
+    M.ladrilhos = L.tileLayer(URL_LADRILHO, { maxNativeZoom: 18, maxZoom: 19, minZoom: 13, attribution: ATRIBUICAO, crossOrigin: false }).addTo(M.map);
     M.calor = new CamadaCalor([]).addTo(M.map);
     M.contornos = L.layerGroup().addTo(M.map);
     M.marcas = L.layerGroup().addTo(M.map);
@@ -654,5 +655,43 @@ const MapaCalor = (() => {
     } catch (e) { aviso(e.message, true); }
   }
 
-  return { abrir, fechar };
+  // ------------------- escolher o ponto de um ROI -------------------
+  // Abre o satélite em tela cheia com um alvo no centro: arraste o mapa (ou toque) até o ponto exato.
+  function escolherPonto(inicial) {
+    return new Promise(async ok => {
+      let base = null;
+      try { base = (await api('GET', '/api/roi/mapa-base')).area; } catch (_) {}
+      const info = el('div', { class: 'pt-info mudo pequeno', text: 'Arraste o mapa até o alvo ficar no ponto exato, ou toque no lugar.' });
+      const caixa = el('div', { class: 'pt-mapa' });
+      let terminou = false, timer = null;
+      const fim = v => { if (terminou) return; terminou = true; document.removeEventListener('keydown', tecla); mapa.remove(); tela.remove(); ok(v); };
+      const tecla = e => { if (e.key === 'Escape') fim(null); };
+      const tela = el('div', { class: 'ponto-tela', role: 'dialog', 'aria-label': 'Marcar onde aconteceu' },
+        el('header', { class: 'pt-topo' },
+          el('div', { class: 'pt-tit' }, el('strong', { text: 'Onde aconteceu?' }), info),
+          el('div', { class: 'linha', style: 'gap:6px' },
+            el('button', { type: 'button', class: 'btn fantasma', onclick: () => fim(null) }, 'Cancelar'),
+            el('button', { type: 'button', class: 'btn primario', onclick: () => { const c = mapa.getCenter(); fim({ lat: c.lat, lng: c.lng, origem: 'mapa' }); } }, '📍 Usar este ponto'))),
+        el('div', { class: 'pt-corpo' }, caixa, el('div', { class: 'pt-alvo', 'aria-hidden': 'true' }, el('i'), el('b'))));
+      document.body.append(tela);
+      document.addEventListener('keydown', tecla);
+      const mapa = L.map(caixa, { minZoom: 13, maxZoom: 19, zoomSnap: 0.5 });
+      mapa.attributionControl.setPrefix('Leaflet');
+      L.tileLayer(URL_LADRILHO, { maxNativeZoom: 18, maxZoom: 19, minZoom: 13, attribution: ATRIBUICAO }).addTo(mapa);
+      L.control.scale({ imperial: false, position: 'bottomleft', maxWidth: 120 }).addTo(mapa);
+      if (inicial && isFinite(inicial.lat)) mapa.setView([inicial.lat, inicial.lng], 18);
+      else if (base) mapa.fitBounds(limites(base)); else mapa.setView([-21.82137, -41.02123], 16);
+      if (base) mapa.setMaxBounds(limites(base).pad(0.6));
+      mapa.on('click', ev => mapa.panTo(ev.latlng));
+      const atualizar = () => { clearTimeout(timer); timer = setTimeout(async () => {
+        const c = mapa.getCenter();
+        try { const r = await api('GET', `/api/roi/ponto?lat=${c.lat}&lng=${c.lng}`); info.textContent = r.area ? `Área: ${r.area}${r.sugestoes[0] ? ' · perto de ' + r.sugestoes[0].nome : ''}` : (r.sugestoes[0] ? `Perto de ${r.sugestoes[0].nome}` : 'Fora das áreas desenhadas'); }
+        catch (e) { info.textContent = e.message; }
+      }, 250); };
+      mapa.on('moveend', atualizar);
+      setTimeout(() => mapa.invalidateSize(), 50);
+    });
+  }
+
+  return { abrir, fechar, escolherPonto };
 })();
