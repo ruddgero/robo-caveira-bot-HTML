@@ -243,7 +243,7 @@ const MapaCalor = (() => {
     el('span', { class: 'mapa-tipo' }, el('i', { class: 'ponto-tipo', style: `background:${COR_TIPO[g]}` }), `${g} – ${M.d.grupos[g]}: ${n}`)));
   const linhaPonto = (p, comPos, recuo) => el('button', { class: 'mapa-local' + (recuo ? ' recuo' : ''), title: `${p.nome}${p.empresa ? ' (' + p.empresa + ')' : ''} · ${plural(p.total)}`, onclick: () => selecionar(p.nome, comPos) },
     el('span', { class: 'mapa-pino' + (comPos ? '' : ' sem') + (p.tipo === 'empresa' ? ' empresa' : ''), 'aria-hidden': 'true', text: !comPos ? '○' : p.tipo === 'empresa' ? '◆' : '●' }),
-    el('span', { class: 'mapa-local-nome', text: p.nome }),
+    el('span', { class: 'mapa-local-nome', text: p.tipo === 'centro' ? `${p.nome} (meio da área)` : p.nome }),
     el('strong', { text: String(p.total) }));
 
   function desenharLado() {
@@ -290,30 +290,42 @@ const MapaCalor = (() => {
           d.areaPadrao ? null : el('button', { class: 'btn fantasma pequeno', onclick: () => salvarEnquadramento(null) }, 'Voltar ao padrão'))) : null].filter(Boolean));
   }
 
+  function porEmpresa(x) {
+    const lista = Object.entries(x.porEmpresa || {}).sort((a, b) => b[1] - a[1]);
+    if (!lista.length) return null;
+    const max = lista[0][1];
+    return el('div', { class: 'mapa-empresas' }, lista.slice(0, 12).map(([nome, n]) => el('div', { class: 'mapa-empresa' },
+      el('span', { class: 'mapa-local-nome', text: nome, title: nome }), el('i', { style: `width:${Math.max(6, n / max * 100)}%` }), el('strong', { text: String(n) }))),
+      lista.length > 12 ? el('div', { class: 'mudo pequeno', text: `+ ${lista.length - 12} empresas` }) : null);
+  }
+
   function listaRois(p) {
     return [
       p.rois.length ? el('div', { class: 'mapa-lista' }, p.rois.map(r => el('button', { class: 'mapa-roi', onclick: () => abrirRoi(r.id) },
         el('span', { class: 'ponto-tipo', style: `background:${COR_TIPO[r.tipo] || '#888'}` }),
         el('span', { style: 'min-width:0' },
           el('div', { class: 'tit' }, `ROI ${r.numero} · ${r.tipo} · ${r.data}`, r.simulado ? el('span', { class: 'etiqueta simulado', text: 'SIMULADO' }) : null),
-          r.descricao ? el('div', { class: 'sub', text: r.descricao }) : null)))) : el('p', { class: 'mudo pequeno', style: 'margin:0', text: 'Nenhum ROI neste período.' }),
+          el('div', { class: 'sub', text: [r.local !== p.nome ? r.local : '', r.empresa, r.descricao].filter(Boolean).join(' · ') }))))) : el('p', { class: 'mudo pequeno', style: 'margin:0', text: 'Nenhum ROI neste período.' }),
       p.rois.length < p.total ? el('p', { class: 'mudo pequeno', style: 'margin:0', text: `Mostrando ${p.rois.length} de ${p.total}.` }) : null];
   }
 
   function fichaPonto(p, pode) {
-    const temPos = 'lat' in p, empresa = p.tipo === 'empresa';
-    const sub = [temPos ? (empresa ? 'Estrutura de empresa' : 'Local') : 'Sem posição no mapa', p.empresa, p.area ? `área ${p.area}` : temPos && M.d.areas.length ? 'fora das áreas' : ''].filter(Boolean).join(' · ');
+    const temPos = 'lat' in p, empresa = p.tipo === 'empresa', centro = p.tipo === 'centro';
+    const sub = centro ? 'Meio da área: o local é a própria área e ainda não tem ponto próprio'
+      : [temPos ? (empresa ? 'Estrutura de empresa' : 'Local') : 'Sem posição no mapa', p.empresa, p.area ? `área ${p.area}` : temPos && M.d.areas.length ? 'fora das áreas' : ''].filter(Boolean).join(' · ');
     return [
       voltarLista(),
       el('div', {}, el('h3', { class: 'mapa-ficha-tit', text: p.nome }), el('div', { class: 'mudo pequeno', text: sub })),
       el('div', { class: 'mapa-kpi' }, el('strong', { text: String(p.total) }), el('span', { text: `ROI${p.total === 1 ? '' : 's'} no período` })),
       p.total ? tiposDe(p.porTipo) : null,
       p.simulados ? el('p', { class: 'mudo pequeno', style: 'margin:0', text: `${p.simulados} simulado${p.simulados === 1 ? '' : 's'} (contam no total).` }) : null,
+      !empresa && Object.keys(p.porEmpresa || {}).length ? el('h3', { text: 'Por empresa' }) : null,
+      !empresa ? porEmpresa(p) : null,
       ...listaRois(p),
       pode ? el('div', { class: 'linha', style: 'gap:6px;flex-wrap:wrap' },
-        el('button', { class: 'btn primario pequeno', onclick: () => iniciarMarcacao(p.nome) }, temPos ? '📍 Mudar posição' : '📍 Marcar no mapa'),
-        temPos ? el('button', { class: 'btn pequeno', onclick: () => editarTipo(p) }, empresa ? 'Editar empresa' : 'É estrutura de empresa?') : null,
-        temPos ? el('button', { class: 'btn fantasma pequeno', onclick: () => removerPosicao(p.nome) }, 'Tirar do mapa') : null) : null
+        el('button', { class: 'btn primario pequeno', onclick: () => iniciarMarcacao(p.nome) }, centro ? '📍 Marcar ponto próprio' : temPos ? '📍 Mudar posição' : '📍 Marcar no mapa'),
+        temPos && !centro ? el('button', { class: 'btn pequeno', onclick: () => editarTipo(p) }, empresa ? 'Editar empresa' : 'É estrutura de empresa?') : null,
+        temPos && !centro ? el('button', { class: 'btn fantasma pequeno', onclick: () => removerPosicao(p.nome) }, 'Tirar do mapa') : null) : null
     ];
   }
 
@@ -322,11 +334,13 @@ const MapaCalor = (() => {
     const parte = M.d.total ? Math.round(a.total / M.d.total * 100) : 0;
     return [
       voltarLista(),
-      el('div', {}, el('h3', { class: 'mapa-ficha-tit', text: a.nome }), el('div', { class: 'mudo pequeno', text: `Área · ${dentro.length} ponto${dentro.length === 1 ? '' : 's'} marcado${dentro.length === 1 ? '' : 's'}` })),
+      el('div', {}, el('h3', { class: 'mapa-ficha-tit', text: a.nome }), el('div', { class: 'mudo pequeno', text: (n => `Área · ${n} ponto${n === 1 ? '' : 's'} marcado${n === 1 ? '' : 's'}`)(dentro.filter(p => p.tipo !== 'centro').length) })),
       el('div', { class: 'mapa-kpis' },
         el('div', { class: 'mapa-kpi' }, el('strong', { text: String(a.total) }), el('span', { text: `ROI${a.total === 1 ? '' : 's'} no período` })),
         el('div', { class: 'mapa-kpi' }, el('strong', { text: parte + '%' }), el('span', { text: 'do total do período' }))),
       a.total ? tiposDe(a.porTipo) : null,
+      Object.keys(a.porEmpresa || {}).length ? el('h3', { text: 'Por empresa' }) : null,
+      porEmpresa(a),
       el('h3', { text: 'Locais e empresas na área' }),
       dentro.length ? el('div', { class: 'mapa-lista' }, dentro.map(p => linhaPonto(p, true))) : el('p', { class: 'mudo pequeno', style: 'margin:0', text: 'Nenhum ponto marcado dentro desta área.' }),
       ehAdmin() ? el('div', { class: 'linha', style: 'gap:6px;flex-wrap:wrap' },

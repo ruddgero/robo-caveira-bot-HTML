@@ -678,39 +678,67 @@ function areaDoPonto(lat, lng) {
     return achadas[0] || null;
 }
 
-// Dados do mapa: os mesmos filtros do indicador (ano, mês, tipos, empresa) agrupados por local
+// Dados do mapa: os mesmos filtros do indicador (ano, mês, tipos, empresa).
+// Onde vai a mancha de cada ROI:
+//  1) na estrutura (◆) da empresa do ROI, se ela estiver dentro da área do local (ou perto do ponto do local);
+//  2) senão, no ponto do local; se o local for uma área desenhada sem ponto, no meio da área;
+//  3) senão, fica em "Sem posição no mapa".
+const centroDe = poly => [poly.reduce((s, p) => s + p[0], 0) / poly.length, poly.reduce((s, p) => s + p[1], 0) / poly.length];
+const metros = (a, b) => { const R = 6371000, r = Math.PI / 180; const x = (b[1] - a[1]) * r * Math.cos((a[0] + b[0]) / 2 * r), y = (b[0] - a[0]) * r; return Math.sqrt(x * x + y * y) * R; };
+const mesmaEmpresa = (a, b) => !!a && !!b && (chaveLocal(a) === chaveLocal(b) || saoParecidos(a, b));
+
 function dadosDoMapa(filtros = {}) {
     const d = indicadorOcorrencias({ ...filtros, local: '' });
-    const pontos = [], semPosicao = [];
-    const comRoi = new Set();
-    for (const l of d.locais) {
-        if (l.nome === '(sem local)') continue;
-        comRoi.add(l.nome);
-        const p = estado.mapa.pontos[l.nome];
-        const rois = d.lista.filter(r => r.local === l.nome).map(r => ({ id: r.id, numero: r.numero, tipo: r.tipo, data: r.data, simulado: r.simulado, descricao: String(r.descricao || '').slice(0, 120) }));
-        const item = { nome: l.nome, total: l.total, porTipo: l.porTipo, simulados: l.simulados, rois };
-        if (p) pontos.push({ ...item, lat: p.lat, lng: p.lng, tipo: p.tipo || 'local', empresa: p.empresa || '' }); else semPosicao.push(item);
-    }
-    // pontos cadastrados que não têm ROI no período (ex.: canteiro de uma empresa)
-    for (const [nome, p] of Object.entries(estado.mapa.pontos))
-        if (!comRoi.has(nome)) pontos.push({ nome, total: 0, porTipo: {}, simulados: 0, rois: [], lat: p.lat, lng: p.lng, tipo: p.tipo || 'local', empresa: p.empresa || '' });
-    const areas = estado.mapa.areas.map(a => ({ id: a.id, nome: a.nome, poly: a.poly, total: 0, porTipo: {}, simulados: 0 }));
-    const porId = new Map(areas.map(a => [a.id, a]));
-    for (const p of pontos) {
+    const areas = estado.mapa.areas.map(a => ({ id: a.id, nome: a.nome, poly: a.poly, total: 0, porTipo: {}, simulados: 0, porEmpresa: {} }));
+    const areaPorId = new Map(areas.map(a => [a.id, a]));
+    const areaPorNome = new Map(estado.mapa.areas.map(a => [chaveLocal(a.nome), a]));
+    // pinos: cada ponto cadastrado (local ou empresa) e, se preciso, o meio de uma área
+    const pinos = new Map();
+    const pino = (chave, base) => { if (!pinos.has(chave)) pinos.set(chave, { total: 0, porTipo: {}, simulados: 0, porEmpresa: {}, rois: [], ...base }); return pinos.get(chave); };
+    for (const [nome, p] of Object.entries(estado.mapa.pontos)) {
         const a = areaDoPonto(p.lat, p.lng);
-        p.area = a ? a.nome : '';
-        p.areaId = a ? a.id : '';
-        if (!a) continue;
-        const x = porId.get(a.id);
-        x.total += p.total; x.simulados += p.simulados;
-        for (const [g, n] of Object.entries(p.porTipo)) x.porTipo[g] = (x.porTipo[g] || 0) + n;
+        pino('p:' + nome, { nome, lat: p.lat, lng: p.lng, tipo: p.tipo || 'local', empresa: p.empresa || '', area: a ? a.nome : '', areaId: a ? a.id : '' });
     }
+    const empresasNoMapa = [...pinos.values()].filter(p => p.tipo === 'empresa' && p.empresa);
+    const semPos = new Map();
+    const somar = (alvo, r) => {
+        alvo.total++; alvo.porTipo[r.tipo] = (alvo.porTipo[r.tipo] || 0) + 1;
+        if (r.simulado) alvo.simulados++;
+        if (r.empresaNome) alvo.porEmpresa[r.empresaNome] = (alvo.porEmpresa[r.empresaNome] || 0) + 1;
+    };
+    const resumo = r => ({ id: r.id, numero: r.numero, tipo: r.tipo, data: r.data, simulado: !!r.simulado, local: r.localNome, empresa: r.empresaNome || '', descricao: String(r.descricao || r.oque || '').slice(0, 120) });
+    for (const r of d.baseMapa.slice().sort((x, y) => y.ano - x.ano || y.seq - x.seq)) {
+        if (r.localNome === '(sem local)') continue;
+        const pLocal = estado.mapa.pontos[r.localNome];
+        const aLocal = areaPorNome.get(chaveLocal(r.localNome)) || (pLocal ? areaDoPonto(pLocal.lat, pLocal.lng) : null);
+        let alvo = null;
+        if (r.empresaNome && (aLocal || pLocal)) {
+            const cand = empresasNoMapa.filter(p => mesmaEmpresa(p.empresa, r.empresaNome)
+                && (aLocal ? p.areaId === aLocal.id : metros([p.lat, p.lng], [pLocal.lat, pLocal.lng]) <= 500));
+            if (cand.length) alvo = pLocal ? cand.sort((x, y) => metros([x.lat, x.lng], [pLocal.lat, pLocal.lng]) - metros([y.lat, y.lng], [pLocal.lat, pLocal.lng]))[0] : cand[0];
+        }
+        if (!alvo && pLocal) alvo = pinos.get('p:' + r.localNome);
+        if (!alvo && aLocal) {
+            const [lat, lng] = centroDe(aLocal.poly);
+            alvo = pino('a:' + aLocal.id, { nome: aLocal.nome, lat, lng, tipo: 'centro', empresa: '', area: aLocal.nome, areaId: aLocal.id });
+        }
+        if (!alvo) {
+            const x = semPos.get(r.localNome) || { nome: r.localNome, total: 0, porTipo: {}, simulados: 0, porEmpresa: {}, rois: [] };
+            somar(x, r); if (x.rois.length < 100) x.rois.push(resumo(r)); semPos.set(r.localNome, x);
+            continue;
+        }
+        somar(alvo, r); if (alvo.rois.length < 100) alvo.rois.push(resumo(r));
+        const aSoma = aLocal || (alvo.areaId ? estado.mapa.areas.find(a => a.id === alvo.areaId) : null);
+        if (aSoma) somar(areaPorId.get(aSoma.id), r);
+    }
+    const pontos = [...pinos.values()].filter(p => p.tipo !== 'centro' || p.total);
     return {
         ano: d.ano, mes: d.mes, anos: d.anos, meses: d.meses.map(m => ({ mes: m.mes, total: m.total })),
         grupos: d.grupos, filtroTipos: d.filtroTipos, tiposTodos: d.tiposTodos,
-        total: d.locais.reduce((s, l) => s + l.total, 0),
+        total: d.baseMapa.length,
         area: estado.mapa.area || AREA_PADRAO, areaPadrao: !estado.mapa.area,
-        areas: areas.sort((a, b) => b.total - a.total || a.nome.localeCompare(b.nome)), pontos, semPosicao
+        areas: areas.sort((a, b) => b.total - a.total || a.nome.localeCompare(b.nome)), pontos,
+        semPosicao: [...semPos.values()].sort((a, b) => b.total - a.total)
     };
 }
 
@@ -956,6 +984,7 @@ function indicadorOcorrencias({ ano, mes, tipos: filtroTipos, local: filtroLocal
         };
     });
     const tipos = contarTipos(escopo);
+    const baseMapa = semLocal.filter(r => r.ano === ano && (!mes || r.mes === mes));   // usado pelo mapa (não vai no JSON)
     const locaisMap = new Map();
     for (const r of semLocal.filter(r => r.ano === ano && (!mes || r.mes === mes))) { const n = r.localNome; const l = locaisMap.get(n) || []; l.push(r); locaisMap.set(n, l); }
     const locais = [...locaisMap].map(([nome, l]) => ({ nome, total: l.length, porTipo: contarTipos(l), simulados: l.filter(r => r.simulado).length }))
@@ -1038,13 +1067,15 @@ function indicadorOcorrencias({ ano, mes, tipos: filtroTipos, local: filtroLocal
     if (simulados.length) frases.push(`${simulados.length} dos ${total} ROIs ${periodo} são simulados (contam no total).`);
     if (!total) frases.push(`Nenhum ROI registrado ${periodo}.`);
 
-    return {
+    const resultado = {
         ano, mes, anos, hoje, grupos: GRUPOS_ROI, filtroTipos, filtroLocal, filtroEmpresa, tiposTodos, tiposAnterior, empresas, reincidencias: reincidencias.slice(0, 30),
         tendencia: { ultimos12, anteriores12 }, total, anterior, anoAnterior: ano - 1, parcialAno: anoCorrente && !mes,
         mesRef: { mes: refMes, nome: nomeRef, total: noMes, media: Math.round(media * 10) / 10, parcial },
         tipos, simulados: simulados.length, meses, locais, porAno, frases,
         lista: escopo.sort((a, b) => b.ano - a.ano || b.seq - a.seq).slice(0, 200).map(r => ({ id: r.id, numero: r.numero, tipo: r.tipo, data: r.data, local: r.localNome, simulado: !!r.simulado, descricao: r.descricao || r.oque || '' }))
     };
+    Object.defineProperty(resultado, 'baseMapa', { value: baseMapa, enumerable: false });
+    return resultado;
 }
 
 module.exports = {

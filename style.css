@@ -570,3 +570,7 @@ html, body { overflow-x: clip; }
 .mapa-bt-gaveta .seta { font-size: 11px; color: var(--mudo); margin-left: 2px; }
 .mapa-tit strong { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 @media (max-width: 420px) { .mapa-topo { gap: 6px; padding: 8px 10px; } .mapa-modo button { padding: 6px 8px; font-size: 12.5px; } }
+.mapa-empresas { display: grid; gap: 4px; }
+.mapa-empresa { display: grid; grid-template-columns: minmax(0, 1fr) 90px 26px; align-items: center; gap: 8px; font-size: 13px; }
+.mapa-empresa i { height: 7px; border-radius: 4px; background: #a78bfa; display: block; }
+.mapa-empresa strong { text-align: right; font-variant-numeric: tabular-nums; }
