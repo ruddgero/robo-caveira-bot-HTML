@@ -113,6 +113,7 @@ const MapaCalor = (() => {
     M.faixa = el('div', { class: 'mapa-faixa', hidden: true });
     M.btModo = el('div', { class: 'mapa-modo' },
       el('button', { class: 'ativo', 'data-modo': 'calor', onclick: () => trocarModo('calor') }, 'Calor'),
+      el('button', { 'data-modo': 'areas', onclick: () => trocarModo('areas') }, 'Áreas'),
       el('button', { 'data-modo': 'locais', onclick: () => trocarModo('locais') }, 'Locais'));
     t.replaceChildren(
       el('header', { class: 'mapa-topo' },
@@ -120,7 +121,7 @@ const MapaCalor = (() => {
         el('div', { class: 'mapa-tit' }, el('strong', { text: 'Mapa de calor' }), M.titulo),
         el('div', { class: 'mapa-acoes' }, M.btModo,
           (M.btGaveta = el('button', { type: 'button', class: 'mapa-bt-gaveta', 'aria-expanded': 'false', 'aria-keyshortcuts': 'L', onclick: () => gaveta(!gavetaAberta()) })),
-          (M.btContornos = el('button', { hidden: true, class: 'btn-icone' + (M.contornosVisiveis ? ' ativo' : ''), title: 'Mostrar/esconder os contornos das áreas', 'aria-label': 'Mostrar ou esconder os contornos das áreas', 'aria-pressed': String(M.contornosVisiveis),
+          (M.btContornos = el('button', { class: 'btn-icone' + (M.contornosVisiveis ? ' ativo' : ''), title: 'Mostrar/esconder os contornos das áreas', 'aria-label': 'Mostrar ou esconder os contornos das áreas', 'aria-pressed': String(M.contornosVisiveis),
             onclick: () => { M.contornosVisiveis = !M.contornosVisiveis; try { localStorage.setItem('caveira.contornos', M.contornosVisiveis ? '1' : '0'); } catch (_) {} M.btContornos.classList.toggle('ativo', M.contornosVisiveis); M.btContornos.setAttribute('aria-pressed', String(M.contornosVisiveis)); desenharCamadas(); } }, '▢')),
           el('button', { class: 'btn-icone', title: 'Centralizar na Ferroport', 'aria-label': 'Centralizar na Ferroport', onclick: centralizar }, '⌖'))),
       M.filtros,
@@ -183,20 +184,13 @@ const MapaCalor = (() => {
         M.map.fitBounds(limites(d.area));
       }
       desenhar();
-      if (primeira && d.areas.length) {
-        // abre enquadrando as áreas; no computador o ranking já fica à vista ao lado
-        const largo = window.innerWidth >= 1000;
-        if (largo) gaveta(true);
-        const b = L.latLngBounds(d.areas.flatMap(a => a.poly));
-        M.map.fitBounds(b, { paddingTopLeft: [40, 40], paddingBottomRight: [largo ? 400 : 30, largo ? 40 : 60], maxZoom: 17 });
-      }
+      if (primeira && d.areas.length && window.innerWidth >= 1000) gaveta(true);   // ranking das áreas já à vista no computador
     } catch (e) { aviso(e.message, true); }
   }
 
   function centralizar() { if (M.d) M.map.flyToBounds(limites(M.d.area), { duration: 0.6 }); }
   function trocarModo(m) {
-    M.modo = m === 'areas' ? 'calor' : m;   // o modo Áreas virou o próprio Calor (áreas pintadas)
-    if (M.btContornos) M.btContornos.hidden = M.modo === 'calor';
+    M.modo = m;
     M.btModo.querySelectorAll('button').forEach(b => b.classList.toggle('ativo', b.dataset.modo === m));
     desenharCamadas();
   }
@@ -306,14 +300,16 @@ const MapaCalor = (() => {
     for (const [t, k] of Object.entries(pt)) if (k > 0) { n += k; peso += k * (PESO_G[t] || 1); } else delete pt[t];
     return { n, v: M.gravidade ? peso : n, porTipo: pt };
   }
-  // 5 faixas fixas, do cinza-claro ao vermelho
-  const ESCALA = ['#e2e8f0', '#fde68a', '#fb923c', '#ef4444', '#991b1b'];
-  const faixaDe = (v, max) => v > 0 ? Math.min(4, Math.max(0, Math.ceil(v / max * 5) - 1)) : -1;
+  function corArea(n, max) {
+    if (!n) return '#64748b';
+    const t = n / max;
+    return t > .75 ? '#dc2626' : t > .45 ? '#f97316' : t > .2 ? '#facc15' : '#4ade80';
+  }
   function medidasAreas() {
     const d = M.d;
     const lista = d.areas.map(a => ({ a, ...medir(a), ant: medir(a.anterior).n }));
     const max = Math.max(1, ...lista.map(x => x.v));
-    lista.forEach(x => { x.faixa = faixaDe(x.v, max); });
+    lista.forEach(x => { x.cor = corArea(x.v, max); });
     lista.sort((x, y) => y.v - x.v || y.n - x.n || x.a.nome.localeCompare(y.a.nome));
     const totalN = lista.reduce((s, x) => s + x.n, 0) + medir(d.foraAreas).n;
     return { lista, max, totalN, porId: new Map(lista.map(x => [x.a.id, x])) };
@@ -324,7 +320,6 @@ const MapaCalor = (() => {
     if (!dif) return el('span', { class: 'tend igual', title: `Igual ao ${ref}`, text: longo ? '= igual' : '=' });
     return el('span', { class: 'tend ' + (dif > 0 ? 'sobe' : 'desce'), title: `${dif > 0 ? 'Aumentou' : 'Diminuiu'} ${Math.abs(dif)} em relação ao ${ref}`, text: `${dif > 0 ? '▲' : '▼'} ${Math.abs(dif)}${longo ? ' vs ' + M.d.anoAnterior : ''}` });
   }
-  const tamanhoNaTela = a => { const b = L.latLngBounds(a.poly), p1 = M.map.latLngToContainerPoint(b.getNorthWest()), p2 = M.map.latLngToContainerPoint(b.getSouthEast()); return Math.max(Math.abs(p2.x - p1.x), Math.abs(p2.y - p1.y)); };
   const centroDe = poly => [poly.reduce((s, q) => s + q[0], 0) / poly.length, poly.reduce((s, q) => s + q[1], 0) / poly.length];
   function areaAberta(a) {
     const b = L.latLngBounds(a.poly), p1 = M.map.latLngToContainerPoint(b.getNorthWest()), p2 = M.map.latLngToContainerPoint(b.getSouthEast());
@@ -360,29 +355,19 @@ const MapaCalor = (() => {
       } else pinos.push({ p, ...c });
     }
     for (const g of grupos.values()) if (g.n) { const [lat, lng] = centroDe(g.area.poly); pinos.push({ grupo: g, p: { nome: g.area.nome, lat, lng }, n: g.n, peso: g.peso, porTipo: g.porTipo }); }
-    // mancha de calor só com zoom perto (dentro das áreas abertas); de longe quem fala é a cor da área
-    const perto = M.map.getZoom() >= 16;
-    M.calor.definir(M.modo === 'calor' && perto ? pinos.filter(x => x.peso && !x.soMarca && !x.grupo).map(x => ({ lat: x.p.lat, lng: x.p.lng, peso: x.peso })) : []);
-    if (M.modo === 'calor') for (let i = pinos.length - 1; i >= 0; i--) if (pinos[i].grupo) pinos.splice(i, 1);
+    M.calor.definir(M.modo === 'calor' ? pinos.filter(x => x.peso && !x.soMarca).map(x => ({ lat: x.p.lat, lng: x.p.lng, peso: x.peso })) : []);
+    M.med = medidasAreas();
     // contornos das áreas (só o admin vê)
     M.contornos.clearLayers();
-    const pintar = M.modo === 'calor' && !M.desenho;
-    const med = M.med = medidasAreas();
-    const verContornos = pintar || M.contornosVisiveis || M.desenho;
+    const maxA = Math.max(1, ...d.areas.map(a => a.total));
+    const verContornos = (M.contornosVisiveis || M.modo === 'areas' || M.desenho);
     for (const a of verContornos ? d.areas : []) {
-      const sel = M.selArea === a.id, x = med.porId.get(a.id);
-      const cor = x.faixa >= 0 ? ESCALA[x.faixa] : '#94a3b8';
+      const sel = M.selArea === a.id, pintar = M.modo === 'areas';
       const pol = L.polygon(a.poly, pintar
-        ? x.n ? { color: sel ? '#fff' : cor, weight: sel ? 3 : 1.5, opacity: .95, fillColor: cor, fillOpacity: sel ? .55 : .42, bubblingMouseEvents: false }
-          : { color: sel ? '#fff' : '#94a3b8', weight: sel ? 3 : 1.2, dashArray: '4 4', fillOpacity: 0, bubblingMouseEvents: false }   // sem ROI: só o contorno
+        ? { color: sel ? '#fff' : '#e2e8f0', weight: sel ? 3 : 1.5, fillColor: corArea(a.total, maxA), fillOpacity: a.total ? .55 : .15, bubblingMouseEvents: false }
         : { color: sel ? '#fff' : '#f97316', weight: sel ? 3 : 2, dashArray: sel ? null : '6 4', fillColor: '#f97316', fillOpacity: sel ? .12 : .04, bubblingMouseEvents: false });
-      const rotulo = el('span', { class: 'rot-area' }, el('b', { text: a.nome }), ` · ${x.n}`, pintar && (x.n || x.ant) ? [' ', tendencia(x.n, x.ant)] : null);
-      if (pintar && (sel || tamanhoNaTela(a) >= 110)) {
-        // rótulo fixo na borda de cima da área (não cobre os pontos de dentro)
-        const b = L.latLngBounds(a.poly);
-        L.marker([b.getNorth(), b.getCenter().lng], { icon: L.divIcon({ className: 'rotulo-area-ic', html: rotulo, iconSize: null }), interactive: false, keyboard: false }).addTo(M.contornos);
-      } else if (!pintar && (sel || areaAberta(a))) pol.bindTooltip(rotulo, { permanent: true, direction: 'center', className: 'rotulo-area' });
-      else pol.bindTooltip(rotulo, { direction: 'top', className: 'rotulo-area', sticky: true });   // área pequena na tela: rótulo só ao passar o mouse
+      if (sel || areaAberta(a)) pol.bindTooltip(`${a.nome} · ${plural(a.total)}`, { permanent: true, direction: 'center', className: 'rotulo-area' });   // área pequena na tela: sem rótulo (não embaralha)
+      else pol.bindTooltip(`${a.nome} · ${plural(a.total)}`, { direction: 'top', className: 'rotulo-area', sticky: true });
       pol.on('click', ev => (M.marcando || M.desenho) ? aoClicarMapa(ev) : selecionarArea(a.id, false));
       pol.addTo(M.contornos);
     }
@@ -435,12 +420,16 @@ const MapaCalor = (() => {
     return `conic-gradient(${partes.join(',') || '#94a3b8 0deg 360deg'})`;
   }
   // dica ao passar o mouse: quantidade, tipos e os últimos ROIs
+  function tendenciaDaArea(id) {
+    const a = M.med && M.med.porId.get(id);
+    return a && (a.n || a.ant) ? el('div', { class: 'dica-tend' }, tendencia(a.n, a.ant, true), el('span', { class: 'mudo', text: ` (${M.d.anoAnterior}: ${a.ant})` })) : null;
+  }
   function dicaPino(p, x, rois, grupo) {
     const tipos = Object.entries(x.porTipo).sort((a, b) => b[1] - a[1]);
     return el('div', { class: 'dica-pino' },
       el('strong', { text: `${grupo ? p.nome : p.nome} · ${plural(x.n)}` }),
       el('div', { class: 'dica-tipos' }, tipos.map(([g, n]) => el('span', {}, el('i', { style: `background:${COR_TIPO[g]}` }), `${g} ${n}`))),
-      grupo ? el('div', { class: 'mudo', text: 'Toque para aproximar e ver os pontos da área.' }) : [
+      grupo ? [tendenciaDaArea(x.grupo.area.id), el('div', { class: 'mudo', text: 'Toque para aproximar e ver os pontos da área.' })] : [
         ...rois.slice(0, 5).map(r => el('div', { class: 'dica-roi' }, el('i', { style: `background:${COR_TIPO[r.tipo] || '#888'}` }),
           el('span', { text: `ROI ${r.numero} · ${r.tipo} · ${String(r.data || '').slice(0, 5)}${r.descricao ? ' · ' + (r.descricao.length > 46 ? r.descricao.slice(0, 44) + '…' : r.descricao) : ''}` }))),
         rois.length > 5 ? el('div', { class: 'mudo', text: `+ ${rois.length - 5} outros` }) : null,
@@ -449,12 +438,12 @@ const MapaCalor = (() => {
 
   function desenharLegenda() {
     if (!M.legenda) return;
-    const itens = M.modo === 'locais'
+    const itens = M.modo === 'areas'
+      ? [el('b', { text: 'ROIs por área' }), ...[['#4ade80', 'poucos'], ['#facc15', 'médio'], ['#f97316', 'alto'], ['#dc2626', 'mais alto']].map(([c, t]) => el('div', { class: 'leg-it' }, el('i', { style: `background:${c}` }), t))]
+      : M.modo === 'locais'
         ? [el('b', { text: 'ROIs por ponto' }), el('div', { class: 'leg-it' }, el('i', { class: 'bola' }), 'tamanho = quantidade'), el('div', { class: 'leg-it' }, el('i', { class: 'bola grupo' }), 'área agrupada: aproxime')]
-        : [el('b', { text: M.gravidade ? 'ROIs por área · peso por gravidade' : 'ROIs por área · quantidade' }),
-          el('div', { class: 'leg-faixas' }, ESCALA.map(c => el('i', { style: `background:${c}` }))), el('div', { class: 'leg-esc' }, el('span', { text: 'menos' }), el('span', { text: 'mais' })),
-          el('div', { class: 'leg-it' }, el('i', { class: 'vazia' }), 'área sem ROI'),
-          el('div', { class: 'leg-it' }, el('span', { class: 'tend sobe', text: '▲' }), el('span', { class: 'tend desce', text: '▼' }), `vs mesmo período de ${M.d ? M.d.anoAnterior : ''}`),
+        : [el('b', { text: M.gravidade ? 'Intensidade · peso por gravidade' : 'Intensidade · quantidade' }), el('div', { class: 'leg-barra' }), el('div', { class: 'leg-esc' }, el('span', { text: 'baixa' }), el('span', { text: 'alta' })),
+          el('div', { class: 'leg-it' }, el('i', { class: 'bola grupo' }), 'área agrupada: aproxime'),
           el('div', { class: 'leg-it' }, el('i', { class: 'losango' }), 'estrutura de empresa')];
     M.legenda.replaceChildren(...itens);
   }
@@ -562,7 +551,7 @@ const MapaCalor = (() => {
     const ordenarP = l => l.slice().sort((a, b) => b.total - a.total || a.nome.localeCompare(b.nome));
     const linha = (x, pos) => el('button', { class: 'mapa-local mapa-rank' + (M.selArea === x.a.id ? ' sel' : ''), title: `${x.a.nome} · ${plural(x.n)}`, onclick: () => selecionarArea(x.a.id, true) },
       el('span', { class: 'rk-pos', text: x.n ? `${pos}º` : '–' }),
-      el('i', { class: 'rk-cor' + (x.n ? '' : ' vazia'), style: x.n ? `background:${ESCALA[x.faixa]}` : '' }),
+      el('i', { class: 'rk-cor' + (x.n ? '' : ' vazia'), style: x.n ? `background:${x.cor}` : '' }),
       el('span', { class: 'rk-nome' }, el('span', { class: 'mapa-local-nome', text: x.a.nome }), el('span', { class: 'rk-barra' }, el('em', { style: `width:${x.n ? Math.max(4, x.n / maxN * 100) : 0}%` }))),
       el('span', { class: 'rk-num' }, el('strong', { text: String(x.n) }), el('small', { text: med.totalN ? Math.round(x.n / med.totalN * 100) + '%' : '0%' })),
       x.n || x.ant ? tendencia(x.n, x.ant) : el('span', { class: 'tend vazio' }));
