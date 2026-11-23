@@ -350,7 +350,7 @@ function abaOperacoes(ops) {
         nome: 'Operações de bordo', cabecalho: true, larguras: [22, 24, 10, 22, 22, 22, 12, 10, 10, 18],
         linhas: [['Tipo', 'Navio', 'Terminal', 'Empresa', 'Motorista/Agente', 'Ajudante(s)', 'Placa', 'Entrada', 'Saída', 'E-mail'],
             ...ops.map(o => [R.TIPOS_OPERACAO[o.tipo]?.rotulo || o.tipo, o.navio, o.terminal, o.empresa, o.responsavel, o.ajudante, o.placa,
-                o.horaInicial || '', o.horaFinal || 'sem saída', o.email?.encaminhadoEm ? 'Encaminhado' : o.email?.status === 'ENVIADO' ? 'Enviado ao líder' : 'Pendente'])]
+                o.horaInicial || '', R.ehEmbarque(o) ? '—' : o.horaFinal || 'sem saída', o.email?.encaminhadoEm ? 'Encaminhado' : o.email?.status === 'ENVIADO' ? 'Enviado ao líder' : 'Pendente'])]
     };
 }
 rota('GET', '/api/ficha/xlsx', async () => {

@@ -1117,6 +1117,8 @@ function abrirPendencia(p) {
 }
 
 // ---------------------- Operações de bordo e e-mail ------------------
+// tripulantes: embarque só tem entrada; desembarque só tem saída
+const soEntrada = o => o && o.tipo === 'TRIPULACAO' && /^embarque( definitivo)?$/i.test(o.movimento || '');
 function abrirOperacao(o) {
   const linhas = [
     ['Tipo', o.rotuloTipo], ['Navio', o.navio], ['Terminal', o.terminal],
@@ -1126,7 +1128,7 @@ function abrirOperacao(o) {
     ['Veículo', `${o.veiculo || ''} ${o.placa || ''}`.trim()], ['Observações', o.observacoes],
     // desembarque de tripulantes: só existe a saída
     o.tipo === 'TRIPULACAO' && /^desembarque( definitivo)?$/i.test(o.movimento || '') && !o.horaInicial ? null : ['Entrada', o.horaInicial ? o.horaInicial + 'h' : '—'],
-    ['Saída', o.horaFinal ? o.horaFinal + 'h' : 'aguardando']
+    soEntrada(o) ? null : ['Saída', o.horaFinal ? o.horaFinal + 'h' : 'aguardando']
   ].filter(x => x && x[1]);
   abrirModal(`${o.rotuloTipo} · ${o.navio || ''}`, [
     ...(o.conferir || []).map(t => el('div', { class: 'citacao', style: 'border-left-color:var(--vermelho)', text: '⚠️ ' + t })),
@@ -1201,10 +1203,11 @@ async function abrirEmail(o) {
 function situacaoEmail(o) {
   const st = o.email?.status;
   if (!o.horaFinal) return { txt: `Entrada ${o.horaInicial || '?'} · ⚠ saída não registrada`, alerta: true };
-  if (o.email?.encaminhadoEm) return { txt: `Saída ${o.horaFinal} · ✓ encaminhado` };
-  if (st === 'ENVIADO') return { txt: `Saída ${o.horaFinal} · enviado ao líder, falta encaminhar` };
-  if (st === 'ERRO') return { txt: `Saída ${o.horaFinal} · envio falhou, copie e envie`, alerta: true };
-  return { txt: `Saída ${o.horaFinal} · pronto para copiar${o.email?.whatsappEm ? ' (minuta no seu WhatsApp)' : ''}` };
+  const h = soEntrada(o) ? `Entrada ${o.horaInicial}` : `Saída ${o.horaFinal}`;
+  if (o.email?.encaminhadoEm) return { txt: `${h} · ✓ encaminhado` };
+  if (st === 'ENVIADO') return { txt: `${h} · enviado ao líder, falta encaminhar` };
+  if (st === 'ERRO') return { txt: `${h} · envio falhou, copie e envie`, alerta: true };
+  return { txt: `${h} · pronto para copiar${o.email?.whatsappEm ? ' (minuta no seu WhatsApp)' : ''}` };
 }
 
 function desenharEmails() {
@@ -1650,7 +1653,7 @@ function listaOperacoes() {
     const st = !o.horaFinal ? 'Em andamento' : o.email?.encaminhadoEm ? 'Encaminhado ✓' : o.email?.status === 'ENVIADO' ? 'E-mail enviado ao líder' : o.email?.status === 'ERRO' ? 'Falha no e-mail' : 'E-mail pendente';
     return el('button', { class: `pend${o.email?.status === 'ERRO' ? ' erro' : ''}`, onclick: () => abrirOperacao(o) },
       el('span', { class: 'ic', text: o.horaFinal ? '✉️' : '🚢' }),
-      el('span', { style: 'min-width:0' }, el('div', { class: 'tit', text: `${o.rotuloTipo} · ${o.navio || '?'}` }), el('div', { class: 'sub', text: `${o.horaInicial || '—'} → ${o.horaFinal || '…'} · ${st}` })),
+      el('span', { style: 'min-width:0' }, el('div', { class: 'tit', text: `${o.rotuloTipo} · ${o.navio || '?'}` }), el('div', { class: 'sub', text: `${soEntrada(o) ? 'entrada ' + (o.horaInicial || '—') : `${o.horaInicial || '—'} → ${o.horaFinal || '…'}`} · ${st}` })),
       el('span', { class: 'seta', text: '›' }));
   }));
 }

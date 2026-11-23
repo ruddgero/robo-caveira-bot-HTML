@@ -131,7 +131,14 @@ const tDef = R.classificarMensagem('MOVIMENTAÇÃO DE TRIPULANTES\nNAVIO: EAGLE 
 assert.strictEqual(tDef.movimento, 'Desembarque definitivo');
 assert.deepStrictEqual([tDef.horaInicial, tDef.horaFinal], ['', '18:51']);
 const tEmb = R.classificarMensagem('Embarque definitivo de 02 tripulantes navio EAGLE PILLAR T-OIL entrada 09:00', R.NAVIOS_PADRAO, '09:05').rascunhos[0];
-assert.deepStrictEqual([tEmb.horaInicial, tEmb.horaFinal], ['09:00', '']);
+// embarque: só entrada; a operação já fica concluída e a saída não aparece em mensagem nem e-mail
+assert.deepStrictEqual([tEmb.horaInicial, tEmb.horaFinal], ['09:00', '09:00']);
+assert.strictEqual(R.resumoNavio(tEmb), 'Embarque definitivo de 02 tripulantes.');
+assert.ok(!/Sa[ií]da/.test(R.mensagemPadraoOperacao ? R.mensagemPadraoOperacao(tEmb) : ''));
+assert.ok(R.minutaEmail(tEmb).corpo.includes('Horário final: Não se aplica'));
+// mensagem sem dizer o movimento não fecha sozinha
+const tVago = R.classificarMensagem('Van da agência OCEAN para tripulantes do navio EAGLE PILLAR T-OIL 10:00', R.NAVIOS_PADRAO, '10:05').rascunhos?.[0];
+if (tVago && tVago.tipo === 'TRIPULACAO') assert.strictEqual(tVago.horaFinal, '');
 assert.strictEqual(R.resumoNavio({ ...t1, horaFinal: '15:00' }), 'Desembarque de 02 tripulantes.');
 const et = R.minutaEmail({ ...t1, horaFinal: '15:00' });
 assert.ok(et.corpo.includes('Autorizado por (Autoridades): Polícia Federal'));
@@ -149,7 +156,7 @@ assert.strictEqual(em.responsavel, 'ROSSINE GUEDES');
 assert.strictEqual(em.agente, 'DIEGO ALVARADO');
 assert.strictEqual(em.empresa, 'LS LOCAÇÕES', 'empresa repetida igual não duplica');
 assert.deepStrictEqual(em.conferir, []);
-assert.strictEqual(R.resumoNavio(em), 'Embarque definitivo de 01 tripulante. Em andamento.');
+assert.strictEqual(R.resumoNavio(em), 'Embarque definitivo de 01 tripulante.');   // embarque: só entrada, já concluído
 const emEmail = R.minutaEmail({ ...em, data: '19/11/2026' }).corpo;
 assert.ok(emEmail.includes('DIEGO ALVARADO (AGENTE) / ROSSINE GUEDES (MOTORISTA)'));
 assert.ok(emEmail.includes('Embarque ou desembarque: Embarque definitivo'));
