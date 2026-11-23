@@ -63,7 +63,7 @@ const MapaCalor = (() => {
     const tela = el('div', { class: 'mapa-tela', role: 'dialog', 'aria-label': 'Mapa de calor' });
     document.body.append(tela);
     document.body.style.overflow = 'hidden';
-    M = { tela, modo: 'calor', contornosVisiveis: true, ano: S.indAno || 0, mes: S.indMes || 0, tipos: (S.indTipos || []).slice(), sel: '', selArea: '', marcando: null, desenho: null, d: null };
+    M = { tela, modo: 'calor', contornosVisiveis: true, gravidade: true, simulados: true, ano: S.indAno || 0, mes: S.indMes || 0, tipos: (S.indTipos || []).slice(), sel: '', selArea: '', marcando: null, desenho: null, d: null };
     history.pushState({ mapaCalor: true }, '');
     window.addEventListener('popstate', aoVoltar);
     document.addEventListener('keydown', aoTeclar);
@@ -74,6 +74,7 @@ const MapaCalor = (() => {
     if (!M) return;
     window.removeEventListener('popstate', aoVoltar);
     document.removeEventListener('keydown', aoTeclar);
+    if (M.fora) document.removeEventListener('pointerdown', M.fora, true);
     if (M.map) M.map.remove();
     M.tela.remove(); M = null;
     document.body.style.overflow = '';
@@ -81,7 +82,11 @@ const MapaCalor = (() => {
   }
   function aoVoltar() { if (modalAberto()) { history.pushState({ mapaCalor: true }, ''); fecharModal(); return; } fechar(true); }
   function aoTeclar(e) {
+    if ((e.key === 'l' || e.key === 'L') && !e.ctrlKey && !e.metaKey && !e.altKey && !modalAberto() && !/^(INPUT|TEXTAREA|SELECT)$/.test((document.activeElement || {}).tagName || '')) {
+      e.preventDefault(); return gaveta(!gavetaAberta());
+    }
     if (e.key !== 'Escape' || modalAberto()) return;
+    if (M.popAberto) return fecharPop();
     if (M.desenho) return pararDesenho();
     if (M.marcando) return pararMarcacao();
     if (gavetaAberta()) return gaveta(false);
@@ -105,6 +110,7 @@ const MapaCalor = (() => {
         el('button', { class: 'btn pequeno', onclick: () => fechar() }, '‹ Voltar'),
         el('div', { class: 'mapa-tit' }, el('strong', { text: 'Mapa de calor' }), M.titulo),
         el('div', { class: 'mapa-acoes' }, M.btModo,
+          (M.btGaveta = el('button', { type: 'button', class: 'mapa-bt-gaveta', 'aria-expanded': 'false', 'aria-keyshortcuts': 'L', onclick: () => gaveta(!gavetaAberta()) })),
           ehAdmin() ? (M.btContornos = el('button', { class: 'btn-icone ativo', title: 'Mostrar/esconder os contornos das áreas (só o admin vê)', 'aria-label': 'Mostrar ou esconder os contornos das áreas', 'aria-pressed': 'true',
             onclick: () => { M.contornosVisiveis = !M.contornosVisiveis; M.btContornos.classList.toggle('ativo', M.contornosVisiveis); M.btContornos.setAttribute('aria-pressed', String(M.contornosVisiveis)); desenharCamadas(); } }, '▢')) : null,
           el('button', { class: 'btn-icone', title: 'Centralizar na Ferroport', 'aria-label': 'Centralizar na Ferroport', onclick: centralizar }, '⌖'))),
@@ -119,24 +125,20 @@ const MapaCalor = (() => {
     M.contornos = L.layerGroup().addTo(M.map);
     M.marcas = L.layerGroup().addTo(M.map);
     L.control.scale({ imperial: false, position: 'bottomleft', maxWidth: 140 }).addTo(M.map);
+    const Ctl = (pos, fn) => new (L.Control.extend({ onAdd: fn }))({ position: pos }).addTo(M.map);
+    Ctl('bottomleft', () => (M.legenda = L.DomUtil.create('div', 'mapa-legenda')));
+    Ctl('topright', () => { const d = L.DomUtil.create('div', 'mapa-norte'); d.title = 'Norte'; d.append(el('span', { class: 'seta-n', 'aria-hidden': 'true' }), el('b', { text: 'N' })); return d; });
+    M.caixaMapa.append(el('div', { class: 'mapa-selo', text: 'USO INTERNO · CONFIDENCIAL' }));
+    M.map.on('zoomend', () => desenharCamadas());
     M.map.on('click', aoClicarMapa);
     // botão que abre/fecha a gaveta de locais (fica embaixo do + e −)
-    const Botao = L.Control.extend({ onAdd: () => {
-      M.btGaveta = L.DomUtil.create('button', 'mapa-bt-gaveta');
-      M.btGaveta.type = 'button';
-      M.btGaveta.setAttribute('aria-expanded', 'false');
-      L.DomEvent.disableClickPropagation(M.btGaveta);
-      M.btGaveta.addEventListener('click', () => gaveta(!gavetaAberta()));
-      return M.btGaveta;
-    } });
-    new Botao({ position: 'topleft' }).addTo(M.map);
   }
   const gavetaAberta = () => M.tela.classList.contains('lado-aberto');
   function gaveta(abrir) {
     if (abrir && M.btGaveta) {
       const caixa = M.caixaMapa.getBoundingClientRect(), b = M.btGaveta.getBoundingClientRect();
-      M.lado.style.setProperty('--topo-menu', Math.round(b.bottom - caixa.top + 6) + 'px');
-      M.lado.style.setProperty('--esq-menu', Math.round(b.left - caixa.left) + 'px');
+      M.lado.style.setProperty('--topo-menu', '8px');
+      M.lado.style.setProperty('--dir-menu', Math.max(8, Math.round(caixa.right - b.right)) + 'px');
     }
     M.tela.classList.toggle('lado-aberto', abrir);
     if (M.btGaveta) M.btGaveta.setAttribute('aria-expanded', abrir ? 'true' : 'false');
@@ -146,9 +148,16 @@ const MapaCalor = (() => {
   function rotuloGaveta() {
     if (!M.btGaveta || !M.d) return;
     const n = M.d.pontos.length + M.d.semPosicao.length;
-    M.btGaveta.replaceChildren(el('span', { class: 'ic', 'aria-hidden': 'true', text: '☰' }), M.d.areas.length ? `Áreas e locais (${n})` : `Locais (${n})`,
-      el('span', { class: 'seta', 'aria-hidden': 'true', text: gavetaAberta() ? '▴' : '▾' }));
-    M.btGaveta.title = gavetaAberta() ? 'Fechar a lista' : 'Abrir a lista de áreas e locais';
+    const escolhido = M.sel || (M.selArea && (M.d.areas.find(a => a.id === M.selArea) || {}).nome) || '';
+    const faltam = ehLider() ? M.d.semPosicao.length : 0;
+    M.btGaveta.replaceChildren(...[
+      el('span', { class: 'ic', 'aria-hidden': 'true', text: '☰' }),
+      escolhido ? el('span', { class: 'txt escolhido', text: escolhido }) : el('span', { class: 'txt' }, 'Locais ', el('b', { text: `(${n})` })),
+      faltam && !escolhido ? el('i', { class: 'falta', title: `${faltam} local(is) sem posição no mapa` }) : null,
+      escolhido ? el('span', { class: 'limpar', role: 'button', 'aria-label': 'Voltar à lista toda', title: 'Voltar à lista toda', text: '✕',
+        onclick: ev => { ev.stopPropagation(); M.sel = ''; M.selArea = ''; desenharCamadas(); desenharLado(); rotuloGaveta(); } })
+        : el('span', { class: 'seta', 'aria-hidden': 'true', text: gavetaAberta() ? '▴' : '▾' })].filter(Boolean));
+    M.btGaveta.title = (gavetaAberta() ? 'Fechar a lista' : 'Abrir a lista de áreas e locais') + ' (atalho: L)' + (faltam ? ` · ${faltam} sem posição no mapa` : '');
   }
 
   async function carregar() {
@@ -176,23 +185,90 @@ const MapaCalor = (() => {
   }
 
   // ------------------- desenho -------------------
+  // filtros numa linha só: Período ▾ · Tipos ▾ · Ajustes ▾ (+ filtros ativos removíveis)
+  const NOMES_MES = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
   function desenhar() {
     const d = M.d;
     const per = d.mes ? `${MESES_ABREV[d.mes - 1]}/${d.ano}` : `${d.ano} · ano todo`;
     M.titulo.textContent = `${per} · ${d.total} ROI${d.total === 1 ? '' : 's'}${M.tipos.length ? ' · ' + M.tipos.join(', ') : ''}`;
-    const chip = (txt, ativo, fn, extra) => el('button', { class: 'filtro' + (ativo ? ' ativo' : ''), onclick: fn }, extra || null, txt);
-    const mudar = fn => () => { fn(); carregar(); };
-    M.filtros.replaceChildren(...[
-      d.anos.length > 1 ? el('div', { class: 'filtros' }, d.anos.slice().sort((a, b) => a - b).map(a => chip(String(a), a === d.ano, mudar(() => { M.ano = a; M.mes = 0; })))) : null,
-      el('div', { class: 'filtros' }, chip('Ano todo', !d.mes, mudar(() => { M.mes = 0; })),
-        ...d.meses.map(m => chip(MESES_ABREV[m.mes - 1], d.mes === m.mes, mudar(() => { M.mes = d.mes === m.mes ? 0 : m.mes; })))),
-      el('div', { class: 'filtros' }, chip('Todos os tipos', !M.tipos.length, mudar(() => { M.tipos = []; })),
-        ...Object.keys(d.grupos).map(g => chip(`${g} (${d.tiposTodos[g] || 0})`, M.tipos.includes(g),
-          mudar(() => { M.tipos = M.tipos.includes(g) ? M.tipos.filter(x => x !== g) : [...M.tipos, g]; }),
-          el('i', { class: 'ponto-tipo', style: `background:${COR_TIPO[g]}` }))))].filter(Boolean));
+    const mudar = fn => { fn(); carregar(); };
+    const botao = (chave, conteudo, titulo, marca) => el('button', { type: 'button', class: 'mf-bt' + (M.popAberto === chave ? ' aberto' : ''), 'data-pop': chave, title: titulo, 'aria-haspopup': 'true', 'aria-expanded': String(M.popAberto === chave), onclick: ev => { ev.stopPropagation(); alternarPop(chave); } },
+      ...conteudo, marca ? el('i', { class: 'mf-marca', 'aria-hidden': 'true' }) : null, el('span', { class: 'mf-seta', 'aria-hidden': 'true', text: '▾' }));
+    const tiposTxt = M.tipos.length
+      ? [el('span', { class: 'mf-pontos' }, M.tipos.map(g => el('i', { style: `background:${COR_TIPO[g]}` }))), el('span', { class: 'mf-txt', text: M.tipos.join(', ') })]
+      : [el('span', { class: 'mf-pontos' }, Object.keys(d.grupos).map(g => el('i', { style: `background:${COR_TIPO[g]}` }))), el('span', { class: 'mf-txt', text: 'Todos os tipos' })];
+    const ajustado = !M.gravidade || !M.simulados;
+    const ativos = [
+      d.mes ? ['mes', `${MESES_ABREV[d.mes - 1]}/${d.ano}`, () => mudar(() => { M.mes = 0; })] : null,
+      ...M.tipos.map(g => ['t' + g, g, () => mudar(() => { M.tipos = M.tipos.filter(x => x !== g); }), COR_TIPO[g]]),
+      !M.gravidade ? ['peso', 'Só quantidade', () => { M.gravidade = true; desenhar(); }] : null,
+      !M.simulados ? ['sim', 'Sem simulados', () => { M.simulados = true; desenhar(); }] : null
+    ].filter(Boolean);
+    const marcados = d.pontos.reduce((s, p) => s + p.total, 0), pct = d.total ? Math.round(marcados / d.total * 100) : 0;
+    M.filtros.replaceChildren(el('div', { class: 'mf-linha' },
+      botao('periodo', [el('span', { class: 'mf-ic', 'aria-hidden': 'true', text: '📅' }), el('span', { class: 'mf-txt', text: d.mes ? `${MESES_ABREV[d.mes - 1]}/${d.ano}` : `${d.ano} · Ano todo` })], 'Período'),
+      botao('tipos', tiposTxt, 'Tipos de ocorrência'),
+      botao('ajustes', [el('span', { class: 'mf-ic', 'aria-hidden': 'true', text: '⚙️' }), el('span', { class: 'mf-txt', text: 'Ajustes' })], 'Peso do calor e simulados', ajustado),
+      ativos.length ? el('div', { class: 'mf-ativos' }, ativos.map(([k, txt, limpar, cor]) => el('button', { type: 'button', class: 'mf-ativo', title: 'Tirar este filtro', onclick: limpar },
+        cor ? el('i', { style: `background:${cor}` }) : null, txt, el('span', { class: 'x', 'aria-hidden': 'true', text: '✕' })))) : null,
+      el('span', { class: 'mapa-qualidade', title: 'ROIs do período que já aparecem no mapa' }, el('i', {}, el('em', { style: `width:${pct}%` })), `${pct}% no mapa`)));
+    atualizarPop();
     desenharCamadas();
     desenharLado();
     rotuloGaveta();
+  }
+
+  // --- quadros que abrem dos botões (popover; no celular sobem de baixo)
+  function alternarPop(chave) { M.popAberto = M.popAberto === chave ? '' : chave; desenhar(); }
+  function fecharPop() { if (!M.popAberto) return; M.popAberto = ''; desenhar(); }
+  function atualizarPop() {
+    if (!M.pop) {
+      M.pop = el('div', { class: 'mf-pop', role: 'dialog', hidden: true });
+      M.tela.append(M.pop);
+      M.fora = ev => { if (M.popAberto && !M.pop.contains(ev.target) && !ev.target.closest('.mf-bt')) fecharPop(); };
+      document.addEventListener('pointerdown', M.fora, true);
+    }
+    const bt = M.popAberto && M.filtros.querySelector(`[data-pop="${M.popAberto}"]`);
+    if (!bt) { M.pop.hidden = true; return; }
+    M.pop.replaceChildren(...conteudoPop(M.popAberto));
+    M.pop.hidden = false;
+    const r = bt.getBoundingClientRect(), w = M.pop.offsetWidth;
+    M.pop.style.top = Math.round(r.bottom + 6) + 'px';
+    M.pop.style.left = Math.round(Math.max(8, Math.min(r.left, innerWidth - w - 8))) + 'px';
+  }
+  function conteudoPop(chave) {
+    const d = M.d;
+    const carregarCom = fn => { fn(); carregar(); };
+    if (chave === 'periodo') {
+      const comDados = new Map(d.meses.map(m => [m.mes, m.total]));
+      return [
+        el('div', { class: 'mf-pop-tit', text: 'Período' }),
+        d.anos.length > 1 ? el('div', { class: 'mf-seg' }, d.anos.slice().sort((a, b) => a - b).map(a => el('button', { type: 'button', class: a === d.ano ? 'ativo' : '', onclick: () => carregarCom(() => { M.ano = a; M.mes = 0; }) }, String(a)))) : null,
+        el('button', { type: 'button', class: 'mf-todo' + (!d.mes ? ' ativo' : ''), onclick: () => { M.popAberto = ''; carregarCom(() => { M.mes = 0; }); } }, `Ano todo de ${d.ano}`),
+        el('div', { class: 'mf-meses' }, NOMES_MES.map((nome, i) => {
+          const m = i + 1, tem = comDados.has(m);
+          return el('button', { type: 'button', class: (d.mes === m ? 'ativo' : '') + (tem ? '' : ' vazio'), disabled: !tem, title: tem ? `${nome}: ${comDados.get(m)} ROI(s)` : `${nome}: sem dados`,
+            onclick: () => { M.popAberto = ''; carregarCom(() => { M.mes = m; }); } }, el('span', { text: MESES_ABREV[i] }), tem ? el('small', { text: String(comDados.get(m)) }) : null);
+        }))
+      ].filter(Boolean);
+    }
+    if (chave === 'tipos') return [
+      el('div', { class: 'mf-pop-tit' }, 'Tipos de ocorrência', M.tipos.length ? el('button', { type: 'button', class: 'mf-limpar', onclick: () => carregarCom(() => { M.tipos = []; }) }, 'Limpar') : null),
+      el('div', { class: 'mf-lista' }, Object.keys(d.grupos).map(g => {
+        const on = M.tipos.includes(g);
+        return el('button', { type: 'button', class: 'mf-item' + (on ? ' ativo' : ''), role: 'checkbox', 'aria-checked': String(on),
+          onclick: () => carregarCom(() => { M.tipos = on ? M.tipos.filter(x => x !== g) : [...M.tipos, g]; }) },
+          el('span', { class: 'mf-check', style: `--cor:${COR_TIPO[g]}`, text: on ? '✓' : '' }), el('span', { class: 'mf-nome', text: `${g} · ${d.grupos[g]}` }), el('b', { text: String(d.tiposTodos[g] || 0) }));
+      })),
+      el('p', { class: 'mf-dica', text: M.tipos.length ? 'Mostrando só os tipos marcados.' : 'Sem marcação = todos os tipos.' })];
+    const seg = (opcoes, atual, fn) => el('div', { class: 'mf-seg' }, opcoes.map(([v, t]) => el('button', { type: 'button', class: v === atual ? 'ativo' : '', onclick: () => { fn(v); desenhar(); } }, t)));
+    return [
+      el('div', { class: 'mf-pop-tit', text: 'Ajustes do mapa' }),
+      el('div', { class: 'mf-grupo' }, el('span', { class: 'mf-rot', text: 'Peso do calor' }),
+        seg([[true, 'Por gravidade'], [false, 'Só quantidade']], M.gravidade, v => { M.gravidade = v; }),
+        el('p', { class: 'mf-dica', text: M.gravidade ? 'Acidentes e atos ilícitos pesam 3×, quebra de procedimento e ameaças 2×.' : 'Cada ROI pesa igual.' })),
+      el('div', { class: 'mf-grupo' }, el('span', { class: 'mf-rot', text: 'ROIs simulados' }),
+        seg([[true, 'Incluir'], [false, 'Excluir']], M.simulados, v => { M.simulados = v; }))];
   }
 
   // ------------------- camadas do mapa -------------------
@@ -202,37 +278,90 @@ const MapaCalor = (() => {
     const t = n / max;
     return t > .75 ? '#dc2626' : t > .45 ? '#f97316' : t > .2 ? '#facc15' : '#4ade80';
   }
+  // peso por gravidade, simulados e agrupamento por área
+  const PESO_G = { G1: 3, G3: 3, G2: 2, G4: 2, G5: 1, G6: 1 };
+  function contar(p) {
+    const r = M.simulados ? p.rois : p.rois.filter(x => !x.simulado);
+    const porTipo = {}; r.forEach(x => { porTipo[x.tipo] = (porTipo[x.tipo] || 0) + 1; });
+    const n = p.rois.length < p.total && M.simulados ? p.total : r.length;
+    return { n, peso: M.gravidade ? r.reduce((s, x) => s + (PESO_G[x.tipo] || 1), 0) : n, porTipo };
+  }
+  const centroDe = poly => [poly.reduce((s, q) => s + q[0], 0) / poly.length, poly.reduce((s, q) => s + q[1], 0) / poly.length];
+  function areaAberta(a) {
+    const b = L.latLngBounds(a.poly), p1 = M.map.latLngToContainerPoint(b.getNorthWest()), p2 = M.map.latLngToContainerPoint(b.getSouthEast());
+    return Math.max(Math.abs(p2.x - p1.x), Math.abs(p2.y - p1.y)) >= 170;    // área grande na tela: abre nos pontos das empresas
+  }
+  function linhaPeso(d) {
+    const loc = (txt, ativo, fn) => el('button', { class: 'filtro' + (ativo ? ' ativo' : ''), onclick: () => { fn(); desenhar(); } }, txt);
+    const marcados = d.pontos.reduce((s, p) => s + p.total, 0), pct = d.total ? Math.round(marcados / d.total * 100) : 0;
+    return el('div', { class: 'filtros mapa-peso' },
+      el('span', { class: 'rot', text: 'Peso' }),
+      loc('Por gravidade', M.gravidade, () => { M.gravidade = true; }), loc('Só quantidade', !M.gravidade, () => { M.gravidade = false; }),
+      el('span', { class: 'sep' }),
+      el('span', { class: 'rot', text: 'Simulados' }),
+      loc('Incluir', M.simulados, () => { M.simulados = true; }), loc('Excluir', !M.simulados, () => { M.simulados = false; }),
+      el('span', { class: 'mapa-qualidade', title: 'ROIs do período que já aparecem no mapa' }, el('i', {}, el('em', { style: `width:${pct}%` })), `${pct}% no mapa`));
+  }
   function desenharCamadas() {
     const d = M.d; if (!d) return;
-    M.calor.definir(M.modo === 'calor' ? d.pontos.filter(p => p.total).map(p => ({ lat: p.lat, lng: p.lng, peso: p.total })) : []);
-    // contornos das áreas
+    // pinos visíveis: áreas pequenas na tela viram um pino só (no meio da área)
+    const pinos = [];
+    const fechadas = new Map();
+    for (const a of d.areas) if (!areaAberta(a)) fechadas.set(a.id, a);
+    const grupos = new Map();
+    for (const p of d.pontos) {
+      const c = contar(p);
+      if (p.areaId && fechadas.has(p.areaId)) {
+        const g = grupos.get(p.areaId) || { area: fechadas.get(p.areaId), n: 0, peso: 0, porTipo: {}, pontos: 0 };
+        g.n += c.n; g.peso += c.peso; if (c.n) g.pontos++; for (const [t, k] of Object.entries(c.porTipo)) g.porTipo[t] = (g.porTipo[t] || 0) + k;
+        grupos.set(p.areaId, g);
+      } else pinos.push({ p, ...c });
+    }
+    for (const g of grupos.values()) if (g.n) { const [lat, lng] = centroDe(g.area.poly); pinos.push({ grupo: g, p: { nome: g.area.nome, lat, lng }, n: g.n, peso: g.peso, porTipo: g.porTipo }); }
+    M.calor.definir(M.modo === 'calor' ? pinos.filter(x => x.peso).map(x => ({ lat: x.p.lat, lng: x.p.lng, peso: x.peso })) : []);
+    // contornos das áreas (só o admin vê)
     M.contornos.clearLayers();
     const maxA = Math.max(1, ...d.areas.map(a => a.total));
-    // a delimitação das áreas fica oculta: só o administrador vê e edita
     const verContornos = ehAdmin() && (M.contornosVisiveis || M.modo === 'areas' || M.desenho);
     for (const a of verContornos ? d.areas : []) {
       const sel = M.selArea === a.id, pintar = M.modo === 'areas';
       const pol = L.polygon(a.poly, pintar
         ? { color: sel ? '#fff' : '#e2e8f0', weight: sel ? 3 : 1.5, fillColor: corArea(a.total, maxA), fillOpacity: a.total ? .55 : .15, bubblingMouseEvents: false }
         : { color: sel ? '#fff' : '#f97316', weight: sel ? 3 : 2, dashArray: sel ? null : '6 4', fillColor: '#f97316', fillOpacity: sel ? .12 : .04, bubblingMouseEvents: false });
-      pol.bindTooltip(`${a.nome} · ${plural(a.total)}`, { permanent: true, direction: 'center', className: 'rotulo-area' });
+      if (sel || areaAberta(a)) pol.bindTooltip(`${a.nome} · ${plural(a.total)}`, { permanent: true, direction: 'center', className: 'rotulo-area' });   // área pequena na tela: sem rótulo (não embaralha)
+      else pol.bindTooltip(`${a.nome} · ${plural(a.total)}`, { direction: 'top', className: 'rotulo-area', sticky: true });
       pol.on('click', ev => (M.marcando || M.desenho) ? aoClicarMapa(ev) : selecionarArea(a.id, false));
       pol.addTo(M.contornos);
     }
-    // pontos: locais (círculo) e estruturas de empresa (losango)
+    // marcadores
     M.marcas.clearLayers();
-    const max = Math.max(1, ...d.pontos.map(p => p.total));
-    for (const p of d.pontos) {
-      const empresa = p.tipo === 'empresa';
-      const dom = Object.entries(p.porTipo).sort((a, b) => b[1] - a[1])[0];
-      const grande = M.modo === 'locais' && p.total;
-      const tam = grande ? Math.round(26 + 22 * Math.sqrt(p.total / max)) : empresa ? 16 : 14;
-      const html = grande ? `<span style="--cor:${COR_TIPO[dom ? dom[0] : 'G6']};width:${tam}px;height:${tam}px">${p.total}</span>` : '<span></span>';
-      const classe = 'mapa-bolha' + (empresa ? ' empresa' : '') + (grande ? '' : ' discreta') + (M.sel === p.nome ? ' sel' : '');
-      L.marker([p.lat, p.lng], { icon: L.divIcon({ className: classe, html, iconSize: [tam, tam] }), title: `${p.nome}${p.empresa ? ' (' + p.empresa + ')' : ''} · ${plural(p.total)}`, keyboard: true })
-        .on('click', ev => (M.marcando || M.desenho) ? aoClicarMapa(ev) : selecionar(p.nome, true)).addTo(M.marcas);
+    const max = Math.max(1, ...pinos.map(x => x.n));
+    for (const x of pinos) {
+      const { p } = x, empresa = p.tipo === 'empresa', grupo = !!x.grupo;
+      const dom = Object.entries(x.porTipo).sort((a, b) => b[1] - a[1])[0];
+      const grande = M.modo === 'locais' && x.n;
+      const tam = grande ? Math.round(26 + 22 * Math.sqrt(x.n / max)) : grupo ? 26 : empresa ? 16 : 14;
+      const html = grande || grupo ? `<span style="--cor:${COR_TIPO[dom ? dom[0] : 'G6']};width:${tam}px;height:${tam}px">${x.n}</span>` : '<span></span>';
+      const classe = 'mapa-bolha' + (grupo ? ' grupo' : '') + (empresa ? ' empresa' : '') + (grande || grupo ? '' : ' discreta') + (M.modo === 'calor' && grupo ? ' leve' : '') + (M.sel === p.nome ? ' sel' : '');
+      const titulo = grupo ? `${p.nome} · ${plural(x.n)} em ${x.grupo.pontos} ponto${x.grupo.pontos === 1 ? '' : 's'}. Toque para aproximar e ver as empresas.` : `${p.nome}${p.empresa ? ' (' + p.empresa + ')' : ''} · ${plural(x.n)}`;
+      L.marker([p.lat, p.lng], { icon: L.divIcon({ className: classe, html, iconSize: [tam, tam] }), title: titulo, keyboard: true })
+        .on('click', ev => (M.marcando || M.desenho) ? aoClicarMapa(ev)
+          : grupo ? (M.map.flyToBounds(L.latLngBounds(x.grupo.area.poly), { duration: 0.7, padding: [60, 60] }), selecionarArea(x.grupo.area.id, false))
+          : selecionar(p.nome, true)).addTo(M.marcas);
     }
     if (M.temp) M.temp.addTo(M.map);
+    desenharLegenda();
+  }
+  function desenharLegenda() {
+    if (!M.legenda) return;
+    const itens = M.modo === 'areas'
+      ? [el('b', { text: 'ROIs por área' }), ...[['#4ade80', 'poucos'], ['#facc15', 'médio'], ['#f97316', 'alto'], ['#dc2626', 'mais alto']].map(([c, t]) => el('div', { class: 'leg-it' }, el('i', { style: `background:${c}` }), t))]
+      : M.modo === 'locais'
+        ? [el('b', { text: 'ROIs por ponto' }), el('div', { class: 'leg-it' }, el('i', { class: 'bola' }), 'tamanho = quantidade'), el('div', { class: 'leg-it' }, el('i', { class: 'bola grupo' }), 'área agrupada: aproxime')]
+        : [el('b', { text: M.gravidade ? 'Intensidade · peso por gravidade' : 'Intensidade · quantidade' }), el('div', { class: 'leg-barra' }), el('div', { class: 'leg-esc' }, el('span', { text: 'baixa' }), el('span', { text: 'alta' })),
+          el('div', { class: 'leg-it' }, el('i', { class: 'bola grupo' }), 'área agrupada: aproxime'),
+          el('div', { class: 'leg-it' }, el('i', { class: 'losango' }), 'estrutura de empresa')];
+    M.legenda.replaceChildren(...itens);
   }
 
   // ------------------- gaveta -------------------
@@ -252,6 +381,7 @@ const MapaCalor = (() => {
 
   function desenharLado() {
     const d = M.d, pode = ehLider();
+    rotuloGaveta();
     if (M.sel) {
       const p = d.pontos.find(x => x.nome === M.sel) || d.semPosicao.find(x => x.nome === M.sel);
       if (p) return M.lado.replaceChildren(...fichaPonto(p, pode).filter(Boolean));

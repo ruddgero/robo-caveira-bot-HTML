@@ -425,6 +425,7 @@ function desenharSubabas() {
 }
 
 function trocarAba(nome) {
+  if (S.indPop) { S.indPop = ''; if (S.popIndEl) S.popIndEl.hidden = true; }
   if (nome === 'plantao' || nome === 'pendencias-grupo') nome = S.ultimaAba[nome === 'plantao' ? 'plantao' : 'pendencias'] || (nome === 'plantao' ? 'central' : 'pendencias');
   S.aba = DESENHAR[nome] ? nome : 'central';
   const g = grupoDa(S.aba);
@@ -589,28 +590,24 @@ function desenharCentral() {
   } else {
     const eq = C.ficha.equipes || {};
     esq.append(el('div', { class: 'faixa' },
-      el('div', { class: 'cartao-topo' },
-        el('div', {},
-          el('h3', { class: 'mudo pequeno', text: 'PLANTÃO' }),
-          el('h2', { text: `${E.turno.turno} · ${E.turno.data}` }),
-          el('span', { class: 'mudo pequeno', text: `Líder: ${p.liderNome} · desde ${quando(p.assumidoEm)}` }),
-          eq.saindo && !/conforme/i.test(eq.saindo) ? el('div', { class: 'mudo pequeno', text: `Equipe de serviço: ${eq.saindo}` }) : null),
-        el('span', { class: 'etiqueta ok', text: deplantao() ? 'Você' : 'Ativo' })),
+      faixaTurno(E, p, eq),
       el('div', { class: 'contadores' },
-        contador(nConf, 'A confirmar', filtrar('confirmar'), nConf > 0),
-        contador(nAberto, 'Em aberto', filtrar('aberto')),
-        contador(emailsPendentes().length, 'E-mails', filtrar('emails'), emailsPendentes().some(o => o.email?.status === 'ERRO')),
+        contador(nConf, 'A confirmar', filtrar('confirmar'), nConf > 0 ? 'atencao' : ''),
+        contador(nAberto, 'Em aberto', filtrar('aberto'), nAberto > 0 ? 'atencao' : ''),
+        contador(emailsPendentes().length, 'E-mails', filtrar('emails'), emailsPendentes().some(o => o.email?.status === 'ERRO') ? 'alerta' : emailsPendentes().length ? 'atencao' : ''),
         contador(pendenciasAbertas().length, 'Pendências gerais', () => { S.filtroTurno = 'gerais'; S.subfiltroTurno = ''; redesenharAba(); }),
-        contador(E.urgentes, 'Urgentes', () => { S.filtroEntrada = 'pendente'; trocarAba('entrada'); }, E.urgentes > 0),
+        contador(E.urgentes, 'Urgentes', () => { S.filtroEntrada = 'pendente'; trocarAba('entrada'); }, E.urgentes > 0 ? 'alerta' : ''),
         contador(E.pendentesEntrada, 'Mensagens', () => { S.filtroEntrada = 'pendente'; trocarAba('entrada'); })),
-      deplantao() ? el('button', { class: 'btn primario largo', style: 'padding:13px;font-size:15px', onclick: () => trocarAba('relatorio') }, '📑 Fechar turno') : null));
+      deplantao() ? el('div', { class: 'acoes-turno' },
+        el('button', { class: 'btn primario', style: 'padding:13px;font-size:15px', onclick: () => trocarAba('relatorio') }, '📑 Fechar turno'),
+        el('button', { class: 'btn', style: 'padding:13px', onclick: abrirEscala }, '📦 Passagem da escala')) : null));
   }
 
   // --- Sugestão de nova escala (só para o líder de plantão)
   if (p.sugerirNovaEscala && deplantao()) {
-    esq.append(el('div', { class: 'faixa info' },
-      el('strong', { text: '📦 Parece o primeiro turno da escala' }),
-      el('p', { class: 'pequeno', text: C.escala ? `A escala atual começou em ${C.escala.dataInicio}. Iniciar uma nova para coletar as informações desde hoje?` : 'Inicie a escala para o robô coletar as informações de todos os turnos até a passagem.' }),
+    esq.append(el('div', { class: 'faixa info faixa-compacta' },
+      el('div', {}, el('strong', { text: 'Primeiro turno da escala?' }),
+        el('div', { class: 'mudo pequeno', text: C.escala ? `A escala atual começou em ${C.escala.dataInicio}.` : 'Inicie a escala para o robô coletar os turnos até a passagem.' })),
       el('div', { class: 'linha' },
         el('button', { class: 'btn primario', onclick: async () => { await api('POST', '/api/escala/iniciar'); aviso('Nova escala iniciada ✓'); recarregarTudo(); } }, 'Iniciar nova escala'),
         C.escala ? el('button', { class: 'btn fantasma', onclick: async () => { await api('POST', '/api/escala/continuar'); recarregarTudo(); } }, 'Continuar a atual') : null)));
@@ -628,15 +625,43 @@ function desenharCentral() {
   }
 
   if (p.liderId) esq.append(cartaoPassagemTurno());
-  esq.append(el('div', { class: 'rodape-discreto' }, el('button', { onclick: abrirEscala }, '📦 Passagem da escala')));
+  if (!deplantao()) esq.append(el('div', { class: 'rodape-discreto' }, el('button', { onclick: abrirEscala }, '📦 Passagem da escala')));
 
   // --- Pendências ao lado (no celular, logo abaixo)
   dir.append(cartaoPendenciasTurno());
   c.replaceChildren(el('div', { class: 'duas-colunas' }, esq, dir));
 }
 
-function contador(n, rotulo, onclick, alerta = false) {
-  return el('button', { class: `contador${alerta ? ' alerta' : ''}`, onclick }, el('strong', { text: String(n || 0) }), el('span', { text: rotulo }));
+function contador(n, rotulo, onclick, nivel = '') {
+  if (nivel === true) nivel = 'alerta';
+  return el('button', { class: `contador${nivel ? ' ' + nivel : ''}${!n ? ' zero' : ''}`, onclick },
+    el('strong', { text: String(n || 0) }), el('span', { text: rotulo }), nivel && n ? el('i', { class: 'pulso', 'aria-hidden': 'true' }) : null);
+}
+
+// faixa do turno: turno, horário, equipe, líder e quanto falta
+function faixaTurno(E, p, eq) {
+  const noturno = E.turno.turno === 'NOTURNO';
+  const resto = el('span', { class: 'ft-resto' });
+  const atualizar = () => {
+    const agora = new Date(), fim = new Date(agora);
+    if (noturno) { if (agora.getHours() >= 19) fim.setDate(fim.getDate() + 1); fim.setHours(7, 0, 0, 0); } else fim.setHours(19, 0, 0, 0);
+    const min = Math.max(0, Math.round((fim - agora) / 60000));
+    resto.textContent = min ? `faltam ${Math.floor(min / 60)}h${String(min % 60).padStart(2, '0')}` : 'turno encerrando';
+    resto.classList.toggle('perto', min <= 60);
+  };
+  atualizar(); clearInterval(S.timerFaixa); S.timerFaixa = setInterval(() => document.body.contains(resto) ? atualizar() : clearInterval(S.timerFaixa), 30000);
+  const equipe = eq.saindo && !/conforme/i.test(eq.saindo) ? eq.saindo : '';
+  return el('div', { class: 'faixa-turno' },
+    el('div', { class: 'ft-principal' },
+      el('span', { class: 'ft-turno' + (noturno ? ' noturno' : '') }, noturno ? '☾' : '☀', ` ${E.turno.turno}`),
+      el('strong', { text: E.turno.data }),
+      el('span', { class: 'mudo', text: noturno ? '19h – 07h' : '07h – 19h' }),
+      el('span', { class: 'etiqueta ok', text: deplantao() ? 'Você está de plantão' : 'Ativo' })),
+    el('div', { class: 'ft-detalhes' },
+      el('span', {}, el('span', { class: 'mudo', text: 'Líder ' }), p.liderNome),
+      equipe ? el('span', {}, el('span', { class: 'mudo', text: 'Equipe ' }), equipe) : null,
+      el('span', { class: 'mudo', text: `desde ${quando(p.assumidoEm)}` }),
+      resto));
 }
 
 async function assumir() {
@@ -1791,15 +1816,18 @@ async function abrirOrganograma() {
   const ponto = id => el('span', { class: 'ponto-cor', style: `background:${cor(id)}` });
   const recarregar = async () => { await Promise.all([carregarEquipes(), carregarFicha()]); fecharPainel(); abrirOrganograma(); };
 
+  const eu = semAcento(S.usuario?.nome || '').toLowerCase();
+  const minhaEq = (o.equipes.find(e => e.rodizio && e.membros.some(m => semAcento(m.nome).toLowerCase() === eu)) || {}).id || '';
   const escala = el('section', { class: 'cartao' },
     el('h2', { text: 'Escala 4×4' }),
     el('p', { class: 'mudo pequeno', style: 'margin:0', text: `Ordem: ${o.escala.ordem.map(x => NOMES_EQ[x]).join(' → ')} · 2 diurnos, 2 noturnos, 4 folgas` }),
     el('div', { class: 'tabela-escala' },
       el('div', { class: 'te-cab' }, el('span', { text: 'Dia' }), el('span', { text: 'Diurno' }), el('span', { text: 'Noturno' })),
       ...o.escala.dias.map(d => el('div', { class: `te-linha${d.data === o.escala.atual.data ? ' hoje' : ''}` },
-        el('span', { text: d.data.slice(0, 5) }),
-        el('span', {}, ponto(d.diurno), NOMES_EQ[d.diurno] || '—'),
-        el('span', {}, ponto(d.noturno), NOMES_EQ[d.noturno] || '—')))));
+        el('span', {}, d.data.slice(0, 5), d.data === o.escala.atual.data ? el('b', { class: 'tag-hoje', text: 'HOJE' }) : null),
+        el('span', { class: d.diurno === minhaEq ? 'minha' : '' }, ponto(d.diurno), NOMES_EQ[d.diurno] || '—'),
+        el('span', { class: d.noturno === minhaEq ? 'minha' : '' }, ponto(d.noturno), NOMES_EQ[d.noturno] || '—')))),
+    minhaEq ? el('p', { class: 'mudo pequeno', style: 'margin:0' }, 'Em negrito: os plantões da sua equipe (', ponto(minhaEq), ` ${NOMES_EQ[minhaEq]}).`) : null);
 
   const subs = el('section', { class: 'cartao' },
     el('div', { class: 'cartao-topo' }, el('h2', { text: 'Férias e substituições' }),
@@ -1813,9 +1841,9 @@ async function abrirOrganograma() {
       } }, 'Cancelar')) : null)))
       : el('p', { class: 'mudo pequeno', style: 'margin:0', text: 'Ninguém de férias ou substituído a partir de hoje.' }));
 
-  const equipes = o.equipes.map(e => el('section', { class: 'cartao' },
-    el('div', { class: 'cartao-topo' }, el('h2', {}, ponto(e.id), e.nome),
-      e.rodizio ? el('span', { class: 'mudo pequeno', text: o.escala.saindo === e.id ? 'de serviço agora' : o.escala.assumindo === e.id ? 'próximo turno' : '' }) : el('span', { class: 'etiqueta', text: 'cobre férias' })),
+  const equipes = o.equipes.map(e => el('section', { class: 'cartao cartao-equipe' + (e.id === minhaEq ? ' minha' : ''), style: `--cor-eq:${cor(e.id)}` },
+    el('div', { class: 'cartao-topo' }, el('h2', {}, ponto(e.id), e.nome, el('span', { class: 'mudo pequeno', text: ` · ${e.membros.length}` })),
+      e.rodizio ? (o.escala.saindo === e.id ? el('span', { class: 'etiqueta ok', text: '● De serviço agora' }) : o.escala.assumindo === e.id ? el('span', { class: 'etiqueta info', text: 'Próximo turno' }) : e.id === minhaEq ? el('span', { class: 'etiqueta', text: 'Sua equipe' }) : null) : el('span', { class: 'etiqueta', text: 'cobre férias' })),
     ...e.membros.map(m => {
       const ef = (e.efetiva?.membros || []).find(x => x.cobrindoId === m.id);
       return el('button', { class: 'pessoa-linha', onclick: () => ehAdmin() && editarPessoaModal(o, m, e.id, recarregar) },
@@ -1827,7 +1855,7 @@ async function abrirOrganograma() {
     })));
 
   abrirPainel('Organograma operacional', [
-    escala, subs, ...equipes,
+    escala, subs, el('div', { class: 'grade-equipes' }, ...equipes),
     ehAdmin() ? el('div', {}, el('button', { class: 'btn', onclick: () => editarPessoaModal(o, {}, 'FERISTA', recarregar) }, '+ Colaborador')) : null
   ]);
 }
@@ -2310,6 +2338,48 @@ function desenharPainelGerencial() {
     d.filtroEmpresa ? botao(`🏢 ${d.filtroEmpresa} ×`, true, () => { S.indEmpresa = ''; refazer(); }) : null].filter(Boolean);
   const linhaAtivos = ativos.length || d.mes ? el('div', { class: 'filtros ind-filtros' }, ...ativos,
     el('button', { class: 'btn fantasma pequeno', onclick: ev => { ev.stopPropagation(); S.indMes = 0; S.indTipos = []; S.indLocal = ''; S.indEmpresa = ''; refazer(); } }, 'Limpar filtros')) : null;
+  void linhaAnos; void linhaMeses; void linhaAtivos;
+  // cabeçalho e filtros numa linha só (mesmo padrão do mapa de calor)
+  const botaoPop = (chave, conteudo, titulo) => el('button', { type: 'button', class: 'mf-bt' + (S.indPop === chave ? ' aberto' : ''), 'data-indpop': chave, title: titulo, 'aria-haspopup': 'true', 'aria-expanded': String(S.indPop === chave),
+    onclick: ev => { ev.stopPropagation(); S.indPop = S.indPop === chave ? '' : chave; refazer(); } }, ...conteudo, el('span', { class: 'mf-seta', 'aria-hidden': 'true', text: '▾' }));
+  const chipAtivo = (txt, limpar, cor) => el('button', { type: 'button', class: 'mf-ativo', title: 'Tirar este filtro', onclick: ev => { ev.stopPropagation(); limpar(); } },
+    cor ? el('i', { style: `background:${cor}` }) : null, txt, el('span', { class: 'x', 'aria-hidden': 'true', text: '✕' }));
+  const chipsAtivos = [
+    d.mes ? chipAtivo(`${MESES_ABREV[d.mes - 1]}/${d.ano}`, () => { S.indMes = 0; refazer(); }) : null,
+    ...d.filtroTipos.map(g => chipAtivo(g, () => alternarTipo(g), COR_TIPO[g])),
+    d.filtroLocal ? chipAtivo(`📍 ${d.filtroLocal}`, () => { S.indLocal = ''; refazer(); }) : null,
+    d.filtroEmpresa ? chipAtivo(`🏢 ${d.filtroEmpresa}`, () => { S.indEmpresa = ''; refazer(); }) : null].filter(Boolean);
+  const barraInd = el('div', { class: 'ind-fixo ind-barra' },
+    el('button', { type: 'button', class: 'btn-icone ind-voltar', title: 'Voltar aos indicadores', 'aria-label': 'Voltar aos indicadores', onclick: () => { S.indPop = ''; S.indVista = 'inicio'; desenharPainelGerencial(); } }, '‹'),
+    el('h2', { class: 'ind-tit', text: 'Ocorrências' }),
+    botaoPop('periodo', [el('span', { class: 'mf-ic', 'aria-hidden': 'true', text: '📅' }), el('span', { class: 'mf-txt', text: d.mes ? `${MESES_ABREV[d.mes - 1]}/${d.ano}` : `${d.ano} · Ano todo` })], 'Período'),
+    botaoPop('tipos', [el('span', { class: 'mf-pontos' }, (d.filtroTipos.length ? d.filtroTipos : Object.keys(G)).map(g => el('i', { style: `background:${COR_TIPO[g]}` }))),
+      el('span', { class: 'mf-txt', text: d.filtroTipos.length ? d.filtroTipos.join(', ') : 'Todos os tipos' })], 'Tipos de ocorrência'),
+    chipsAtivos.length ? el('div', { class: 'mf-ativos' }, ...chipsAtivos) : null,
+    chipsAtivos.length > 1 ? el('button', { type: 'button', class: 'btn fantasma pequeno ind-limpar', onclick: ev => { ev.stopPropagation(); S.indMes = 0; S.indTipos = []; S.indLocal = ''; S.indEmpresa = ''; refazer(); } }, 'Limpar') : null,
+    el('span', { class: 'ind-espaco' }),
+    ehLider() ? el('button', { class: 'btn-icone btn-mapa', title: 'Mapa de calor', 'aria-label': 'Abrir o mapa de calor', onclick: ev => { ev.stopPropagation(); S.indPop = ''; abrirMapaCalor(); } }, iconeMapaCalor()) : null);
+  const conteudoPopInd = chave => {
+    if (chave === 'periodo') {
+      const comDados = new Map(d.meses.map(m => [m.mes, m.total]));
+      const NOMES = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
+      return [el('div', { class: 'mf-pop-tit', text: 'Período' }),
+        d.anos.length > 1 ? el('div', { class: 'mf-seg' }, d.anos.slice().sort((a, b) => a - b).map(a => el('button', { type: 'button', class: a === d.ano ? 'ativo' : '', onclick: () => { S.indAno = a; S.indMes = 0; refazer(); } }, String(a)))) : null,
+        el('button', { type: 'button', class: 'mf-todo' + (!d.mes ? ' ativo' : ''), onclick: () => { S.indPop = ''; S.indMes = 0; refazer(); } }, `Ano todo de ${d.ano}`),
+        el('div', { class: 'mf-meses' }, NOMES.map((nome, i) => {
+          const m = i + 1, tem = comDados.has(m), n = comDados.get(m) || 0;
+          return el('button', { type: 'button', class: (d.mes === m ? 'ativo' : '') + (tem ? '' : ' vazio'), disabled: !tem, title: tem ? `${nome}: ${n} ROI(s)` : `${nome}: ainda não chegou`,
+            onclick: () => { S.indPop = ''; S.indMes = m; refazer(); } }, el('span', { text: MESES_ABREV[i] }), tem ? el('small', { text: String(n) }) : null);
+        }))].filter(Boolean);
+    }
+    return [el('div', { class: 'mf-pop-tit' }, 'Tipos de ocorrência', d.filtroTipos.length ? el('button', { type: 'button', class: 'mf-limpar', onclick: () => { S.indTipos = []; refazer(); } }, 'Limpar') : null),
+      el('div', { class: 'mf-lista' }, Object.keys(G).map(g => {
+        const on = d.filtroTipos.includes(g);
+        return el('button', { type: 'button', class: 'mf-item' + (on ? ' ativo' : ''), role: 'checkbox', 'aria-checked': String(on), onclick: () => alternarTipo(g) },
+          el('span', { class: 'mf-check', style: `--cor:${COR_TIPO[g]}`, text: on ? '✓' : '' }), el('span', { class: 'mf-nome', text: `${g} · ${G[g]}` }), el('b', { text: String(d.tiposTodos[g] || 0) }));
+      })),
+      el('p', { class: 'mf-dica', text: d.filtroTipos.length ? 'Mostrando só os tipos marcados.' : 'Sem marcação = todos os tipos.' })];
+  };
 
   const variacao = d.anterior ? Math.round((d.total - d.anterior) / d.anterior * 100) : null;
   const seta = (v, base, ano) => v === null ? '' : `${v < 0 ? '▼' : v > 0 ? '▲' : '='} ${Math.abs(v)}% vs ${ano} (${base})`;
@@ -2415,11 +2485,7 @@ function desenharPainelGerencial() {
 
   c.replaceChildren(
     dica,
-    el('section', { class: 'cartao' },
-      el('button', { class: 'btn fantasma pequeno', style: 'justify-self:start', onclick: () => { S.indVista = 'inicio'; desenharPainelGerencial(); } }, '‹ Indicadores'),
-      el('div', { class: 'cartao-topo' }, el('h2', { text: 'Ocorrências' }),
-        ehLider() ? el('button', { class: 'btn-icone btn-mapa', title: 'Mapa de calor', 'aria-label': 'Abrir o mapa de calor', onclick: ev => { ev.stopPropagation(); abrirMapaCalor(); } }, iconeMapaCalor()) : null)),
-    el('div', { class: 'ind-fixo' }, linhaAnos, linhaMeses, linhaAtivos),
+    barraInd,
     el('div', { class: 'ind-kpis' }, kpis),
     secao(`Por mês e tipo · ${d.ano}`, legenda, colunas),
     el('div', { class: 'ind-duas' },
@@ -2442,6 +2508,31 @@ function desenharPainelGerencial() {
       d.lista.length > 10 ? el('button', { class: 'btn fantasma pequeno', onclick: ev => { ev.stopPropagation(); S.indListaTudo = !S.indListaTudo; refazer(); } }, S.indListaTudo ? 'Mostrar menos' : `Ver todos (${d.lista.length})`) : null)
   );
   c.onclick = esconder;
+  popIndicador(conteudoPopInd);
+}
+
+// quadro que abre dos botões Período / Tipos dos indicadores
+function popIndicador(conteudo) {
+  if (!S.popIndEl) {
+    S.popIndEl = el('div', { class: 'mf-pop', role: 'dialog', hidden: true });
+    document.body.append(S.popIndEl);
+    const fechar = () => { if (S.indPop) { S.indPop = ''; if (S.aba === 'painel') desenharPainelGerencial(); else S.popIndEl.hidden = true; } };
+    document.addEventListener('pointerdown', ev => { if (S.indPop && !S.popIndEl.contains(ev.target) && !ev.target.closest('[data-indpop]')) fechar(); }, true);
+    document.addEventListener('keydown', ev => { if (ev.key === 'Escape' && S.indPop) fechar(); });
+    window.addEventListener('scroll', () => { if (S.indPop) posicionarPopInd(); }, { passive: true });
+  }
+  const bt = S.indPop && S.aba === 'painel' && document.querySelector(`[data-indpop="${S.indPop}"]`);
+  if (!bt) { S.popIndEl.hidden = true; return; }
+  S.popIndEl.replaceChildren(...conteudo(S.indPop));
+  S.popIndEl.hidden = false;
+  posicionarPopInd();
+}
+function posicionarPopInd() {
+  const bt = document.querySelector(`[data-indpop="${S.indPop}"]`);
+  if (!bt || S.popIndEl.hidden) return;
+  const r = bt.getBoundingClientRect(), w = S.popIndEl.offsetWidth;
+  S.popIndEl.style.top = Math.round(r.bottom + 6) + 'px';
+  S.popIndEl.style.left = Math.round(Math.max(8, Math.min(r.left, innerWidth - w - 8))) + 'px';
 }
 
 
@@ -2460,13 +2551,13 @@ function iconeMapaCalor() {
 let carregandoMapa = null;
 function abrirMapaCalor() {
   const v = encodeURIComponent(S.meta?.versao || '1');
-  carregandoMapa = carregandoMapa || new Promise((ok, falha) => {
+  if (typeof MapaCalor === 'undefined') carregandoMapa = carregandoMapa || new Promise((ok, falha) => {
     const css = el('link', { rel: 'stylesheet', href: '/leaflet.css?v=' + v });
     document.head.append(css);
     const js = src => new Promise((ok2, falha2) => { const s = el('script', { src }); s.onload = ok2; s.onerror = falha2; document.head.append(s); });
     js('/leaflet.js?v=' + v).then(() => js('/mapa.js?v=' + v)).then(ok, falha);
   });
-  carregandoMapa.then(() => MapaCalor.abrir()).catch(() => { carregandoMapa = null; aviso('Não foi possível abrir o mapa. Verifique a conexão.', true); });
+  (typeof MapaCalor !== 'undefined' ? Promise.resolve() : carregandoMapa).then(() => MapaCalor.abrir()).catch(() => { carregandoMapa = null; aviso('Não foi possível abrir o mapa. Verifique a conexão.', true); });
 }
 
 // Resumo para a gerência a partir do Menu (usa os filtros atuais do indicador)
@@ -3429,3 +3520,65 @@ function importarControleRoi() {
     S.roi = null; S.ind = null; S.indResumo = null; if (S.aba === 'roi') desenharROI();
   });
 }
+
+// =====================================================================
+// Ícones de traço no lugar dos emojis (botões, menu, abas)
+// =====================================================================
+(() => {
+  // ---- ícones de traço no lugar dos emojis ----
+  const P = {
+    plantao: '<circle cx="12" cy="12" r="9"/><path d="M15.5 8.5l-2 5-5 2 2-5z"/>',
+    pend: '<rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4h6v3H9zM9 11h6M9 15h4"/>',
+    graf: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
+    assumir: '<circle cx="9" cy="8" r="4"/><path d="M2 21c0-4 3-6 7-6s7 2 7 6M16 11l2 2 4-4"/>',
+    fechar: '<path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6M9 15l2 2 4-4"/>',
+    caixa: '<path d="M3 7l9-4 9 4v10l-9 4-9-4z"/><path d="M3 7l9 4 9-4M12 11v10"/>',
+    pasta: '<path d="M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
+    colar: '<rect x="6" y="4" width="12" height="17" rx="2"/><path d="M9 4V3h6v1M9 10h6M9 14h6"/>',
+    imprimir: '<path d="M6 9V3h12v6M6 18H4v-7h16v7h-2"/><rect x="6" y="14" width="12" height="7"/>',
+    pino: '<path d="M12 21s-7-6.2-7-11a7 7 0 0 1 14 0c0 4.8-7 11-7 11z"/><circle cx="12" cy="10" r="2.5"/>',
+    texto: '<path d="M4 7V5h16v2M12 5v14M9 19h6"/>',
+    lapis: '<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M14 6l4 4"/>',
+    mais: '<path d="M12 5v14M5 12h14"/>',
+    baixar: '<path d="M12 4v11M7 10l5 5 5-5M4 20h16"/>',
+    usuario: '<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/>',
+    arquivo: '<rect x="3" y="4" width="18" height="5" rx="1"/><path d="M5 9v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9M10 13h4"/>',
+    brilho: '<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/>',
+    equipe: '<circle cx="9" cy="8" r="3.5"/><circle cx="17" cy="9" r="2.5"/><path d="M2 20c0-3.5 3-5.5 7-5.5s7 2 7 5.5M16 14.5c3 0 6 1.5 6 4.5"/>',
+    config: '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/>',
+    sair: '<path d="M15 4h4a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-4M10 16l4-4-4-4M14 12H3"/>',
+    mira: '<circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/>',
+    email: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/>',
+    alerta: '<path d="M12 3l10 18H2z"/><path d="M12 10v5M12 18h.01"/>',
+    bandeira: '<path d="M5 21V4M5 4h11l-2 4 2 4H5"/>',
+    navio: '<path d="M3 17l2 4h14l2-4-9-3z"/><path d="M6 15V9h12v6M12 4v5"/>',
+    olho: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
+    doc: '<path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6M8 13h8M8 17h5"/>',
+    enviar: '<path d="M22 2L11 13M22 2l-7 20-4-9-9-4z"/>',
+    calendario: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/>',
+    camera: '<rect x="3" y="7" width="18" height="13" rx="2"/><circle cx="12" cy="13" r="3.5"/><path d="M8 7l2-3h4l2 3"/>'
+  };
+  const MAPA = { '🧭': 'plantao', '📌': 'pend', '📊': 'graf', '🙋': 'assumir', '📑': 'fechar', '📦': 'caixa', '🗂️': 'pasta', '🗂': 'pasta', '📋': 'colar', '🖨️': 'imprimir', '🖨': 'imprimir',
+    '📍': 'pino', '🔤': 'texto', '✏️': 'lapis', '✏': 'lapis', '➕': 'mais', '⬇️': 'baixar', '⬇': 'baixar', '📥': 'baixar', '👤': 'usuario', '🗃️': 'arquivo', '🗃': 'arquivo', '✨': 'brilho',
+    '🧑‍🤝‍🧑': 'equipe', '👥': 'equipe', '⚙️': 'config', '⚙': 'config', '🚪': 'sair', '⌖': 'mira', '✉️': 'email', '✉': 'email', '🚨': 'alerta', '📷': 'camera', '📝': 'lapis', '🗺️': 'pino', '🏁': 'bandeira', '🚢': 'navio', '📧': 'email', '👁️': 'olho', '👁': 'olho', '📄': 'doc', '🚀': 'enviar', '📤': 'enviar', '🔁': 'mira', '📅': 'calendario' };
+  const CHAVES = Object.keys(MAPA).sort((a, b) => b.length - a.length);
+  const svg = nome => { const t = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); t.setAttribute('viewBox', '0 0 24 24'); t.setAttribute('fill', 'none'); t.setAttribute('stroke', 'currentColor'); t.setAttribute('stroke-width', '1.8'); t.setAttribute('stroke-linecap', 'round'); t.setAttribute('stroke-linejoin', 'round'); t.setAttribute('class', 'ic-svg'); t.setAttribute('aria-hidden', 'true'); t.innerHTML = P[nome]; return t; };
+  function trocar(raiz) {
+    const alvos = raiz.querySelectorAll ? raiz.querySelectorAll('button, .ic, .mf-ic, .menu-lista span, h1, h2, h3, .etiqueta, strong') : [];
+    for (const no of [raiz, ...alvos]) {
+      if (!no.childNodes) continue;
+      for (const t of [...no.childNodes]) {
+        if (t.nodeType !== 3) continue;
+        const txt = t.nodeValue.replace(/^\s+/, '');
+        const k = CHAVES.find(c => txt.startsWith(c));
+        if (!k) continue;
+        const resto = txt.slice(k.length).replace(/^️/, '');
+        no.insertBefore(svg(MAPA[k]), t);
+        t.nodeValue = resto ? (resto.startsWith(' ') ? resto : ' ' + resto) : '';
+      }
+    }
+  }
+  new MutationObserver(ms => { for (const m of ms) for (const n of m.addedNodes) if (n.nodeType === 1) trocar(n); else if (n.nodeType === 3 && n.parentNode) trocar(n.parentNode); })
+    .observe(document.documentElement, { childList: true, subtree: true });
+  trocar(document.body);
+})();
