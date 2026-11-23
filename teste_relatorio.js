@@ -302,8 +302,8 @@ assert.strictEqual(relido.dados.avisos[0].titulo, 'URNAS DA CIPA');
 assert.ok(relido.dados.navios.toil.some(n => n.navio === 'BARCELONA SPIRIT'));
 assert.ok(texto.includes('✓ BARCELONA SPIRIT - T-OIL - Fornecimento de Rancho. Vide e-mail;'));
 assert.ok(texto.includes('✓ LILA PSARA - T-ORE - Desembarque de 02 Tripulantes. Vide e-mail;'));
-assert.ok(texto.includes('*6. NAVIOS*\n*6.1 - T-ORE*\n✓ LILA PSARA'));
-assert.ok(texto.includes('*3.1 - CFTV*') && texto.includes('*3.2 - CA - CONTROLE DE ACESSO*') && texto.includes('*3.3 - OCR – RECONHECIMENTO DE PLACAS*'));
+assert.ok(texto.includes('*6. NAVIOS*\n*T-ORE*\n✓ LILA PSARA'));
+assert.ok(texto.includes('*3. SISTEMAS*\n*CFTV*') && texto.includes('*CA - CONTROLE DE ACESSO*') && texto.includes('*OCR – RECONHECIMENTO DE PLACAS*') && !/\*[368]\.\d/.test(texto), 'subnúmero só no item 5');
 assert.ok(texto.includes('✓ *5.1. URNAS DA CIPA*\nVerificar status das chaves.') && !texto.includes('Atualização ('), 'aviso só com título e texto');
 assert.ok(texto.includes('✓ Realizada ronda no perímetro;'));
 assert.ok(texto.includes('Assertividade: 88,05%\n') && texto.includes('Total de leituras: 188 veículos.'));
@@ -325,8 +325,8 @@ assert.deepStrictEqual(R.separarNomes('Wallace Ferroport e Equipe US'), ['Wallac
 assert.strictEqual(R.juntarNomes(['Gustavo Ramos', 'Ítalo']), 'Gustavo Ramos e Ítalo');
 assert.throws(() => R.lerEquipesComPipe('Gustavo e Ítalo'));
 assert.strictEqual(R.lerEquipesComPipe('Gustavo Ramos e Ítalo | Renan Neves e Ewerton').assumindo, 'Renan Neves e Ewerton');
-assert.ok(R.formatarRelatorio(R.fichaVazia(), []).includes('*8. PASSAGEM DE TURNO*\n*8.1 - EQUIPE SAINDO:*\n✓ Conforme escala.\n\n*8.2 - EQUIPE ASSUMINDO:*\n✓ Conforme escala.'));
-assert.ok(R.formatarRelatorio(R.fichaVazia(), []).includes('*6.1 - T-ORE*\n✓ Sem navio'));
+assert.ok(R.formatarRelatorio(R.fichaVazia(), []).includes('*8. PASSAGEM DE TURNO*\n*EQUIPE SAINDO:*\n✓ Conforme escala.\n\n*EQUIPE ASSUMINDO:*\n✓ Conforme escala.'));
+assert.ok(R.formatarRelatorio(R.fichaVazia(), []).includes('*T-ORE*\n✓ Sem navio'));
 // lista de avisos colada num aviso: sai só a parte dele, e a conferência avisa
 const avLista = [{ titulo: '5.1. FM-200 SALA DE CRISE*', texto: 'Sistema retirado para manutenção.\n5.2. DOCK STATION*\nConsultar o e-mail.' }];
 assert.ok(R.formatarRelatorio(R.fichaVazia(), avLista).includes('✓ *5.1. FM-200 SALA DE CRISE*\nSistema retirado para manutenção.\n\n*6.'));

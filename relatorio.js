@@ -649,7 +649,7 @@ function textoAviso(p) {
 
 // ---------------------------------------------------------------------
 // Padrão oficial do relatório (modelo da US):
-//   3.1/3.2/3.3 nos sistemas · itens da seção 4 e 7 terminam com ";" ·
+//   subnúmeros (5.1, 5.2…) só nos avisos · itens da seção 4 e 7 terminam com ";" ·
 //   movimentações de navio entram na seção 4 ("NAVIO - TERMINAL - Embarque de 04 Tripulantes. Vide e-mail;") ·
 //   seção 6 só com os nomes dos navios · avisos só com título + texto (atualizações ficam no histórico)
 // ---------------------------------------------------------------------
@@ -730,11 +730,11 @@ function formatarRelatorio(f, avisos = [], { negrito = true } = {}) {
         `KM final: ${formatarKm(f.vtr?.kmFinal)}`,
         '',
         b('3. SISTEMAS'),
-        b('3.1 - CFTV'),
+        b('CFTV'),
         blocoTexto(f.sistemas?.cftv),
-        b('3.2 - CA - CONTROLE DE ACESSO'),
+        b('CA - CONTROLE DE ACESSO'),
         blocoTexto(f.sistemas?.ca),
-        b('3.3 - OCR – RECONHECIMENTO DE PLACAS'),
+        b('OCR – RECONHECIMENTO DE PLACAS'),
         `Assertividade: ${f.sistemas?.ocrAssertividade || '—'}`,
         `Total de leituras: ${f.sistemas?.ocrLeituras || '—'} veículos.`,
         '',
@@ -745,20 +745,20 @@ function formatarRelatorio(f, avisos = [], { negrito = true } = {}) {
         blocoAvisos,
         '',
         b('6. NAVIOS'),
-        b('6.1 - T-ORE'),
+        b('T-ORE'),
         naviosPadrao(f.navios?.tore),
         '',
-        b('6.2 - T-OIL'),
+        b('T-OIL'),
         naviosPadrao(f.navios?.toil),
         '',
         b('7. OCORRÊNCIAS'),
         listaPadrao(f.ocorrencias),
         '',
         b('8. PASSAGEM DE TURNO'),
-        b('8.1 - EQUIPE SAINDO:'),
+        b('EQUIPE SAINDO:'),
         equipePadrao(f.equipes?.saindo),
         '',
-        b('8.2 - EQUIPE ASSUMINDO:'),
+        b('EQUIPE ASSUMINDO:'),
         equipePadrao(f.equipes?.assumindo)
     ].join('\n');
 }
