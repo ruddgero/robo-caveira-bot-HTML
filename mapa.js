@@ -290,7 +290,8 @@ const MapaCalor = (() => {
   const centroDe = poly => [poly.reduce((s, q) => s + q[0], 0) / poly.length, poly.reduce((s, q) => s + q[1], 0) / poly.length];
   function areaAberta(a) {
     const b = L.latLngBounds(a.poly), p1 = M.map.latLngToContainerPoint(b.getNorthWest()), p2 = M.map.latLngToContainerPoint(b.getSouthEast());
-    return Math.max(Math.abs(p2.x - p1.x), Math.abs(p2.y - p1.y)) >= 170;    // área grande na tela: abre nos pontos das empresas
+    // abre a partir do zoom 17 (qualquer tamanho) ou quando a área já está grande na tela
+    return M.map.getZoom() >= 17 || Math.max(Math.abs(p2.x - p1.x), Math.abs(p2.y - p1.y)) >= 170;
   }
   function linhaPeso(d) {
     const loc = (txt, ativo, fn) => el('button', { class: 'filtro' + (ativo ? ' ativo' : ''), onclick: () => { fn(); desenhar(); } }, txt);
@@ -316,10 +317,12 @@ const MapaCalor = (() => {
         const g = grupos.get(p.areaId) || { area: fechadas.get(p.areaId), n: 0, peso: 0, porTipo: {}, pontos: 0 };
         g.n += c.n; g.peso += c.peso; if (c.n) g.pontos++; for (const [t, k] of Object.entries(c.porTipo)) g.porTipo[t] = (g.porTipo[t] || 0) + k;
         grupos.set(p.areaId, g);
+        // empresas e locais continuam visíveis mesmo com a área agrupada (só o número e o calor ficam juntos)
+        if (p.tipo === 'empresa' || p.tipo === 'local') pinos.push({ p, n: c.n, peso: 0, porTipo: c.porTipo, soMarca: true });
       } else pinos.push({ p, ...c });
     }
     for (const g of grupos.values()) if (g.n) { const [lat, lng] = centroDe(g.area.poly); pinos.push({ grupo: g, p: { nome: g.area.nome, lat, lng }, n: g.n, peso: g.peso, porTipo: g.porTipo }); }
-    M.calor.definir(M.modo === 'calor' ? pinos.filter(x => x.peso).map(x => ({ lat: x.p.lat, lng: x.p.lng, peso: x.peso })) : []);
+    M.calor.definir(M.modo === 'calor' ? pinos.filter(x => x.peso && !x.soMarca).map(x => ({ lat: x.p.lat, lng: x.p.lng, peso: x.peso })) : []);
     // contornos das áreas (só o admin vê)
     M.contornos.clearLayers();
     const maxA = Math.max(1, ...d.areas.map(a => a.total));
@@ -336,14 +339,14 @@ const MapaCalor = (() => {
     }
     // marcadores
     M.marcas.clearLayers();
-    const max = Math.max(1, ...pinos.map(x => x.n));
+    const max = Math.max(1, ...pinos.filter(x => !x.soMarca).map(x => x.n));
     for (const x of pinos) {
       const { p } = x, empresa = p.tipo === 'empresa', grupo = !!x.grupo;
       const dom = Object.entries(x.porTipo).sort((a, b) => b[1] - a[1])[0];
-      const grande = M.modo === 'locais' && x.n;
+      const grande = M.modo === 'locais' && x.n && !x.soMarca;
       const tam = grande ? Math.round(26 + 22 * Math.sqrt(x.n / max)) : grupo ? 26 : empresa ? 16 : 14;
       const html = grande || grupo ? `<span style="--cor:${COR_TIPO[dom ? dom[0] : 'G6']};width:${tam}px;height:${tam}px">${x.n}</span>` : '<span></span>';
-      const classe = 'mapa-bolha' + (grupo ? ' grupo' : '') + (empresa ? ' empresa' : '') + (grande || grupo ? '' : ' discreta') + (M.modo === 'calor' && grupo ? ' leve' : '') + (M.sel === p.nome ? ' sel' : '');
+      const classe = 'mapa-bolha' + (x.soMarca ? ' agrupada' : '') + (grupo ? ' grupo' : '') + (empresa ? ' empresa' : '') + (grande || grupo ? '' : ' discreta') + (M.modo === 'calor' && grupo ? ' leve' : '') + (M.sel === p.nome ? ' sel' : '');
       const titulo = grupo ? `${p.nome} · ${plural(x.n)} em ${x.grupo.pontos} ponto${x.grupo.pontos === 1 ? '' : 's'}. Toque para aproximar e ver as empresas.` : `${p.nome}${p.empresa ? ' (' + p.empresa + ')' : ''} · ${plural(x.n)}`;
       L.marker([p.lat, p.lng], { icon: L.divIcon({ className: classe, html, iconSize: [tam, tam] }), title: titulo, keyboard: true })
         .on('click', ev => (M.marcando || M.desenho) ? aoClicarMapa(ev)

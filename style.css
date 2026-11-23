@@ -797,3 +797,4 @@ body:has(#app:not([hidden])) #fundo-animado { opacity: .12; }
   .pt-topo .linha { width: 100%; display: grid !important; grid-template-columns: auto 1fr 1.3fr; }
   .pt-topo .linha .btn { padding-left: 8px; padding-right: 8px; justify-content: center; }
 }
+.mapa-bolha.agrupada span { opacity: .8; }
