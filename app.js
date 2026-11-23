@@ -3431,8 +3431,16 @@ function abrirFormRoi(r) {
   const resolver = async (preencher) => {
     automatico = null;
     if (!geo) { areaMapa = ''; sugestoes = []; return desenharPonto(); }
-    try { const x = await api('GET', `/api/roi/ponto?lat=${geo.lat}&lng=${geo.lng}`); areaMapa = x.area; sugestoes = x.sugestoes; } catch (e) { aviso(e.message, true); }
-    // óbvio: só um ponto cadastrado a menos de 30 m e o Local vazio → preenche sozinho (com desfazer)
+    let x0 = {};
+    const empresa = (campos.empresa?.value || '').trim();
+    try { x0 = await api('GET', `/api/roi/ponto?lat=${geo.lat}&lng=${geo.lng}&empresa=${encodeURIComponent(empresa)}`); areaMapa = x0.area; sugestoes = x0.sugestoes; } catch (e) { aviso(e.message, true); }
+    if (preencher && !campos.local.value.trim() && x0.empresaNoLocal) {
+      // a empresa do ROI tem estrutura na mesma área do ponto → o local é a estrutura dela
+      automatico = { local: '', empresa: campos.empresa.value, nome: x0.empresaNoLocal.nome, motivo: 'empresa' };
+      campos.local.value = x0.empresaNoLocal.nome;
+      return desenharPonto();
+    }
+    // senão (empresa fora da área ou sem empresa): só um ponto a menos de 30 m e o Local vazio → preenche sozinho
     const perto = sugestoes.filter(x => x.metros <= 30);
     if (preencher && perto.length === 1 && !campos.local.value.trim()) {
       const x = perto[0];
@@ -3468,7 +3476,7 @@ function abrirFormRoi(r) {
         : el('button', { type: 'button', class: 'btn roi-onde', onclick: ondeFoi }, '📍 Onde foi?'),
       somenteLeitura ? null : el('span', { class: 'mudo pequeno', text: 'Opcional · deixa o mapa de calor mais preciso' })].filter(Boolean));
     // resumo numa linha
-    const partes = [areaMapa || 'Fora das áreas', local || null, maisPerto ? `${maisPerto.metros} m` : null, geo.origem === 'gps' ? `GPS ± ${geo.precisao || '?'} m` : null].filter(Boolean);
+    const partes = [areaMapa || 'Fora das áreas', local || null, automatico?.motivo === 'empresa' ? 'local pela empresa' : maisPerto ? `${maisPerto.metros} m` : null, geo.origem === 'gps' ? `GPS ± ${geo.precisao || '?'} m` : null].filter(Boolean);
     const duvida = !automatico && !maisPerto && sugestoes.length > 0 && !somenteLeitura && (sugestoes.length > 1 || !local);
     blocoPonto.replaceChildren(...[
       el('div', { class: 'roi-ponto-linha' },
@@ -3481,7 +3489,7 @@ function abrirFormRoi(r) {
         sugestoes.slice(0, 3).map(x => el('button', { type: 'button', class: 'filtro', title: `${x.metros} m`, onclick: () => usar(x) },
           `${x.tipo === 'empresa' ? '◆' : '●'} ${x.nome}`, el('small', { class: 'mudo', text: ` ${x.metros} m` })))) : null].filter(Boolean));
   }
-  desenharPonto(); queueMicrotask(desenharPonto);
+  desenharPonto(); queueMicrotask(() => { desenharPonto(); campos.empresa?.addEventListener('change', () => { if (geo && !campos.local.value.trim() && !somenteLeitura) resolver(true); }); });
   const datalist = el('datalist', { id: 'roi-locais' }, (meta.locais || []).map(l => el('option', { value: l })));
 
   // envolvidos e/ou testemunhas (até 10 linhas, como no modelo)

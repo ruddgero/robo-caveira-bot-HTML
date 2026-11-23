@@ -484,7 +484,7 @@ rota('POST', '/api/operacoes/:id/marcar', async (req, res, { corpo, params, u })
 // --- ROI (Relatório de Ocorrência Interna)
 rota('GET', '/api/roi', async () => ({ rois: ROI.listar(), proximo: ROI.proximoNumero(), grupos: ROI.GRUPOS_ROI, locais: ROI.locaisConhecidos(), maxFotos: ROI.MAX_FOTOS }));
 rota('GET', '/api/roi/mapa-base', async () => ROI.mapaBase());
-rota('GET', '/api/roi/ponto', async req => { const q = new URL(req.url, 'http://x').searchParams; return ROI.pontoDoRoi(q.get('lat'), q.get('lng')); });
+rota('GET', '/api/roi/ponto', async req => { const q = new URL(req.url, 'http://x').searchParams; return ROI.pontoDoRoi(q.get('lat'), q.get('lng'), q.get('empresa') || ''); });
 rota('GET', '/api/roi/resumo', async () => ROI.resumoGeral());
 rota('GET', '/api/roi/controle/:ano/xlsx', async (req, res, { params }) => {
     const arq = params.ano === 'todos' ? ROI.xlsxControleTodos() : ROI.xlsxControle(+params.ano);

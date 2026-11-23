@@ -58,13 +58,19 @@ const MapaCalor = (() => {
     }
   });
 
+  // contornos das áreas: opcionais para todos que veem o mapa (quem desenha começa com eles ligados)
+  function contornosIniciais() {
+    try { const v = localStorage.getItem('caveira.contornos'); if (v === '1' || v === '0') return v === '1'; } catch (_) {}
+    return pode('mapa.areas');
+  }
+
   // ------------------- abrir / fechar -------------------
   function abrir() {
     if (M) return;
     const tela = el('div', { class: 'mapa-tela', role: 'dialog', 'aria-label': 'Mapa de calor' });
     document.body.append(tela);
     document.body.style.overflow = 'hidden';
-    M = { tela, modo: 'calor', contornosVisiveis: true, gravidade: true, simulados: true, ano: S.indAno || 0, mes: S.indMes || 0, tipos: (S.indTipos || []).slice(), sel: '', selArea: '', marcando: null, desenho: null, d: null };
+    M = { tela, modo: 'calor', contornosVisiveis: contornosIniciais(), gravidade: true, simulados: true, ano: S.indAno || 0, mes: S.indMes || 0, tipos: (S.indTipos || []).slice(), sel: '', selArea: '', marcando: null, desenho: null, d: null };
     history.pushState({ mapaCalor: true }, '');
     window.addEventListener('popstate', aoVoltar);
     document.addEventListener('keydown', aoTeclar);
@@ -104,7 +110,7 @@ const MapaCalor = (() => {
     M.faixa = el('div', { class: 'mapa-faixa', hidden: true });
     M.btModo = el('div', { class: 'mapa-modo' },
       el('button', { class: 'ativo', 'data-modo': 'calor', onclick: () => trocarModo('calor') }, 'Calor'),
-      pode('mapa.areas') ? el('button', { 'data-modo': 'areas', onclick: () => trocarModo('areas') }, 'Áreas') : null,
+      el('button', { 'data-modo': 'areas', onclick: () => trocarModo('areas') }, 'Áreas'),
       el('button', { 'data-modo': 'locais', onclick: () => trocarModo('locais') }, 'Locais'));
     t.replaceChildren(
       el('header', { class: 'mapa-topo' },
@@ -112,8 +118,8 @@ const MapaCalor = (() => {
         el('div', { class: 'mapa-tit' }, el('strong', { text: 'Mapa de calor' }), M.titulo),
         el('div', { class: 'mapa-acoes' }, M.btModo,
           (M.btGaveta = el('button', { type: 'button', class: 'mapa-bt-gaveta', 'aria-expanded': 'false', 'aria-keyshortcuts': 'L', onclick: () => gaveta(!gavetaAberta()) })),
-          pode('mapa.areas') ? (M.btContornos = el('button', { class: 'btn-icone ativo', title: 'Mostrar/esconder os contornos das áreas (só quem tem a permissão vê)', 'aria-label': 'Mostrar ou esconder os contornos das áreas', 'aria-pressed': 'true',
-            onclick: () => { M.contornosVisiveis = !M.contornosVisiveis; M.btContornos.classList.toggle('ativo', M.contornosVisiveis); M.btContornos.setAttribute('aria-pressed', String(M.contornosVisiveis)); desenharCamadas(); } }, '▢')) : null,
+          (M.btContornos = el('button', { class: 'btn-icone' + (M.contornosVisiveis ? ' ativo' : ''), title: 'Mostrar/esconder os contornos das áreas', 'aria-label': 'Mostrar ou esconder os contornos das áreas', 'aria-pressed': String(M.contornosVisiveis),
+            onclick: () => { M.contornosVisiveis = !M.contornosVisiveis; try { localStorage.setItem('caveira.contornos', M.contornosVisiveis ? '1' : '0'); } catch (_) {} M.btContornos.classList.toggle('ativo', M.contornosVisiveis); M.btContornos.setAttribute('aria-pressed', String(M.contornosVisiveis)); desenharCamadas(); } }, '▢')),
           el('button', { class: 'btn-icone', title: 'Centralizar na Ferroport', 'aria-label': 'Centralizar na Ferroport', onclick: centralizar }, '⌖'))),
       M.filtros,
       el('div', { class: 'mapa-corpo' }, M.caixaMapa, M.lado),
@@ -326,7 +332,7 @@ const MapaCalor = (() => {
     // contornos das áreas (só o admin vê)
     M.contornos.clearLayers();
     const maxA = Math.max(1, ...d.areas.map(a => a.total));
-    const verContornos = pode('mapa.areas') && (M.contornosVisiveis || M.modo === 'areas' || M.desenho);
+    const verContornos = (M.contornosVisiveis || M.modo === 'areas' || M.desenho);
     for (const a of verContornos ? d.areas : []) {
       const sel = M.selArea === a.id, pintar = M.modo === 'areas';
       const pol = L.polygon(a.poly, pintar

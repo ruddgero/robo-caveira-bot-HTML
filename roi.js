@@ -759,14 +759,23 @@ function dadosDoMapa(filtros = {}) {
 }
 
 // Para o formulário do ROI: a área do ponto e os locais/empresas cadastrados mais perto
-function pontoDoRoi(lat, lng) {
+function pontoDoRoi(lat, lng, empresa = '') {
     lat = num(lat); lng = num(lng);
     if (!isFinite(lat) || !isFinite(lng) || !dentro(lat, lng)) throw erro('Ponto fora da área do Porto do Açu.', 400);
     const a = areaDoPonto(lat, lng);
+    // empresa do ROI: se ela tem estrutura (◆) na mesma área do ponto, o local é a estrutura dela
+    let empresaNoLocal = null, empresaFora = false;
+    if (limpo(empresa)) {
+        const estruturas = Object.entries(estado.mapa.pontos).filter(([, p]) => p.tipo === 'empresa' && p.empresa && mesmaEmpresa(p.empresa, empresa))
+            .map(([nome, p]) => ({ nome, empresa: p.empresa, metros: Math.round(metros([lat, lng], [p.lat, p.lng])), areaId: (areaDoPonto(p.lat, p.lng) || {}).id || '' }));
+        const naArea = a ? estruturas.filter(x => x.areaId === a.id).sort((x, y) => x.metros - y.metros) : [];
+        if (naArea.length) empresaNoLocal = { nome: naArea[0].nome, empresa: naArea[0].empresa, metros: naArea[0].metros };
+        else empresaFora = estruturas.length > 0;
+    }
     const sugestoes = Object.entries(estado.mapa.pontos)
         .map(([nome, p]) => ({ nome, tipo: p.tipo || 'local', empresa: p.empresa || '', metros: Math.round(metros([lat, lng], [p.lat, p.lng])), area: (areaDoPonto(p.lat, p.lng) || {}).nome || '' }))
         .filter(x => x.metros <= 400 && (!a || x.area === a.nome)).sort((x, y) => x.metros - y.metros).slice(0, 5);
-    return { area: a ? a.nome : '', sugestoes };
+    return { area: a ? a.nome : '', sugestoes, empresaNoLocal, empresaFora };
 }
 const mapaBase = () => ({ area: estado.mapa.area || AREA_PADRAO, pontos: Object.fromEntries(Object.entries(estado.mapa.pontos).map(([n, p]) => [n, [p.lat, p.lng]])), mapaLocais: Object.fromEntries(mapaDeLocais()) });
 
