@@ -729,3 +729,16 @@ body:has(#app:not([hidden])) #fundo-animado { opacity: .12; }
   .ind-barra .mf-ativos { order: 9; flex-basis: 100%; }
 }
 @media (max-width: 640px) { .ind-barra .ind-limpar { display: none; } }
+/* Permissões */
+.perm-tabela { display: grid; gap: 2px; overflow-x: auto; }
+.perm-cab, .perm-linha { display: grid; grid-template-columns: minmax(200px, 1fr) repeat(var(--cols), 92px); align-items: center; gap: 6px; padding: 7px 8px; border-radius: 8px; }
+.perm-cab { font-size: 12px; color: var(--mudo); font-weight: 700; position: sticky; top: 0; background: var(--superficie); }
+.perm-cab span:not(:first-child), .perm-cx { text-align: center; justify-self: center; }
+.perm-linha { background: var(--fundo); font-size: 13.5px; }
+.perm-grupo { margin-top: 8px; padding: 4px 8px; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--mudo); }
+.perm-cx input { width: 20px; height: 20px; accent-color: var(--primario); cursor: pointer; }
+.perm-cx.fixo { color: var(--mudo); }
+.perm-cx.fixo input { cursor: not-allowed; opacity: .6; }
+.perm-fixa { margin-top: 8px; opacity: .8; }
+.perm-pessoa { display: grid; grid-template-columns: minmax(0, 1fr) 230px; gap: 10px; align-items: center; padding: 8px 0; border-top: 1px solid var(--borda); }
+@media (max-width: 600px) { .perm-pessoa { grid-template-columns: 1fr; } .perm-cab, .perm-linha { grid-template-columns: minmax(150px, 1fr) repeat(var(--cols), 64px); } }

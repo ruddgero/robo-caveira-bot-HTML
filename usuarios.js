@@ -5,8 +5,9 @@ const crypto = require('crypto');
 const store = require('./store');
 const { novoId, agora } = require('./util');
 
-const PERFIS = ['ADMIN', 'LIDER', 'OPERADOR'];
-const ROTULO_PERFIL = { ADMIN: 'Administrador', LIDER: 'Líder', OPERADOR: 'Operador' };
+const PERFIS = ['ADMIN', 'LIDER', 'OPERADOR', 'SUNSET'];
+const ROTULO_PERFIL = { ADMIN: 'Administrador', LIDER: 'Líder', OPERADOR: 'Operador', SUNSET: 'Supervisor Sunset' };
+const PERM = require('./permissoes');
 
 let usuarios = [];
 
@@ -31,7 +32,7 @@ function emailValido(e) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e); }
 function publico(u) {
     if (!u) return null;
     const { senhaHash, sal, ...resto } = u;
-    return { ...resto, temSenha: !!senhaHash, rotuloPerfil: ROTULO_PERFIL[u.perfil] || u.perfil };
+    return { ...resto, temSenha: !!senhaHash, rotuloPerfil: ROTULO_PERFIL[u.perfil] || u.perfil, permissoes: PERM.efetivas(u), excecoes: u.permissoes || {} };
 }
 
 async function salvar() { await store.set('usuarios', usuarios); }
@@ -39,6 +40,7 @@ async function salvar() { await store.set('usuarios', usuarios); }
 function erro(msg, status = 400) { return Object.assign(new Error(msg), { status }); }
 
 async function carregar() {
+    await PERM.carregar();
     usuarios = await store.get('usuarios', []) || [];
     if (!usuarios.length) {
         const senha = process.env.APP_SENHA;
@@ -133,6 +135,7 @@ async function atualizar(id, dados, { porAdmin = false } = {}) {
             if (u.perfil === 'ADMIN' && dados.perfil !== 'ADMIN' && usuarios.filter(x => x.perfil === 'ADMIN' && x.ativo).length < 2) throw erro('É preciso ter pelo menos um administrador.');
             u.perfil = dados.perfil;
         }
+        if (dados.excecoes !== undefined) u.permissoes = PERM.limparExcecoes(dados.excecoes);
         if (dados.ativo !== undefined) {
             if (!dados.ativo && u.perfil === 'ADMIN' && usuarios.filter(x => x.perfil === 'ADMIN' && x.ativo).length < 2) throw erro('Não dá para desativar o único administrador.');
             u.ativo = !!dados.ativo;
@@ -168,7 +171,7 @@ async function atualizarWhatsapp(id, parcial) {
     return u;
 }
 
-const podeLiderar = u => u && ['ADMIN', 'LIDER'].includes(u.perfil);
+const podeLiderar = u => PERM.pode(u, 'plantao.liderar');
 
 module.exports = {
     PERFIS, ROTULO_PERFIL, carregar, porId, porEmail, todos, admin, autenticar, criar, atualizar,

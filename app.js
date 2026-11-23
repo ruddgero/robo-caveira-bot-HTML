@@ -117,7 +117,9 @@ const S = {
   entrada: [], config: null, filtroEntrada: 'pendente', busca: '', filtroTurno: 'turno', subfiltroTurno: '', abaPend: 'avisos', respPend: '',
   sujo: false, salvando: false, timerSalvar: null, timerEstado: null, painelTimer: null
 };
-const ehLider = () => ['ADMIN', 'LIDER'].includes(S.usuario?.perfil);
+// Permissões (Menu › Permissões; exceção por pessoa em Usuários)
+const pode = chave => S.usuario?.perfil === 'ADMIN' || (S.usuario?.permissoes || []).includes(chave);
+const ehLider = () => pode('plantao.liderar');
 const ehAdmin = () => S.usuario?.perfil === 'ADMIN';
 const deplantao = () => S.estado?.plantao?.liderId === S.usuario?.id;
 
@@ -244,10 +246,12 @@ async function entrar() {
   S.timerEstado = setInterval(atualizarEstado, 6000);
 }
 
-async function carregarCentral() { S.central = await api('GET', '/api/central'); }
-async function carregarEntrada() { S.entrada = (await api('GET', '/api/entrada')).itens; }
+// sem a permissão de ver o Plantão (ex.: Supervisor Sunset), nada do turno é carregado
+async function carregarCentral() { if (!pode('plantao.ver')) { S.central = null; return; } S.central = await api('GET', '/api/central'); }
+async function carregarEntrada() { if (!pode('plantao.ver')) { S.entrada = []; return; } S.entrada = (await api('GET', '/api/entrada')).itens; }
 async function carregarConfig() { S.config = (await api('GET', '/api/config')).config; }
 async function carregarFicha() {
+  if (!pode('plantao.ver')) return;
   const f = await api('GET', '/api/ficha');
   S.ficha = f.ficha; S.fichaBase = clone(f.ficha); S.versao = f.ficha.versao || 0;
   S.conferencia = f.conferencia; S.avisos = f.avisos; S.operacoes = f.operacoes;
@@ -411,9 +415,12 @@ const DESENHAR = {
 };
 function redesenharAba() { (DESENHAR[S.aba] || (() => {}))(); }
 
+const PERM_VISTA = { central: 'plantao.ver', relatorio: 'plantao.ver', emails: 'plantao.ver', historico: 'plantao.ver', entrada: 'plantao.ver', roi: 'roi.registrar', pendencias: 'pendencias.ver', painel: 'indicadores.ver' };
+const vistaPermitida = v => !PERM_VISTA[v] || pode(PERM_VISTA[v]);
+
 function desenharSubabas() {
   const box = $('#subabas');
-  const vistas = GRUPOS[grupoDa(S.aba)].filter(v => ROTULOS_SUB[v]);
+  const vistas = GRUPOS[grupoDa(S.aba)].filter(v => ROTULOS_SUB[v] && vistaPermitida(v));
   box.hidden = vistas.length < 2;
   if (box.hidden) return;
   const contagem = {
@@ -428,7 +435,14 @@ function trocarAba(nome) {
   if (S.indPop) { S.indPop = ''; if (S.popIndEl) S.popIndEl.hidden = true; }
   if (nome === 'plantao' || nome === 'pendencias-grupo') nome = S.ultimaAba[nome === 'plantao' ? 'plantao' : 'pendencias'] || (nome === 'plantao' ? 'central' : 'pendencias');
   S.aba = DESENHAR[nome] ? nome : 'central';
+  if (S.usuario && !vistaPermitida(S.aba)) S.aba = Object.values(GRUPOS).flat().find(vistaPermitida) || S.aba;
   const g = grupoDa(S.aba);
+  // menu de baixo/lateral: só o que a pessoa pode ver; quem só registra ROI vê "ROI"
+  document.querySelectorAll('.abas button').forEach(b => {
+    const vs = GRUPOS[b.dataset.grupo].filter(vistaPermitida);
+    b.hidden = !vs.length;
+    if (b.dataset.grupo === 'plantao') { const t = [...b.childNodes].find(n => n.nodeType === 3 && n.nodeValue.trim()); if (t) t.nodeValue = vs.length === 1 && vs[0] === 'roi' ? 'ROI' : 'Plantão'; }
+  });
   S.ultimaAba[g] = S.aba;
   document.querySelectorAll('.abas button').forEach(b => b.classList.toggle('ativa', b.dataset.grupo === g));
   document.querySelectorAll('.aba').forEach(x => { x.hidden = x.id !== `aba-${S.aba}`; });
@@ -1374,7 +1388,7 @@ function cartaoMensagem(item) {
     acoes.push(el('button', { class: 'btn pequeno', onclick: () => marcarItem(item, 'pendente') }, 'Restaurar'));
   }
   // ocorrência no grupo → rascunho de ROI
-  if ((item.sugestao === 'OCORRENCIA' || item.urgente) && !item.apagado && ehLider()) acoes.unshift(el('button', { class: 'btn pequeno', onclick: () => novoRoi({ entradaId: item.id }) }, '📄 Abrir ROI'));
+  if ((item.sugestao === 'OCORRENCIA' || item.urgente) && !item.apagado && pode('roi.registrar')) acoes.unshift(el('button', { class: 'btn pequeno', onclick: () => novoRoi({ entradaId: item.id }) }, '📄 Abrir ROI'));
   // mensagem do grupo convertida para o modelo padrão
   if (item.padronizada && !item.apagado) acoes.unshift(el('button', { class: 'btn fantasma pequeno', onclick: async () => { await copiar(item.padronizada); aviso('Mensagem no padrão copiada ✓'); } }, '💬 Padrão'));
   return el('article', { class: `msg${item.urgente && item.status === 'pendente' ? ' urgente' : ''}${item.status !== 'pendente' ? ' tratada' : ''}` },
@@ -1831,11 +1845,11 @@ async function abrirOrganograma() {
 
   const subs = el('section', { class: 'cartao' },
     el('div', { class: 'cartao-topo' }, el('h2', { text: 'Férias e substituições' }),
-      ehLider() ? el('button', { class: 'btn pequeno', onclick: () => novaSubstituicaoModal(o, recarregar) }, '+ Substituição') : null),
+      pode('organograma.editar') ? el('button', { class: 'btn pequeno', onclick: () => novaSubstituicaoModal(o, recarregar) }, '+ Substituição') : null),
     o.substituicoes.length ? el('div', { class: 'lista-pend' }, o.substituicoes.map(x => el('div', { class: 'acao-rapida' },
       el('div', { class: 'pequeno' }, el('strong', { text: x.substituto }), ` cobre ${x.titular}`),
       el('div', { class: 'mudo pequeno', text: `${x.motivo} · ${x.de} a ${x.ate}${x.criadoPor ? ' · por ' + x.criadoPor : ''}` }),
-      ehLider() ? el('div', {}, el('button', { class: 'btn fantasma pequeno', onclick: async () => {
+      pode('organograma.editar') ? el('div', {}, el('button', { class: 'btn fantasma pequeno', onclick: async () => {
         if (!await confirmar('Cancelar substituição?', `${x.substituto} deixa de cobrir ${x.titular}.`, 'Cancelar substituição', true)) return;
         try { await api('POST', `/api/organograma/substituicoes/${x.id}/excluir`); aviso('Substituição cancelada'); recarregar(); } catch (e) { aviso(e.message, true); }
       } }, 'Cancelar')) : null)))
@@ -2358,7 +2372,7 @@ function desenharPainelGerencial() {
     chipsAtivos.length ? el('div', { class: 'mf-ativos' }, ...chipsAtivos) : null,
     chipsAtivos.length > 1 ? el('button', { type: 'button', class: 'btn fantasma pequeno ind-limpar', onclick: ev => { ev.stopPropagation(); S.indMes = 0; S.indTipos = []; S.indLocal = ''; S.indEmpresa = ''; refazer(); } }, 'Limpar') : null,
     el('span', { class: 'ind-espaco' }),
-    ehLider() ? el('button', { class: 'btn-icone btn-mapa', title: 'Mapa de calor', 'aria-label': 'Abrir o mapa de calor', onclick: ev => { ev.stopPropagation(); S.indPop = ''; abrirMapaCalor(); } }, iconeMapaCalor()) : null);
+    pode('mapa.ver') ? el('button', { class: 'btn-icone btn-mapa', title: 'Mapa de calor', 'aria-label': 'Abrir o mapa de calor', onclick: ev => { ev.stopPropagation(); S.indPop = ''; abrirMapaCalor(); } }, iconeMapaCalor()) : null);
   const conteudoPopInd = chave => {
     if (chave === 'periodo') {
       const comDados = new Map(d.meses.map(m => [m.mes, m.total]));
@@ -2790,12 +2804,13 @@ function abrirMenu() {
     el('p', { class: 'mudo pequeno', style: 'margin:0', text: `${u.email} · ${u.rotuloPerfil} · versão ${S.meta?.versao || '?'}` }),
     el('div', { class: 'menu-lista' },
       item('👤', 'Meu perfil e WhatsApp', abrirPerfil),
-      item('📦', 'Passagem da escala', abrirEscala),
-      item('🗃️', 'Rascunhos de turnos arquivados', abrirHistorico),
+      pode('plantao.ver') ? item('📦', 'Passagem da escala', abrirEscala) : null,
+      pode('plantao.ver') ? item('🗃️', 'Rascunhos de turnos arquivados', abrirHistorico) : null,
       item('✨', `Fundo animado: ${Fundo.ativo() ? 'ligado' : 'desligado'}`, () => { Fundo.ligar(!Fundo.ativo()); aviso(Fundo.ativo() ? 'Fundo animado ligado' : 'Fundo animado desligado (economiza bateria)'); }),
       item('🧑‍🤝‍🧑', 'Organograma, escala e férias', abrirOrganograma),
-      item('🖨️', 'Resumo de ocorrências para a gerência', resumoGerenciaDoMenu),
-      ehAdmin() ? item('🔤', 'Padronizar nomes dos locais', abrirLocaisIndicador) : null,
+      pode('indicadores.ver') ? item('🖨️', 'Resumo de ocorrências para a gerência', resumoGerenciaDoMenu) : null,
+      pode('locais.padronizar') ? item('🔤', 'Padronizar nomes dos locais', abrirLocaisIndicador) : null,
+      ehAdmin() ? item('🔐', 'Permissões', abrirPermissoes) : null,
       ehAdmin() ? item('👥', 'Usuários', abrirUsuarios) : null,
       ehAdmin() ? item('⚙️', 'Configurações', abrirConfig) : null,
       item('🚪', 'Sair', async () => { await api('POST', '/api/logout'); mostrarLogin(); }))
@@ -3084,7 +3099,9 @@ async function abrirUsuarios() {
         el('span', { class: `etiqueta ${x.ativo ? (x.temSenha ? 'ok' : 'atencao') : 'urgente'}`, text: !x.ativo ? 'Desativado' : x.temSenha ? (x.trocarSenha ? 'Senha provisória' : 'Ativo') : 'Sem senha' })),
       el('div', { class: 'grade-2' }, el('label', { class: 'campo' }, 'Perfil', perfil),
         el('div', { class: 'campo' }, 'WhatsApp', el('span', { text: x.whatsapp.pareado ? `+${x.whatsapp.numero || ''} · ${x.whatsapp.estado === 'CONECTADO' ? 'ligado' : 'guardado'}` : '—' }))),
+      Object.keys(x.excecoes || {}).length ? el('div', { class: 'mudo pequeno', text: `Exceções: ${Object.entries(x.excecoes).map(([k, v]) => `${v ? '+' : '−'} ${k}`).join(' · ')}` }) : null,
       el('div', { class: 'linha' },
+        x.perfil !== 'ADMIN' ? el('button', { class: 'btn pequeno', onclick: () => excecoesDaPessoa(x, abrirUsuarios) }, '🔐 Permissões da pessoa') : null,
         el('button', { class: 'btn pequeno', onclick: async () => { try { const r = await api('POST', `/api/usuarios/${x.id}/senha`); mostrarSenha(x.nome, r.senhaProvisoria); } catch (e) { aviso(e.message, true); } } }, x.temSenha ? 'Gerar senha provisória' : 'Criar senha provisória'),
         el('button', { class: 'btn fantasma pequeno', onclick: async () => {
           if (x.ativo && !await confirmar(`Desativar ${x.nome}?`, 'A pessoa perde o acesso e o WhatsApp dela é desconectado do robô.', 'Desativar', true)) return;
@@ -3099,7 +3116,7 @@ async function abrirUsuarios() {
     const perfil = el('select', {}, Object.entries(S.meta.perfis).map(([k, v]) => el('option', { value: k, text: v })));
     perfil.value = 'OPERADOR';
     abrirModal('Novo usuário', [c1, c2, c3, el('label', { class: 'campo' }, 'Perfil', perfil),
-      el('p', { class: 'mudo pequeno', style: 'margin:0', text: 'Líder: assume o plantão, conecta o WhatsApp e publica. Operador: registra e trata a entrada, não publica.' })],
+      el('p', { class: 'mudo pequeno', style: 'margin:0', text: 'Líder: assume o plantão, conecta o WhatsApp e publica. Operador: registra e trata a entrada, não publica. Supervisor Sunset: só abre e registra ROI. Ajuste em Menu › Permissões.' })],
     botoesSalvar(async () => {
       const r = await api('POST', '/api/usuarios', { nome: iNome.value, email: iEmail.value, telefone: iTel.value, perfil: perfil.value });
       mostrarSenha(r.usuario.nome, r.senhaProvisoria);
@@ -3111,6 +3128,60 @@ async function abrirUsuarios() {
     el('div', {}, el('button', { class: 'btn primario', onclick: novo }, '+ Novo usuário')),
     ...cartoes
   ]);
+}
+
+// ----------------------------- Permissões (admin) --------------------
+async function abrirPermissoes() {
+  let d;
+  try { d = await api('GET', '/api/permissoes'); } catch (e) { return aviso(e.message, true); }
+  const perfis = ['ADMIN', ...d.perfisEditaveis];
+  const marcados = Object.fromEntries(perfis.map(p => [p, new Set(d.perfis[p])]));
+  const nomes = S.meta.perfis;
+  const grupos = [...new Set(d.catalogo.map(c => c.grupo))];
+  const tabela = () => el('div', { class: 'perm-tabela', style: `--cols:${perfis.length}` },
+    el('div', { class: 'perm-cab' }, el('span', { text: 'O que' }), ...perfis.map(p => el('span', { text: nomes[p] || p }))),
+    ...grupos.flatMap(g => [el('div', { class: 'perm-grupo', text: g }),
+      ...d.catalogo.filter(c => c.grupo === g).map(c => el('div', { class: 'perm-linha' },
+        el('span', { class: 'perm-rotulo', text: c.rotulo }),
+        ...perfis.map(p => {
+          const cx = el('input', { type: 'checkbox', checked: marcados[p].has(c.chave), disabled: p === 'ADMIN', 'aria-label': `${c.rotulo} – ${nomes[p] || p}`,
+            onchange: e => { e.target.checked ? marcados[p].add(c.chave) : marcados[p].delete(c.chave); } });
+          return el('label', { class: 'perm-cx' + (p === 'ADMIN' ? ' fixo' : '') }, cx);
+        })))]),
+    el('div', { class: 'perm-linha perm-fixa' }, el('span', { class: 'perm-rotulo', text: 'Usuários, Configurações e Permissões' }), ...perfis.map(p => el('span', { class: 'perm-cx fixo', text: p === 'ADMIN' ? '✓' : '—' }))));
+  const caixa = el('div', {}, tabela());
+  abrirPainel('🔐 Permissões', [
+    el('p', { class: 'mudo', style: 'margin:0', text: 'Marque o que cada perfil pode ver e fazer. O que estiver desmarcado some do menu e das telas, e o servidor também bloqueia. O administrador sempre vê tudo. Para uma pessoa específica, use Usuários › Permissões da pessoa.' }),
+    el('section', { class: 'cartao' }, caixa),
+    el('div', { class: 'linha' },
+      el('button', { class: 'btn primario', onclick: async () => {
+        try { d = await api('PUT', '/api/permissoes', { perfis: Object.fromEntries(d.perfisEditaveis.map(p => [p, [...marcados[p]]])) }); aviso('Permissões salvas ✓'); }
+        catch (e) { aviso(e.message, true); }
+      } }, 'Salvar permissões'),
+      el('button', { class: 'btn fantasma', onclick: () => { for (const p of d.perfisEditaveis) marcados[p] = new Set(d.padrao[p] || []); caixa.replaceChildren(tabela()); aviso('Padrão de fábrica carregado. Toque em Salvar para aplicar.'); } }, 'Voltar ao padrão'))
+  ]);
+}
+
+// Exceções de uma pessoa (valem por cima do perfil)
+async function excecoesDaPessoa(x, depois) {
+  let d;
+  try { d = await api('GET', '/api/permissoes'); } catch (e) { return aviso(e.message, true); }
+  const doPerfil = new Set(d.perfis[x.perfil] || []);
+  const exc = { ...(x.excecoes || {}) };
+  const linhas = d.catalogo.map(c => {
+    const sel = el('select', { 'aria-label': c.rotulo, onchange: e => { if (e.target.value === 'padrao') delete exc[c.chave]; else exc[c.chave] = e.target.value === 'sim'; } },
+      el('option', { value: 'padrao', text: `Como o perfil (${doPerfil.has(c.chave) ? 'pode' : 'não pode'})` }),
+      el('option', { value: 'sim', text: 'Liberar para esta pessoa' }),
+      el('option', { value: 'nao', text: 'Bloquear para esta pessoa' }));
+    sel.value = exc[c.chave] === true ? 'sim' : exc[c.chave] === false ? 'nao' : 'padrao';
+    return el('div', { class: 'perm-pessoa' }, el('div', {}, el('div', { text: c.rotulo }), el('div', { class: 'mudo pequeno', text: c.grupo })), sel);
+  });
+  abrirModal(`🔐 ${x.nome} · ${S.meta.perfis[x.perfil] || x.perfil}`, [
+    el('p', { class: 'mudo pequeno', style: 'margin:0', text: 'Deixe "Como o perfil" para seguir o perfil. Liberar ou Bloquear vale só para esta pessoa.' }), ...linhas],
+    botoesSalvar(async () => {
+      await api('PUT', `/api/usuarios/${x.id}`, { excecoes: exc });
+      fecharModal(); aviso('Permissões da pessoa salvas ✓'); if (depois) depois();
+    }));
 }
 
 // ----------------------------- Configurações (admin) -----------------
@@ -3289,7 +3360,7 @@ function abrirFormRoi(r) {
   const grupos = meta.grupos && Object.keys(meta.grupos).length ? meta.grupos
     : { G1: 'Acidentes', G2: 'Quebra de procedimento', G3: 'Atos ilícitos', G4: 'Ameaças e agressões', G5: 'Ação preventiva', G6: 'Outros' };
   const registrado = r.status === 'registrado', cancelado = r.status === 'cancelado';
-  const somenteLeitura = cancelado || (registrado && !ehLider());
+  const somenteLeitura = cancelado || (registrado && !pode('roi.corrigir'));
   const campos = {};
   const linha = (rotulo, chave, opts = {}) => {
     const [c, i] = opts.texto ? campoTexto(rotulo, r[chave], { linhas: opts.linhas || 3, placeholder: opts.placeholder }) : campoLinha(rotulo, r[chave], { placeholder: opts.placeholder, inputmode: opts.inputmode });
@@ -3424,7 +3495,7 @@ function abrirFormRoi(r) {
         await api('POST', `/api/roi/${encodeURIComponent(r.id)}/cancelar`, {}); fecharModal(); S.roi = null; desenharROI(); aviso('Rascunho descartado');
       }),
       acao('Salvar rascunho', '', async () => { await salvar(); fecharModal(); aviso('Rascunho salvo ✓'); }),
-      ehLider() ? acao(`Registrar ROI`, 'primario', async () => {
+      pode('roi.registrar') ? acao(`Registrar ROI`, 'primario', async () => {
         await salvar();
         const ok = await confirmar('Registrar ROI', [`O ROI recebe o número ${S.roi?.proximo || (await api('GET', '/api/roi')).proximo} e a linha abaixo entra no item 7 do relatório do turno:`,
           el('div', { class: 'citacao', text: `Foi registrado o ROI Nº … (${campos.tipo.value} – ${grupos[campos.tipo.value] || ''}) – ${campos.local.value}${simulado.checked ? ' (SIMULADO)' : ''}.` })], 'Registrar');
@@ -3556,11 +3627,12 @@ function importarControleRoi() {
     doc: '<path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6M8 13h8M8 17h5"/>',
     enviar: '<path d="M22 2L11 13M22 2l-7 20-4-9-9-4z"/>',
     calendario: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/>',
+    cadeado: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
     camera: '<rect x="3" y="7" width="18" height="13" rx="2"/><circle cx="12" cy="13" r="3.5"/><path d="M8 7l2-3h4l2 3"/>'
   };
   const MAPA = { '🧭': 'plantao', '📌': 'pend', '📊': 'graf', '🙋': 'assumir', '📑': 'fechar', '📦': 'caixa', '🗂️': 'pasta', '🗂': 'pasta', '📋': 'colar', '🖨️': 'imprimir', '🖨': 'imprimir',
     '📍': 'pino', '🔤': 'texto', '✏️': 'lapis', '✏': 'lapis', '➕': 'mais', '⬇️': 'baixar', '⬇': 'baixar', '📥': 'baixar', '👤': 'usuario', '🗃️': 'arquivo', '🗃': 'arquivo', '✨': 'brilho',
-    '🧑‍🤝‍🧑': 'equipe', '👥': 'equipe', '⚙️': 'config', '⚙': 'config', '🚪': 'sair', '⌖': 'mira', '✉️': 'email', '✉': 'email', '🚨': 'alerta', '📷': 'camera', '📝': 'lapis', '🗺️': 'pino', '🏁': 'bandeira', '🚢': 'navio', '📧': 'email', '👁️': 'olho', '👁': 'olho', '📄': 'doc', '🚀': 'enviar', '📤': 'enviar', '🔁': 'mira', '📅': 'calendario' };
+    '🧑‍🤝‍🧑': 'equipe', '👥': 'equipe', '⚙️': 'config', '⚙': 'config', '🚪': 'sair', '⌖': 'mira', '✉️': 'email', '✉': 'email', '🚨': 'alerta', '📷': 'camera', '📝': 'lapis', '🗺️': 'pino', '🏁': 'bandeira', '🚢': 'navio', '📧': 'email', '👁️': 'olho', '👁': 'olho', '📄': 'doc', '🚀': 'enviar', '📤': 'enviar', '🔁': 'mira', '📅': 'calendario', '🔐': 'cadeado' };
   const CHAVES = Object.keys(MAPA).sort((a, b) => b.length - a.length);
   const svg = nome => { const t = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); t.setAttribute('viewBox', '0 0 24 24'); t.setAttribute('fill', 'none'); t.setAttribute('stroke', 'currentColor'); t.setAttribute('stroke-width', '1.8'); t.setAttribute('stroke-linecap', 'round'); t.setAttribute('stroke-linejoin', 'round'); t.setAttribute('class', 'ic-svg'); t.setAttribute('aria-hidden', 'true'); t.innerHTML = P[nome]; return t; };
   function trocar(raiz) {

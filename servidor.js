@@ -16,6 +16,27 @@ const R = require('./relatorio');
 const { agora } = require('./util');
 const { gerarXlsx } = require('./xlsx');
 const ROI = require('./roi');
+const PERM = require('./permissoes');
+
+// Permissão exigida por rota (o administrador ajusta por perfil e por pessoa em Menu › Permissões).
+// Quando a rota tem uma permissão aqui, ela vale no lugar do perfil fixo da rota.
+const PERM_ROTAS = [
+    ['*', /^\/api\/indicadores\/mapa\/areas/, 'mapa.areas'], ['PUT', /^\/api\/indicadores\/mapa\/area$/, 'mapa.areas'],
+    ['PUT', /^\/api\/indicadores\/mapa\/ponto$/, 'mapa.marcar'],
+    ['GET', /^\/api\/indicadores\/mapa$/, 'mapa.ver'], ['GET', /^\/api\/mapa\/ladrilho\//, 'mapa.ver'],
+    ['*', /^\/api\/indicadores\/locais\/(padronizar|ignorar|regras)$/, 'locais.padronizar'], ['POST', /^\/api\/indicadores\/locais$/, 'locais.padronizar'],
+    ['GET', /^\/api\/indicadores\//, 'indicadores.ver'],
+    ['POST', /^\/api\/roi\/importar$/, null],
+    ['*', /^\/api\/roi/, 'roi.registrar'],
+    ['*', /^\/api\/pendencias/, 'pendencias.ver'],
+    ['*', /^\/api\/organograma\/substituicoes/, 'organograma.editar'],
+    ['POST', /^\/api\/(plantao|escala\/(iniciar|continuar|publicar|restaurar)|ficha\/(herdar|nova|publicar)|relatorios-hist\/(importar|[^/]+\/herdar))/, 'plantao.liderar'],
+    ['*', /^\/api\/(central|ficha|operacoes|emails|entrada|sugestoes|relatorios|relatorios-hist|planilha-navios|escala|historico|equipes?)(\/|$)/, 'plantao.ver']
+];
+function permissaoDaRota(metodo, caminho) {
+    for (const [m, re, chave] of PERM_ROTAS) if ((m === '*' || m === metodo) && re.test(caminho)) return chave;
+    return undefined;
+}
 
 // Arquivos da tela: SÓ estes podem ser entregues ao navegador
 const PASTA_PUBLICA = __dirname;
@@ -475,14 +496,14 @@ rota('POST', '/api/roi', async (req, res, { corpo, u }) => ({ roi: ROI.detalhe((
 rota('GET', '/api/roi/:id', async (req, res, { params }) => ({ roi: ROI.detalhe(params.id) }));
 rota('PUT', '/api/roi/:id', async (req, res, { corpo, params, u }) => {
     const r = ROI.estado.rois.find(x => x.id === params.id);
-    if (r && r.status !== 'rascunho' && !LIDERES.includes(u.perfil)) throw erro('Só o líder corrige um ROI registrado.', 403);
+    if (r && r.status !== 'rascunho' && !PERM.pode(u, 'roi.corrigir')) throw erro('Você não tem permissão para corrigir um ROI registrado.', 403);
     await ROI.editar(params.id, corpo || {}, u);
     return { roi: ROI.detalhe(params.id) };
 });
 rota('POST', '/api/roi/:id/registrar', async (req, res, { corpo, params, u }) => { await ROI.registrar(params.id, corpo || {}, u); return { roi: ROI.detalhe(params.id) }; }, { perfis: LIDERES });
 rota('POST', '/api/roi/:id/cancelar', async (req, res, { corpo, params, u }) => {
     const r = ROI.estado.rois.find(x => x.id === params.id);
-    if (r && r.status !== 'rascunho' && !LIDERES.includes(u.perfil)) throw erro('Só o líder cancela um ROI registrado.', 403);
+    if (r && r.status !== 'rascunho' && !PERM.pode(u, 'roi.corrigir')) throw erro('Você não tem permissão para cancelar um ROI registrado.', 403);
     return ROI.cancelar(params.id, corpo.motivo, u);
 });
 rota('POST', '/api/roi/:id/foto', async (req, res, { corpo, params, u }) => ({ foto: await ROI.adicionarFoto(params.id, corpo || {}, u) }));
@@ -574,6 +595,10 @@ rota('GET', '/api/config', async () => { const { ultimoTextoPublicado, ...cfg } 
 rota('PUT', '/api/config', async (req, res, { corpo, u }) => { const { ultimoTextoPublicado, ...cfg } = await nucleo.salvarConfig(corpo.config || {}, u); return { config: cfg }; }, { perfis: ['ADMIN'] });
 rota('GET', '/api/auditoria', async () => ({ itens: nucleo.estado.auditoria.slice().reverse().slice(0, 200) }), { perfis: ['ADMIN'] });
 
+// --- Permissões (administrador)
+rota('GET', '/api/permissoes', async () => PERM.resumo(), { perfis: ['ADMIN'] });
+rota('PUT', '/api/permissoes', async (req, res, { corpo, u }) => { const r = await PERM.salvarPerfis(corpo.perfis); nucleo.auditar(u, 'Alterou as permissões dos perfis'); return r; }, { perfis: ['ADMIN'] });
+
 // --- Usuários (administrador)
 rota('GET', '/api/usuarios', async () => ({
     usuarios: usuarios.todos().map(x => ({ ...usuarios.publico(x), whatsapp: { pareado: !!x.whatsapp?.pareado, numero: x.whatsapp?.numero || null, ...whatsapp.status(x.id), qr: undefined } }))
@@ -641,7 +666,13 @@ async function tratar(req, res) {
             u = usuarioDoToken(lerCookies(req)[COOKIE]);
             if (!u) return enviarJson(res, 401, { erro: 'Faça login novamente.' });
             if (u.trocarSenha && !r.permiteTroca) return enviarJson(res, 403, { erro: 'Troque sua senha provisória para continuar.', trocarSenha: true });
-            if (r.perfis && !r.perfis.includes(u.perfil)) return enviarJson(res, 403, { erro: 'Seu perfil não tem permissão para esta ação.' });
+            let chave = permissaoDaRota(req.method, url);
+            const soLideres = r.perfis && r.perfis.length === 2 && r.perfis.includes('LIDER') && r.perfis.includes('ADMIN');
+            const soAdmin = r.perfis && r.perfis.length === 1 && r.perfis[0] === 'ADMIN';
+            if ((chave === undefined || chave === 'plantao.ver') && soLideres) chave = 'plantao.liderar';   // o que era só de líder segue a permissão de liderar
+            if (chave === 'plantao.ver' && soAdmin) chave = undefined;                                       // o que era só do admin continua só do admin
+            if (chave) { if (!PERM.pode(u, chave)) return enviarJson(res, 403, { erro: 'Você não tem permissão para esta ação.', permissao: chave }); }
+            else if (r.perfis && !r.perfis.includes(u.perfil)) return enviarJson(res, 403, { erro: 'Seu perfil não tem permissão para esta ação.' });
         }
         if (req.method !== 'GET' && req.headers['x-caveira'] !== '1') return enviarJson(res, 403, { erro: 'Requisição recusada.' });
         const m = url.match(r.re);

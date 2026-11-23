@@ -103,7 +103,7 @@ const MapaCalor = (() => {
     M.faixa = el('div', { class: 'mapa-faixa', hidden: true });
     M.btModo = el('div', { class: 'mapa-modo' },
       el('button', { class: 'ativo', 'data-modo': 'calor', onclick: () => trocarModo('calor') }, 'Calor'),
-      ehAdmin() ? el('button', { 'data-modo': 'areas', onclick: () => trocarModo('areas') }, 'Áreas') : null,
+      pode('mapa.areas') ? el('button', { 'data-modo': 'areas', onclick: () => trocarModo('areas') }, 'Áreas') : null,
       el('button', { 'data-modo': 'locais', onclick: () => trocarModo('locais') }, 'Locais'));
     t.replaceChildren(
       el('header', { class: 'mapa-topo' },
@@ -111,7 +111,7 @@ const MapaCalor = (() => {
         el('div', { class: 'mapa-tit' }, el('strong', { text: 'Mapa de calor' }), M.titulo),
         el('div', { class: 'mapa-acoes' }, M.btModo,
           (M.btGaveta = el('button', { type: 'button', class: 'mapa-bt-gaveta', 'aria-expanded': 'false', 'aria-keyshortcuts': 'L', onclick: () => gaveta(!gavetaAberta()) })),
-          ehAdmin() ? (M.btContornos = el('button', { class: 'btn-icone ativo', title: 'Mostrar/esconder os contornos das áreas (só o admin vê)', 'aria-label': 'Mostrar ou esconder os contornos das áreas', 'aria-pressed': 'true',
+          pode('mapa.areas') ? (M.btContornos = el('button', { class: 'btn-icone ativo', title: 'Mostrar/esconder os contornos das áreas (só quem tem a permissão vê)', 'aria-label': 'Mostrar ou esconder os contornos das áreas', 'aria-pressed': 'true',
             onclick: () => { M.contornosVisiveis = !M.contornosVisiveis; M.btContornos.classList.toggle('ativo', M.contornosVisiveis); M.btContornos.setAttribute('aria-pressed', String(M.contornosVisiveis)); desenharCamadas(); } }, '▢')) : null,
           el('button', { class: 'btn-icone', title: 'Centralizar na Ferroport', 'aria-label': 'Centralizar na Ferroport', onclick: centralizar }, '⌖'))),
       M.filtros,
@@ -149,7 +149,7 @@ const MapaCalor = (() => {
     if (!M.btGaveta || !M.d) return;
     const n = M.d.pontos.length + M.d.semPosicao.length;
     const escolhido = M.sel || (M.selArea && (M.d.areas.find(a => a.id === M.selArea) || {}).nome) || '';
-    const faltam = ehLider() ? M.d.semPosicao.length : 0;
+    const faltam = pode('mapa.marcar') ? M.d.semPosicao.length : 0;
     M.btGaveta.replaceChildren(...[
       el('span', { class: 'ic', 'aria-hidden': 'true', text: '☰' }),
       escolhido ? el('span', { class: 'txt escolhido', text: escolhido }) : el('span', { class: 'txt' }, 'Locais ', el('b', { text: `(${n})` })),
@@ -322,7 +322,7 @@ const MapaCalor = (() => {
     // contornos das áreas (só o admin vê)
     M.contornos.clearLayers();
     const maxA = Math.max(1, ...d.areas.map(a => a.total));
-    const verContornos = ehAdmin() && (M.contornosVisiveis || M.modo === 'areas' || M.desenho);
+    const verContornos = pode('mapa.areas') && (M.contornosVisiveis || M.modo === 'areas' || M.desenho);
     for (const a of verContornos ? d.areas : []) {
       const sel = M.selArea === a.id, pintar = M.modo === 'areas';
       const pol = L.polygon(a.poly, pintar
@@ -380,11 +380,11 @@ const MapaCalor = (() => {
     el('strong', { text: String(p.total) }));
 
   function desenharLado() {
-    const d = M.d, pode = ehLider();
+    const d = M.d, podeMarcar = pode('mapa.marcar');
     rotuloGaveta();
     if (M.sel) {
       const p = d.pontos.find(x => x.nome === M.sel) || d.semPosicao.find(x => x.nome === M.sel);
-      if (p) return M.lado.replaceChildren(...fichaPonto(p, pode).filter(Boolean));
+      if (p) return M.lado.replaceChildren(...fichaPonto(p, podeMarcar).filter(Boolean));
       M.sel = '';
     }
     if (M.selArea) {
@@ -405,18 +405,18 @@ const MapaCalor = (() => {
         el('button', { class: 'mapa-local mapa-area-linha', title: `${a.nome} · ${plural(a.total)}`, onclick: () => selecionarArea(a.id, true) },
           el('span', { class: 'mapa-pino area', 'aria-hidden': 'true', text: '▢' }), el('span', { class: 'mapa-local-nome', text: a.nome }), el('strong', { text: String(a.total) })),
         ...ordenar(d.pontos.filter(p => p.areaId === a.id)).map(p => linhaPonto(p, true, true))]))
-        : el('p', { class: 'mudo pequeno', style: 'margin:0', text: ehAdmin() ? 'Nenhuma área desenhada ainda. Use "✏️ Desenhar área" abaixo.' : 'Nenhuma área desenhada ainda.' }),
+        : el('p', { class: 'mudo pequeno', style: 'margin:0', text: pode('mapa.areas') ? 'Nenhuma área desenhada ainda. Use "✏️ Desenhar área" abaixo.' : 'Nenhuma área desenhada ainda.' }),
       fora.length ? el('h3', { text: d.areas.length ? `Fora das áreas (${fora.length})` : `Locais no mapa (${fora.length})` }) : null,
       fora.length ? el('div', { class: 'mapa-lista' }, fora.map(p => linhaPonto(p, true))) : null,
       d.semPosicao.length ? el('h3', { text: `Sem posição no mapa (${d.semPosicao.length})` }) : null,
-      d.semPosicao.length ? el('p', { class: 'mudo pequeno', style: 'margin:0', text: pode ? 'Toque no local e marque onde ele fica. Os ROIs dele passam a aparecer no calor.' : 'Ainda não aparecem no calor.' }) : null,
+      d.semPosicao.length ? el('p', { class: 'mudo pequeno', style: 'margin:0', text: podeMarcar ? 'Toque no local e marque onde ele fica. Os ROIs dele passam a aparecer no calor.' : 'Ainda não aparecem no calor.' }) : null,
       d.semPosicao.length ? el('div', { class: 'mapa-lista' }, d.semPosicao.map(p => linhaPonto(p, false))) : null,
-      pode ? el('div', { class: 'mapa-ferramentas' },
-        el('button', { class: 'btn pequeno', onclick: novoPonto }, '➕ Novo ponto (local ou empresa)'),
-        ehAdmin() ? el('button', { class: 'btn pequeno', onclick: () => iniciarDesenho() }, '✏️ Desenhar área') : null,
-        ehAdmin() ? el('button', { class: 'btn pequeno', onclick: () => { fechar(); setTimeout(abrirLocaisIndicador, 50); } }, '🔤 Padronizar nomes') : null) : null,
+      podeMarcar || pode('mapa.areas') || pode('locais.padronizar') ? el('div', { class: 'mapa-ferramentas' },
+        podeMarcar ? el('button', { class: 'btn pequeno', onclick: novoPonto }, '➕ Novo ponto (local ou empresa)') : null,
+        pode('mapa.areas') ? el('button', { class: 'btn pequeno', onclick: () => iniciarDesenho() }, '✏️ Desenhar área') : null,
+        pode('locais.padronizar') ? el('button', { class: 'btn pequeno', onclick: () => { fechar(); setTimeout(abrirLocaisIndicador, 50); } }, '🔤 Padronizar nomes') : null) : null,
       el('p', { class: 'mudo pequeno mapa-legenda-lista', style: 'margin:0' }, '▢ área · ● local · ◆ estrutura de empresa · ○ sem posição'),
-      ehAdmin() ? el('details', { class: 'mapa-admin' },
+      pode('mapa.areas') ? el('details', { class: 'mapa-admin' },
         el('summary', { text: 'Enquadramento do mapa (admin)' }),
         el('p', { class: 'mudo pequeno', style: 'margin:0', text: d.areaPadrao ? 'Usando o enquadramento padrão (terminal, ADM, ponte e píeres).' : 'Usando o enquadramento salvo pelo administrador.' }),
         el('div', { class: 'linha', style: 'gap:6px;flex-wrap:wrap' },
@@ -477,7 +477,7 @@ const MapaCalor = (() => {
       porEmpresa(a),
       el('h3', { text: 'Locais e empresas na área' }),
       dentro.length ? el('div', { class: 'mapa-lista' }, dentro.map(p => linhaPonto(p, true))) : el('p', { class: 'mudo pequeno', style: 'margin:0', text: 'Nenhum ponto marcado dentro desta área.' }),
-      ehAdmin() ? el('div', { class: 'linha', style: 'gap:6px;flex-wrap:wrap' },
+      pode('mapa.areas') ? el('div', { class: 'linha', style: 'gap:6px;flex-wrap:wrap' },
         el('button', { class: 'btn pequeno', onclick: () => renomearArea(a) }, 'Renomear'),
         el('button', { class: 'btn pequeno', onclick: () => iniciarDesenho(a) }, 'Redesenhar'),
         el('button', { class: 'btn fantasma pequeno', onclick: () => apagarArea(a) }, 'Apagar área')) : null
