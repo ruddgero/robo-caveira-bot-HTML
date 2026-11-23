@@ -522,7 +522,13 @@ async function atualizarEstado() {
 
     if (m.relatorios !== a.relatorios && ant) aviso('📑 Relatório da equipe anterior atualizado');
     if (m.historico !== a.historico && ant) { S.historico = null; if (S.aba === 'historico' && livre) desenharHistorico(); }
-    if (m.rois !== a.rois && ant) { S.roi = null; S.ind = null; S.indResumo = null; if (S.aba === 'roi' && livre) desenharROI(); if (S.aba === 'painel' && livre) desenharPainelGerencial(); }
+    if (m.rois !== a.rois && ant) {
+      S.roi = null; S.ind = null; S.indResumo = null; S.indAtualizado = new Date();
+      if (S.aba === 'roi' && livre) desenharROI();
+      if (S.aba === 'painel' && livre && !(typeof MapaCalor !== "undefined" && MapaCalor.aberto())) desenharPainelGerencial();
+      else if (S.aba === 'painel') S.indPendente = true;   // redesenha quando a tela por cima fechar
+      if (typeof MapaCalor !== "undefined" && MapaCalor.aberto()) MapaCalor.atualizarAgora();   // mapa aberto: números na hora
+    } else if (S.indPendente && S.aba === 'painel' && livre && !(typeof MapaCalor !== "undefined" && MapaCalor.aberto())) { S.indPendente = false; desenharPainelGerencial(); }
     if (m.pendencias !== a.pendencias || m.operacoes !== a.operacoes || m.relatorios !== a.relatorios || m.plantao !== a.plantao || m.ficha !== a.ficha) {
       await carregarCentral();
       if (['central', 'pendencias', 'emails'].includes(S.aba) && livre) redesenharAba();
@@ -2409,6 +2415,7 @@ function desenharPainelGerencial() {
     chipsAtivos.length ? el('div', { class: 'mf-ativos' }, ...chipsAtivos) : null,
     chipsAtivos.length > 1 ? el('button', { type: 'button', class: 'btn fantasma pequeno ind-limpar', onclick: ev => { ev.stopPropagation(); S.indMes = 0; S.indTipos = []; S.indLocal = ''; S.indEmpresa = ''; refazer(); } }, 'Limpar') : null,
     el('span', { class: 'ind-espaco' }),
+    el('span', { class: 'ind-hora', title: 'Os números se atualizam sozinhos quando entra ou muda um ROI', text: `atualizado às ${new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}` }),
     pode('mapa.ver') ? el('button', { class: 'btn-icone btn-mapa', title: 'Mapa de calor', 'aria-label': 'Abrir o mapa de calor', onclick: ev => { ev.stopPropagation(); S.indPop = ''; abrirMapaCalor(); } }, iconeMapaCalor()) : null);
   const conteudoPopInd = chave => {
     if (chave === 'periodo') {

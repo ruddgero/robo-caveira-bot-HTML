@@ -879,3 +879,5 @@ body:has(#app:not([hidden])) #fundo-animado { opacity: .12; }
 .mapa-tela .rotulo-area-ic { width: auto !important; height: auto !important; margin: 0 !important; transform-origin: 0 0; }
 .mapa-tela .rotulo-area-ic .rot-area { position: absolute; left: 0; bottom: 3px; transform: translateX(-50%); white-space: nowrap; color: #fff; font: 700 12px system-ui, sans-serif; text-shadow: 0 0 3px #000, 0 0 6px #000, 0 1px 2px #000; pointer-events: none; }
 .dica-tend { display: flex; align-items: center; gap: 2px; }
+.ind-hora { color: var(--mudo); font-size: 12px; white-space: nowrap; }
+@media (max-width: 700px) { .ind-hora { display: none; } }

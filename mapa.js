@@ -170,7 +170,8 @@ const MapaCalor = (() => {
     M.btGaveta.title = (gavetaAberta() ? 'Fechar a lista' : 'Abrir a lista de áreas e locais') + ' (atalho: L)' + (faltam ? ` · ${faltam} sem posição no mapa` : '');
   }
 
-  async function carregar() {
+  async function carregar(silencioso) {
+    const rolagem = M.lado ? M.lado.scrollTop : 0;
     const q = new URLSearchParams();
     if (M.ano) q.set('ano', M.ano); if (M.mes) q.set('mes', M.mes);
     if (M.tipos.length) q.set('tipos', M.tipos.join(','));
@@ -178,15 +179,24 @@ const MapaCalor = (() => {
       const d = await api('GET', '/api/indicadores/mapa?' + q);
       if (!M) return;
       const primeira = !M.d;
-      M.d = d; M.ano = d.ano;
+      M.d = d; M.ano = d.ano; M.atualizadoEm = new Date();
       if (primeira) {
         M.map.setMaxBounds(limites(d.area).pad(0.6));
         M.map.fitBounds(limites(d.area));
       }
       desenhar();
       if (primeira && d.areas.length && window.innerWidth >= 1000) gaveta(true);   // ranking das áreas já à vista no computador
-    } catch (e) { aviso(e.message, true); }
+      if (!primeira) M.lado.scrollTop = rolagem;
+    } catch (e) { if (!silencioso) aviso(e.message, true); }
   }
+  // tempo real: o app avisa (a cada poucos segundos) que ROIs ou o mapa mudaram
+  function atualizarAgora() {
+    if (!M || !M.d) return;
+    if (M.marcando || M.desenho || M.popAberto || modalAberto()) { M.pendente = true; return; }   // espera terminar o que está fazendo
+    M.pendente = false;
+    carregar(true);
+  }
+  const seguirPendente = () => { if (M && M.pendente) setTimeout(atualizarAgora, 300); };
 
   function centralizar() { if (M.d) M.map.flyToBounds(limites(M.d.area), { duration: 0.6 }); }
   function trocarModo(m) {
@@ -201,7 +211,7 @@ const MapaCalor = (() => {
   function desenhar() {
     const d = M.d;
     const per = d.mes ? `${MESES_ABREV[d.mes - 1]}/${d.ano}` : `${d.ano} · ano todo`;
-    M.titulo.textContent = `${per} · ${d.total} ROI${d.total === 1 ? '' : 's'}${M.tipos.length ? ' · ' + M.tipos.join(', ') : ''}`;
+    M.titulo.textContent = `${per} · ${d.total} ROI${d.total === 1 ? '' : 's'}${M.tipos.length ? ' · ' + M.tipos.join(', ') : ''} · atualizado às ${(M.atualizadoEm || new Date()).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`;
     const mudar = fn => { fn(); carregar(); };
     const botao = (chave, conteudo, titulo, marca) => el('button', { type: 'button', class: 'mf-bt' + (M.popAberto === chave ? ' aberto' : ''), 'data-pop': chave, title: titulo, 'aria-haspopup': 'true', 'aria-expanded': String(M.popAberto === chave), onclick: ev => { ev.stopPropagation(); alternarPop(chave); } },
       ...conteudo, marca ? el('i', { class: 'mf-marca', 'aria-hidden': 'true' }) : null, el('span', { class: 'mf-seta', 'aria-hidden': 'true', text: '▾' }));
@@ -231,7 +241,7 @@ const MapaCalor = (() => {
 
   // --- quadros que abrem dos botões (popover; no celular sobem de baixo)
   function alternarPop(chave) { M.popAberto = M.popAberto === chave ? '' : chave; desenhar(); }
-  function fecharPop() { if (!M.popAberto) return; M.popAberto = ''; desenhar(); }
+  function fecharPop() { if (!M.popAberto) return; M.popAberto = ''; desenhar(); seguirPendente(); }
   function atualizarPop() {
     if (!M.pop) {
       M.pop = el('div', { class: 'mf-pop', role: 'dialog', hidden: true });
@@ -478,10 +488,12 @@ const MapaCalor = (() => {
     }
     const ordenar = l => l.slice().sort((a, b) => b.total - a.total || a.nome.localeCompare(b.nome));
     const fora = ordenar(d.pontos.filter(p => !p.areaId));
-    const busca = el('input', { type: 'search', class: 'mapa-busca', placeholder: 'Buscar área, local ou empresa…', 'aria-label': 'Buscar', oninput: e => {
-      const q = semAcento(e.target.value).toLowerCase();
+    const filtrar = v => {
+      M.busca = v; const q = semAcento(v).toLowerCase();
       M.lado.querySelectorAll('.mapa-local').forEach(b => { const achou = semAcento(b.title).toLowerCase().includes(q); b.hidden = b.classList.contains('recuo') ? !q || !achou : !!q && !achou; });
-    } });
+    };
+    const busca = el('input', { type: 'search', class: 'mapa-busca', placeholder: 'Buscar área, local ou empresa…', 'aria-label': 'Buscar', value: M.busca || '', oninput: e => filtrar(e.target.value) });
+    if (M.busca) setTimeout(() => filtrar(M.busca));
     M.lado.replaceChildren(...[
       el('div', { class: 'mapa-lado-topo' }, busca, fecharGaveta(true)),
       d.areas.length ? rankingAreas() : el('p', { class: 'mudo pequeno', style: 'margin:0', text: pode('mapa.areas') ? 'Nenhuma área desenhada ainda. Use "✏️ Desenhar área" abaixo.' : 'Nenhuma área desenhada ainda.' }),
@@ -665,6 +677,7 @@ const MapaCalor = (() => {
   function pararMarcacao() {
     M.marcando = null; M.tela.classList.remove('marcando'); semFaixa();
     if (M.temp) { M.temp.remove(); M.temp = null; }
+    seguirPendente();
   }
   function aoClicarMapa(ev) {
     if (M.desenho) return adicionarVertice(ev.latlng);
@@ -735,6 +748,7 @@ const MapaCalor = (() => {
     if (!M.desenho) return;
     M.desenho.camada.remove(); M.desenho = null;
     M.tela.classList.remove('marcando'); semFaixa();
+    seguirPendente();
   }
   function adicionarVertice(ll) {
     const pts = M.desenho.pts;
@@ -866,5 +880,5 @@ const MapaCalor = (() => {
     });
   }
 
-  return { abrir, fechar, escolherPonto };
+  return { abrir, fechar, escolherPonto, atualizarAgora, aberto: () => !!M };
 })();

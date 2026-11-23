@@ -675,7 +675,7 @@ const LIMITE = { s: -22.10, w: -41.25, n: -21.55, e: -40.80 };
 const dentro = (lat, lng) => lat >= LIMITE.s && lat <= LIMITE.n && lng >= LIMITE.w && lng <= LIMITE.e;
 const num = v => (v === null || v === undefined || v === '' ? NaN : Number(v));
 
-async function salvarMapa() { await store.set('rois_mapa', estado.mapa); }
+async function salvarMapa() { marca++; await store.set('rois_mapa', estado.mapa); }   // avisa as telas abertas (mapa e indicadores)
 
 // Ponto dentro do contorno (lng = x, lat = y)
 function dentroDoContorno(lat, lng, poly) {
