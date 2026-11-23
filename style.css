@@ -574,3 +574,10 @@ html, body { overflow-x: clip; }
 .mapa-empresa { display: grid; grid-template-columns: minmax(0, 1fr) 90px 26px; align-items: center; gap: 8px; font-size: 13px; }
 .mapa-empresa i { height: 7px; border-radius: 4px; background: #a78bfa; display: block; }
 .mapa-empresa strong { text-align: right; font-variant-numeric: tabular-nums; }
+/* Passagem de turno */
+.cartao.passagem { display: grid; gap: 10px; }
+.passagem-assumir { padding: 13px; font-size: 15px; }
+.passagem-ok { color: #86efac; }
+.passagem-origem { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.passagem-trocar summary { cursor: pointer; font-size: 13px; color: var(--mudo); width: fit-content; }
+.passagem-trocar summary:hover { color: var(--texto); }

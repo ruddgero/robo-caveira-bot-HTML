@@ -585,10 +585,7 @@ function desenharCentral() {
   const nConf = turno.filter(i => i.grupo === 'confirmar').length, nAberto = turno.filter(i => i.grupo === 'aberto').length;
   const filtrar = sub => () => { S.filtroTurno = 'turno'; S.subfiltroTurno = sub; redesenharAba(); document.querySelector('#aba-central .duas-colunas > div:last-child')?.scrollIntoView({ behavior: 'smooth' }); };
   if (!p.liderId) {
-    esq.append(el('div', { class: 'faixa atencao' },
-      el('strong', { text: 'Ninguém assumiu o plantão' }),
-      el('p', { class: 'pequeno', text: 'Ao assumir, o relatório é publicado pelo seu WhatsApp e os e-mails de bordo chegam no seu e-mail.' }),
-      ehLider() ? el('div', {}, el('button', { class: 'btn primario', onclick: assumir }, '🙋 Assumir plantão')) : null));
+    esq.append(cartaoPassagemTurno());
   } else {
     const eq = C.ficha.equipes || {};
     esq.append(el('div', { class: 'faixa' },
@@ -598,7 +595,7 @@ function desenharCentral() {
           el('h2', { text: `${E.turno.turno} · ${E.turno.data}` }),
           el('span', { class: 'mudo pequeno', text: `Líder: ${p.liderNome} · desde ${quando(p.assumidoEm)}` }),
           eq.saindo && !/conforme/i.test(eq.saindo) ? el('div', { class: 'mudo pequeno', text: `Equipe de serviço: ${eq.saindo}` }) : null),
-        ehLider() && !deplantao() ? el('button', { class: 'btn pequeno', onclick: assumir }, 'Assumir') : el('span', { class: 'etiqueta ok', text: deplantao() ? 'Você' : 'Ativo' })),
+        el('span', { class: 'etiqueta ok', text: deplantao() ? 'Você' : 'Ativo' })),
       el('div', { class: 'contadores' },
         contador(nConf, 'A confirmar', filtrar('confirmar'), nConf > 0),
         contador(nAberto, 'Em aberto', filtrar('aberto')),
@@ -630,7 +627,7 @@ function desenharCentral() {
         el('button', { class: 'btn fantasma', onclick: async () => { await api('POST', '/api/plantao/manter-turno'); recarregarTudo(); } }, 'Manter meu turno')) : null));
   }
 
-  esq.append(cartaoPassagemTurno());
+  if (p.liderId) esq.append(cartaoPassagemTurno());
   esq.append(el('div', { class: 'rodape-discreto' }, el('button', { onclick: abrirEscala }, '📦 Passagem da escala')));
 
   // --- Pendências ao lado (no celular, logo abaixo)
@@ -651,7 +648,7 @@ async function assumir() {
 }
 
 function cartaoPassagemTurno() {
-  const f = S.central.ficha;
+  const f = S.central.ficha, p = S.estado.plantao;
   const h = f.herdadoDe;
   const detalhes = el('div', { hidden: true, style: 'display:grid;gap:8px' });
   if (h) {
@@ -662,19 +659,34 @@ function cartaoPassagemTurno() {
     if (rel) detalhes.append(el('div', { class: 'texto-bruto', text: rel.texto }));
   }
   const total = h ? (h.encontrados || []).length + (h.faltando || []).length : 0;
-  return el('section', { class: 'cartao' },
-    el('div', { class: 'cartao-topo' },
-      el('div', {},
-        el('h3', { text: 'Passagem de turno' }),
-        el('h2', { text: h ? (h.publicado ? `Preparado após a publicação de ${h.autor || 'líder'}` : `Herdado de ${h.autor || 'equipe anterior'}`) : 'Turno sem herança' }),
-        el('p', { class: 'mudo pequeno', style: 'margin:4px 0 0', text: h ? `Relatório ${h.turno || ''} ${h.data || ''} · ${quando(h.capturadoEm)}` : 'Quando o relatório for postado no grupo, o robô prepara seu turno sozinho.' })),
-      h && !h.publicado ? el('button', { class: `etiqueta ${(h.faltando || []).length ? 'atencao' : 'ok'}`, style: 'cursor:pointer', onclick: () => { detalhes.hidden = !detalhes.hidden; } },
-        (h.faltando || []).length ? `⚠ ${(h.faltando || []).length} faltando ▾` : `✓ ${total} de ${total} campos ▾`) : null),
-    detalhes,
-    el('div', { class: 'linha' },
+  const faltam = h ? (h.faltando || []).length : 0;
+  // de onde veio o turno (fica menor, embaixo)
+  const origem = h ? `${h.publicado ? 'Preparado após a publicação de' : 'Relatório de'} ${h.autor || 'equipe anterior'} · ${h.turno || ''} ${h.data || ''} · ${quando(h.capturadoEm)}`
+    : 'Quando o relatório for postado no grupo, o robô prepara seu turno sozinho.';
+  const campos = h && !h.publicado ? el('button', { class: `etiqueta ${faltam ? 'atencao' : 'ok'}`, style: 'cursor:pointer', onclick: () => { detalhes.hidden = !detalhes.hidden; } },
+    faltam ? `⚠ ${faltam} faltando ▾` : `✓ ${total} de ${total} campos ▾`) : null;
+  // ação principal conforme a situação
+  let principal;
+  if (deplantao()) principal = el('h2', { class: 'passagem-ok', text: '✓ Plantão assumido por você' });
+  else if (!p.liderId) principal = ehLider()
+    ? el('button', { class: 'btn primario largo passagem-assumir', onclick: assumir }, '🙋 Assumir plantão')
+    : el('h2', { text: 'Ninguém assumiu o plantão' });
+  else principal = el('div', { class: 'cartao-topo', style: 'align-items:center' },
+    el('h2', { text: `Plantão com ${p.liderNome}` }),
+    ehLider() ? el('button', { class: 'btn pequeno', onclick: assumir }, 'Assumir') : null);
+  const trocar = el('details', { class: 'passagem-trocar' },
+    el('summary', { text: 'Trocar a herança' }),
+    el('div', { class: 'linha', style: 'margin-top:8px' },
       el('button', { class: 'btn pequeno', onclick: () => trocarAba('historico') }, '🗂️ Escolher no histórico'),
       el('button', { class: 'btn fantasma pequeno', onclick: abrirColarRelatorio }, '📋 Colar relatório'),
-      ehLider() ? el('button', { class: 'btn fantasma pequeno', onclick: novaEmBranco }, 'Turno em branco') : null)
+      ehLider() ? el('button', { class: 'btn fantasma pequeno', onclick: novaEmBranco }, 'Turno em branco') : null));
+  return el('section', { class: 'cartao passagem' },
+    el('h3', { text: 'Passagem de turno' }),
+    principal,
+    !p.liderId && ehLider() ? el('p', { class: 'mudo pequeno', style: 'margin:0', text: 'Ao assumir, o relatório é publicado pelo seu WhatsApp e os e-mails de bordo chegam no seu e-mail.' }) : null,
+    el('div', { class: 'passagem-origem' }, el('span', { class: 'mudo pequeno', text: origem }), campos),
+    detalhes,
+    trocar
   );
 }
 
@@ -1815,7 +1827,6 @@ async function abrirOrganograma() {
     })));
 
   abrirPainel('Organograma operacional', [
-    el('p', { class: 'mudo pequeno', text: 'Segurança Patrimonial · só as equipes operacionais. O item 8 do relatório sai daqui e da escala, já com as férias aplicadas.' }),
     escala, subs, ...equipes,
     ehAdmin() ? el('div', {}, el('button', { class: 'btn', onclick: () => editarPessoaModal(o, {}, 'FERISTA', recarregar) }, '+ Colaborador')) : null
   ]);
