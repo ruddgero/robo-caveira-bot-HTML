@@ -2406,10 +2406,8 @@ function desenharPainelGerencial() {
     dica,
     el('section', { class: 'cartao' },
       el('button', { class: 'btn fantasma pequeno', style: 'justify-self:start', onclick: () => { S.indVista = 'inicio'; desenharPainelGerencial(); } }, '‹ Indicadores'),
-      el('div', { class: 'cartao-topo' }, el('h2', { text: '📊 Indicadores › Ocorrências' }),
-        el('div', { class: 'linha', style: 'gap:6px;justify-content:flex-end' },
-          el('button', { class: 'btn pequeno', onclick: ev => { ev.stopPropagation(); imprimirResumoIndicador(d); } }, '🖨️ Resumo para a gerência'),
-          ehAdmin() ? el('button', { class: 'btn pequeno', onclick: abrirLocaisIndicador }, '📍 Locais') : null))),
+      el('div', { class: 'cartao-topo' }, el('h2', { text: 'Ocorrências' }),
+        ehLider() ? el('button', { class: 'btn-icone btn-mapa', title: 'Mapa de calor', 'aria-label': 'Abrir o mapa de calor', onclick: ev => { ev.stopPropagation(); abrirMapaCalor(); } }, iconeMapaCalor()) : null)),
     el('div', { class: 'ind-fixo' }, linhaAnos, linhaMeses, linhaAtivos),
     el('div', { class: 'ind-kpis' }, kpis),
     secao(`Por mês e tipo · ${d.ano}`, legenda, colunas),
@@ -2435,6 +2433,42 @@ function desenharPainelGerencial() {
   c.onclick = esconder;
 }
 
+
+// Ícone do mapa de calor: mapa dobrado + chama laranja (SVG montado sem innerHTML)
+function iconeMapaCalor() {
+  const NS = 'http://www.w3.org/2000/svg';
+  const svg = (w, attrs, ...filhos) => { const e = document.createElementNS(NS, w); for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v); e.append(...filhos); return e; };
+  return el('span', { class: 'icone-mapa', 'aria-hidden': 'true' },
+    svg('svg', { width: 20, height: 20, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': 1.8, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' },
+      svg('path', { d: 'M3 7l6-3 6 3 6-3v13l-6 3-6-3-6 3z' }), svg('path', { d: 'M9 4v13M15 7v13' })),
+    svg('svg', { class: 'chama', width: 12, height: 12, viewBox: '0 0 24 24', fill: '#f97316' },
+      svg('path', { d: 'M12 2c1 4 5 5 5 10a5 5 0 0 1-10 0c0-3 2-4 2-7 2 1 3 3 3 5 1-2 1-5 0-8z' })));
+}
+
+// Carrega o Leaflet e o mapa só na primeira vez que o mapa é aberto
+let carregandoMapa = null;
+function abrirMapaCalor() {
+  const v = encodeURIComponent(S.meta?.versao || '1');
+  carregandoMapa = carregandoMapa || new Promise((ok, falha) => {
+    const css = el('link', { rel: 'stylesheet', href: '/leaflet.css?v=' + v });
+    document.head.append(css);
+    const js = src => new Promise((ok2, falha2) => { const s = el('script', { src }); s.onload = ok2; s.onerror = falha2; document.head.append(s); });
+    js('/leaflet.js?v=' + v).then(() => js('/mapa.js?v=' + v)).then(ok, falha);
+  });
+  carregandoMapa.then(() => MapaCalor.abrir()).catch(() => { carregandoMapa = null; aviso('Não foi possível abrir o mapa. Verifique a conexão.', true); });
+}
+
+// Resumo para a gerência a partir do Menu (usa os filtros atuais do indicador)
+async function resumoGerenciaDoMenu() {
+  try {
+    let d = S.indVista === 'ocorrencias' && S.ind ? S.ind : null;
+    if (!d) {
+      const q = new URLSearchParams(); if (S.indAno) q.set('ano', S.indAno); if (S.indMes) q.set('mes', S.indMes);
+      d = await api('GET', '/api/indicadores/ocorrencias?' + q);
+    }
+    imprimirResumoIndicador(d);
+  } catch (e) { aviso(e.message, true); }
+}
 
 // Lista dos ROIs de um mês (aberta pelo gráfico "Por mês e tipo")
 function abrirRoisDoMes(d, m, tipoInicial) {
@@ -2570,6 +2604,8 @@ function abrirMenu() {
       item('🗃️', 'Rascunhos de turnos arquivados', abrirHistorico),
       item('✨', `Fundo animado: ${Fundo.ativo() ? 'ligado' : 'desligado'}`, () => { Fundo.ligar(!Fundo.ativo()); aviso(Fundo.ativo() ? 'Fundo animado ligado' : 'Fundo animado desligado (economiza bateria)'); }),
       item('🧑‍🤝‍🧑', 'Organograma, escala e férias', abrirOrganograma),
+      item('🖨️', 'Resumo de ocorrências para a gerência', resumoGerenciaDoMenu),
+      ehAdmin() ? item('📍', 'Locais do indicador de ocorrências', abrirLocaisIndicador) : null,
       ehAdmin() ? item('👥', 'Usuários', abrirUsuarios) : null,
       ehAdmin() ? item('⚙️', 'Configurações', abrirConfig) : null,
       item('🚪', 'Sair', async () => { await api('POST', '/api/logout'); mostrarLogin(); }))

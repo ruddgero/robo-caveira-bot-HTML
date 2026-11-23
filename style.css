@@ -454,3 +454,51 @@ html, body { overflow-x: clip; }
 @media (hover: hover) { .ind-col .ind-pilha span { cursor: pointer; } .ind-col .ind-pilha span:hover { filter: brightness(1.25); } }
 .ponto-tipo { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
 .ind-dica { width: 260px; }
+
+/* ---------- Mapa de calor (tela cheia) ---------- */
+.btn-mapa { color: var(--mudo); flex: none; }
+.btn-mapa:hover, .btn-mapa:focus-visible { color: var(--texto); border-color: #34497a; }
+.icone-mapa { position: relative; display: inline-grid; place-items: center; width: 22px; height: 22px; }
+.icone-mapa .chama { position: absolute; right: -3px; bottom: -3px; }
+.mapa-tela { position: fixed; inset: 0; z-index: 45; display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; background: var(--fundo); padding-top: env(safe-area-inset-top); }
+.mapa-topo { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--borda); background: rgba(11, 17, 32, .96); }
+.mapa-tit { flex: 1; min-width: 0; display: grid; }
+.mapa-sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mapa-acoes { display: flex; align-items: center; gap: 6px; }
+.mapa-acoes .btn-icone { font-size: 20px; }
+.mapa-modo { display: inline-flex; border: 1px solid var(--borda); border-radius: 10px; overflow: hidden; }
+.mapa-modo button { padding: 7px 12px; border: 0; background: var(--superficie); cursor: pointer; font-size: 13px; }
+.mapa-modo button.ativo { background: var(--primario); color: #fff; }
+.mapa-filtros { display: grid; gap: 6px; padding: 8px 14px; border-bottom: 1px solid var(--borda); background: rgba(16, 24, 44, .96); }
+.mapa-filtros .filtro { padding: 5px 10px; font-size: 12.5px; display: inline-flex; align-items: center; gap: 6px; }
+.mapa-corpo { display: grid; grid-template-rows: minmax(0, 1fr) minmax(0, 38%); min-height: 0; }
+.mapa-mapa { min-height: 0; background: #0a1322; }
+.mapa-lado { overflow-y: auto; padding: 12px 14px calc(12px + env(safe-area-inset-bottom)); display: grid; gap: 10px; align-content: start; border-top: 1px solid var(--borda); background: var(--superficie); }
+.mapa-lado h3 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--mudo); }
+@media (min-width: 900px) {
+  .mapa-corpo { grid-template-rows: none; grid-template-columns: minmax(0, 1fr) 340px; }
+  .mapa-lado { border-top: 0; border-left: 1px solid var(--borda); }
+}
+.mapa-lista { display: grid; gap: 4px; }
+.mapa-local, .mapa-roi { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; padding: 9px 10px; border-radius: 10px; border: 1px solid var(--borda); background: var(--superficie-2); cursor: pointer; }
+.mapa-local:hover, .mapa-roi:hover { border-color: #34497a; }
+.mapa-local-nome { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mapa-pino { color: #f97316; }
+.mapa-pino.sem { color: var(--mudo); }
+.mapa-roi .tit { font-size: 13.5px; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.mapa-roi .sub { font-size: 12.5px; color: var(--mudo); }
+.mapa-tipos { display: flex; flex-wrap: wrap; gap: 6px 12px; font-size: 13px; }
+.mapa-tipo { display: inline-flex; align-items: center; gap: 6px; }
+.mapa-admin { display: grid; gap: 6px; padding-top: 8px; border-top: 1px dashed var(--borda); }
+.mapa-faixa { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; padding: 10px 14px calc(10px + env(safe-area-inset-bottom)); background: #2a2010; border-top: 1px solid #5a4313; color: #fcd34d; }
+.mapa-tela.marcando .mapa-mapa { cursor: crosshair; }
+.mapa-calor-canvas { position: absolute; pointer-events: none; }
+.mapa-bolha { background: none; border: 0; }
+.mapa-bolha span { display: grid; place-items: center; width: 100%; height: 100%; border-radius: 50%; font: 700 13px system-ui, sans-serif; color: #fff; background: color-mix(in srgb, var(--cor) 80%, transparent); border: 2px solid #fff; box-shadow: 0 2px 10px rgba(0,0,0,.5); }
+.mapa-bolha.discreta span { background: transparent; border: 2px solid rgba(255,255,255,.75); box-shadow: none; }
+.mapa-bolha.sel span { outline: 3px solid #f97316; outline-offset: 2px; }
+.mapa-bolha.nova span { background: #f97316; border-color: #fff; }
+.mapa-tela .leaflet-container { background: #0a1322; font: 12px system-ui, sans-serif; }
+.mapa-tela .leaflet-container .leaflet-control-attribution { background: rgba(11, 17, 32, .8); color: #b9c3d8; }
+.mapa-tela .leaflet-container .leaflet-control-attribution a { color: #c7d5ff; }
+.mapa-tela .leaflet-bar a { background: var(--superficie); color: var(--texto); border-bottom-color: var(--borda); }

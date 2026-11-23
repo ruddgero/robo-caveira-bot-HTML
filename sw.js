@@ -1,6 +1,6 @@
 // Service worker: guarda só a "casca" do app para abrir rápido.
 // Dados (/api) nunca ficam em cache.
-const CACHE = 'caveira-v6-6-1';
+const CACHE = 'caveira-v6-7-0';
 const CASCA = ['/', '/index.html', '/style.css', '/app.js', '/manifest.json', '/icon.svg', '/logo.svg'];
 
 self.addEventListener('install', e => {
@@ -15,7 +15,7 @@ self.addEventListener('activate', e => {
 
 self.addEventListener('fetch', e => {
   const url = new URL(e.request.url);
-  if (e.request.method !== 'GET' || url.pathname.startsWith('/api/') || url.pathname === '/ping') return;
+  if (e.request.method !== 'GET' || url.origin !== self.location.origin || url.pathname.startsWith('/api/') || url.pathname === '/ping') return;
   e.respondWith(
     fetch(e.request)
       .then(r => { const copia = r.clone(); caches.open(CACHE).then(c => c.put(e.request, copia)); return r; })

@@ -19,7 +19,7 @@ const ROI = require('./roi');
 
 // Arquivos da tela: SÓ estes podem ser entregues ao navegador
 const PASTA_PUBLICA = __dirname;
-const ARQUIVOS_PUBLICOS = new Set(['/index.html', '/app.js', '/style.css', '/manifest.json', '/sw.js', '/icon.svg', '/logo.svg', '/icon-192.png', '/icon-512.png', '/apple-touch-icon.png']);
+const ARQUIVOS_PUBLICOS = new Set(['/index.html', '/app.js', '/mapa.js', '/leaflet.js', '/leaflet.css', '/style.css', '/manifest.json', '/sw.js', '/icon.svg', '/logo.svg', '/icon-192.png', '/icon-512.png', '/apple-touch-icon.png']);
 const COOKIE = 'cv_sessao';
 const DURACAO_SESSAO_MS = 14 * 24 * 60 * 60 * 1000;
 let SEGREDO = null;
@@ -504,6 +504,39 @@ rota('GET', '/api/indicadores/ocorrencias', async req => {
 rota('GET', '/api/indicadores/locais', async () => ({ locais: ROI.listaDeLocais() }));
 rota('POST', '/api/indicadores/locais', async (req, res, { corpo, u }) => ({ locais: await ROI.renomearLocal(corpo.variantes, corpo.nome, u) }), { perfis: ['ADMIN'] });
 
+// --- Indicadores › Ocorrências › Mapa de calor (líder e admin)
+rota('GET', '/api/indicadores/mapa', async req => {
+    const q = new URL(req.url, 'http://x').searchParams;
+    return ROI.dadosDoMapa({ ano: q.get('ano'), mes: q.get('mes'), tipos: q.get('tipos'), empresa: q.get('empresa') });
+}, { perfis: LIDERES });
+rota('PUT', '/api/indicadores/mapa/ponto', async (req, res, { corpo, u }) => ROI.posicionarLocal(corpo.nome, corpo.lat === null ? null : corpo.lat, corpo.lng, u), { perfis: LIDERES });
+rota('PUT', '/api/indicadores/mapa/area', async (req, res, { corpo, u }) => ROI.salvarArea(corpo.area === null ? null : corpo.area, u), { perfis: ['ADMIN'] });
+
+// Imagem de satélite (Esri World Imagery) passando pelo servidor: a chave do ArcGIS
+// fica só no Render (ARCGIS_API_KEY) e o navegador só fala com o próprio app.
+const LADRILHOS = new Map();   // cache simples em memória (últimos ~800)
+rota('GET', '/api/mapa/ladrilho/:z/:x/:y', async (req, res, { params }) => {
+    const z = Number(params.z), x = Number(params.x), y = Number(params.y);
+    if (![z, x, y].every(Number.isInteger) || !ROI.ladrilhoPermitido(z, x, y)) return [404, { erro: 'Fora da área do mapa.' }];
+    const chave = `${z}/${x}/${y}`;
+    let img = LADRILHOS.get(chave);
+    if (!img) {
+        const k = process.env.ARCGIS_API_KEY;
+        const url = k
+            ? `https://ibasemaps-api.arcgis.com/arcgis/rest/services/World_Imagery/MapServer/tile/${z}/${y}/${x}?token=${encodeURIComponent(k)}`
+            : `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${y}/${x}`;
+        let r;
+        try { r = await fetch(url, { signal: AbortSignal.timeout(10000) }); } catch { return [502, { erro: 'Imagem de satélite indisponível.' }]; }
+        if (!r.ok) return [502, { erro: 'Imagem de satélite indisponível.' }];
+        img = { tipo: r.headers.get('content-type') || 'image/jpeg', dados: Buffer.from(await r.arrayBuffer()) };
+        LADRILHOS.set(chave, img);
+        if (LADRILHOS.size > 800) LADRILHOS.delete(LADRILHOS.keys().next().value);
+    }
+    res.writeHead(200, { 'Content-Type': img.tipo, 'Content-Length': img.dados.length, 'Cache-Control': 'private, max-age=604800' });
+    res.end(img.dados);
+    return { __enviado: true };
+}, { perfis: LIDERES });
+
 // --- Escala
 rota('GET', '/api/escala', async () => nucleo.construirPassagem());
 rota('POST', '/api/escala/iniciar', async (req, res, { u }) => { await nucleo.iniciarEscala(u); return nucleo.construirPassagem(); }, { perfis: LIDERES });
@@ -609,6 +642,7 @@ async function tratar(req, res) {
         const params = Object.fromEntries(r.nomes.map((n, i) => [n, decodeURIComponent(m[i + 1])]));
         const corpo = req.method === 'GET' ? {} : await lerCorpo(req);
         const saida = await r.fn(req, res, { corpo, params, u });
+        if (saida && saida.__enviado) return;
         if (Array.isArray(saida)) return enviarJson(res, saida[0], saida[1]);
         if (saida && saida.__arquivo) {
             res.writeHead(200, {

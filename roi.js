@@ -18,7 +18,7 @@ const GRUPOS_ROI = {
 const MAX_FOTOS = 8;
 const CONTROLE_INICIAL = { 2026: 30 };     // último número do controle anual entregue pela equipe (030/2026)
 
-const estado = { rois: [], controle: { ...CONTROLE_INICIAL }, locais: {}, carregado: false };   // locais: grafia → nome confirmado
+const estado = { rois: [], controle: { ...CONTROLE_INICIAL }, locais: {}, mapa: { area: null, pontos: {} }, carregado: false };   // mapa.pontos: nome do local → { lat, lng }   // locais: grafia → nome confirmado
 let marca = 0;
 const nucleo = () => require('./nucleo');   // carregado sob demanda (evita dependência circular)
 
@@ -121,6 +121,8 @@ async function carregar() {
     estado.rois = await store.get('rois', []) || [];
     estado.controle = { ...CONTROLE_INICIAL, ...(await store.get('rois_controle', {}) || {}) };
     estado.locais = await store.get('rois_locais', {}) || {};
+    const m = await store.get('rois_mapa', null) || {};
+    estado.mapa = { area: m.area || null, pontos: m.pontos || {} };
     estado.carregado = true;
     marca++;
 }
@@ -626,14 +628,90 @@ function listaDeLocais() {
 
 // renomear um local do indicador (mesmo nome de outro = juntar). O texto do ROI não muda.
 async function renomearLocal(variantes, nome, u) {
+    const antes = mapaDeLocais();
+    const nomeAntigo = (variantes || []).map(v => antes.get(limparLocal(v))).find(Boolean);
     for (const v of variantes || []) {
         const k = limparLocal(v); if (!k) continue;
         if (limpo(nome)) estado.locais[k] = limparLocal(nome); else delete estado.locais[k];
     }
     await store.set('rois_locais', estado.locais);
+    // a posição no mapa acompanha o novo nome
+    const novo = mapaDeLocais().get(limparLocal((variantes || [])[0] || ''));
+    if (nomeAntigo && novo && novo !== nomeAntigo && estado.mapa.pontos[nomeAntigo] && !estado.mapa.pontos[novo]) {
+        estado.mapa.pontos[novo] = estado.mapa.pontos[nomeAntigo];
+        await salvarMapa();
+    }
     marca++;
     nucleo().auditar(u, 'Indicador: local ajustado', `${(variantes || []).join(' | ')} → ${nome || '(automático)'}`);
     return listaDeLocais();
+}
+
+// ------------------------- Mapa de calor -------------------------
+// Área padrão: terminal da Ferroport (retroárea, ADM, ponte e píeres offshore)
+const AREA_PADRAO = { s: -21.8360, w: -41.0360, n: -21.8040, e: -40.9800 };
+// limite de segurança: só aceita pontos e área perto do Porto do Açu
+const LIMITE = { s: -22.10, w: -41.25, n: -21.55, e: -40.80 };
+const dentro = (lat, lng) => lat >= LIMITE.s && lat <= LIMITE.n && lng >= LIMITE.w && lng <= LIMITE.e;
+const num = v => (v === null || v === undefined || v === '' ? NaN : Number(v));
+
+async function salvarMapa() { await store.set('rois_mapa', estado.mapa); }
+
+// Dados do mapa: os mesmos filtros do indicador (ano, mês, tipos, empresa) agrupados por local
+function dadosDoMapa(filtros = {}) {
+    const d = indicadorOcorrencias({ ...filtros, local: '' });
+    const pontos = [], semPosicao = [];
+    for (const l of d.locais) {
+        if (l.nome === '(sem local)') continue;
+        const p = estado.mapa.pontos[l.nome];
+        const rois = d.lista.filter(r => r.local === l.nome).map(r => ({ id: r.id, numero: r.numero, tipo: r.tipo, data: r.data, simulado: r.simulado, descricao: String(r.descricao || '').slice(0, 120) }));
+        const item = { nome: l.nome, total: l.total, porTipo: l.porTipo, simulados: l.simulados, rois };
+        if (p) pontos.push({ ...item, lat: p.lat, lng: p.lng }); else semPosicao.push(item);
+    }
+    return {
+        ano: d.ano, mes: d.mes, anos: d.anos, meses: d.meses.map(m => ({ mes: m.mes, total: m.total })),
+        grupos: d.grupos, filtroTipos: d.filtroTipos, tiposTodos: d.tiposTodos,
+        total: d.locais.reduce((s, l) => s + l.total, 0),
+        area: estado.mapa.area || AREA_PADRAO, areaPadrao: !estado.mapa.area,
+        pontos, semPosicao
+    };
+}
+
+async function posicionarLocal(nome, lat, lng, u) {
+    nome = limparLocal(nome);
+    if (!nome) throw erro('Informe o local.', 400);
+    if (lat === null) {
+        delete estado.mapa.pontos[nome];
+        nucleo().auditar(u, 'Mapa: posição removida', nome);
+    } else {
+        lat = num(lat); lng = num(lng);
+        if (!isFinite(lat) || !isFinite(lng) || !dentro(lat, lng)) throw erro('Posição fora da área do Porto do Açu.', 400);
+        estado.mapa.pontos[nome] = { lat: +lat.toFixed(6), lng: +lng.toFixed(6), por: u.nome, em: new Date().toISOString() };
+        nucleo().auditar(u, 'Mapa: local georreferenciado', `${nome} → ${lat.toFixed(5)}, ${lng.toFixed(5)}`);
+    }
+    await salvarMapa();
+    return { ok: true };
+}
+
+async function salvarArea(a, u) {
+    if (a === null) { estado.mapa.area = null; await salvarMapa(); nucleo().auditar(u, 'Mapa: área padrão restaurada'); return { area: AREA_PADRAO }; }
+    const area = { s: num(a.s), w: num(a.w), n: num(a.n), e: num(a.e) };
+    if (![area.s, area.w, area.n, area.e].every(isFinite) || area.s >= area.n || area.w >= area.e || !dentro(area.s, area.w) || !dentro(area.n, area.e))
+        throw erro('Área inválida.', 400);
+    for (const k of Object.keys(area)) area[k] = +area[k].toFixed(6);
+    estado.mapa.area = area;
+    await salvarMapa();
+    nucleo().auditar(u, 'Mapa: área do mapa salva', JSON.stringify(area));
+    return { area };
+}
+
+// Faixa de ladrilhos (tiles) permitida para o zoom z: só a área do mapa (com folga)
+function ladrilhoPermitido(z, x, y) {
+    if (!Number.isInteger(z) || z < 12 || z > 19) return false;
+    const a = estado.mapa.area || AREA_PADRAO, folga = 0.03;
+    const n = 2 ** z;
+    const tx = lng => Math.floor((lng + 180) / 360 * n);
+    const ty = lat => { const r = lat * Math.PI / 180; return Math.floor((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2 * n); };
+    return x >= tx(a.w - folga) && x <= tx(a.e + folga) && y >= ty(a.n + folga) && y <= ty(a.s - folga);
 }
 
 function mesAnoDe(r) {
@@ -782,7 +860,7 @@ function indicadorOcorrencias({ ano, mes, tipos: filtroTipos, local: filtroLocal
 }
 
 module.exports = {
-    indicadorOcorrencias, listaDeLocais, renomearLocal, mapaDeLocais,
+    indicadorOcorrencias, listaDeLocais, renomearLocal, mapaDeLocais, dadosDoMapa, posicionarLocal, salvarArea, ladrilhoPermitido,
     GRUPOS_ROI, MAX_FOTOS, estado, carregar, marcaRois, listar, detalhe, criar, editar, registrar, cancelar,
     adicionarFoto, removerFoto, lerFoto, importarControle, lerControle, resumoGeral, locaisConhecidos, proximoNumero,
     xlsxDoRoi, xlsxControle, xlsxControleTodos, montarXlsxRoi, linhaItem7, linhaControle, codigoDoTipo, adivinharTipo, agruparLocais, lerNumero, numeroRoi
