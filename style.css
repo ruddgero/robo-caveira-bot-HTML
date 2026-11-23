@@ -782,3 +782,18 @@ body:has(#app:not([hidden])) #fundo-animado { opacity: .12; }
 .ponto-tela .leaflet-container .leaflet-control-attribution { background: rgba(11, 17, 32, .8); color: #b9c3d8; }
 .ponto-tela .leaflet-bar a { background: var(--superficie); color: var(--texto); border-bottom-color: var(--borda); }
 .ponto-tela .leaflet-control-scale-line { background: rgba(11, 17, 32, .8); color: #e6eaf3; border-color: #e6eaf3; }
+.roi-onde { justify-self: start; }
+.roi-ponto { grid-template-columns: auto minmax(0, 1fr); align-items: center; padding: 8px 10px; }
+.roi-ponto > .roi-ponto-linha, .roi-ponto > .roi-ponto-sug { grid-column: 1 / -1; }
+.roi-ponto-linha { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.roi-ponto-ic { color: #f97316; display: inline-flex; }
+.roi-ponto-txt { flex: 1; min-width: 0; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.roi-ponto-acao { border: 0; background: none; color: #93b4ff; font: 600 13px system-ui, sans-serif; cursor: pointer; padding: 4px 6px; border-radius: 6px; white-space: nowrap; }
+.roi-ponto-acao:hover { background: var(--superficie-2); }
+.roi-ponto-acao.x { color: var(--mudo); }
+@media (max-width: 600px) {
+  .roi-ponto-txt { white-space: normal; font-size: 13.5px; }
+  .roi-ponto-linha { flex-wrap: wrap; }
+  .pt-topo .linha { width: 100%; display: grid !important; grid-template-columns: auto 1fr 1.3fr; }
+  .pt-topo .linha .btn { padding-left: 8px; padding-right: 8px; justify-content: center; }
+}

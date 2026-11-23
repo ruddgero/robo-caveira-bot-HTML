@@ -768,7 +768,7 @@ function pontoDoRoi(lat, lng) {
         .filter(x => x.metros <= 400 && (!a || x.area === a.nome)).sort((x, y) => x.metros - y.metros).slice(0, 5);
     return { area: a ? a.nome : '', sugestoes };
 }
-const mapaBase = () => ({ area: estado.mapa.area || AREA_PADRAO });
+const mapaBase = () => ({ area: estado.mapa.area || AREA_PADRAO, pontos: Object.fromEntries(Object.entries(estado.mapa.pontos).map(([n, p]) => [n, [p.lat, p.lng]])), mapaLocais: Object.fromEntries(mapaDeLocais()) });
 
 async function posicionarLocal(nome, lat, lng, u, extra = {}) {
     nome = limparLocal(nome);

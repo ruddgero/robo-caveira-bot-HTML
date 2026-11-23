@@ -657,21 +657,27 @@ const MapaCalor = (() => {
 
   // ------------------- escolher o ponto de um ROI -------------------
   // Abre o satélite em tela cheia com um alvo no centro: arraste o mapa (ou toque) até o ponto exato.
-  function escolherPonto(inicial) {
+  function escolherPonto(inicial, opcoes = {}) {
     return new Promise(async ok => {
-      let base = null;
-      try { base = (await api('GET', '/api/roi/mapa-base')).area; } catch (_) {}
+      const base = opcoes.base || null;
       const info = el('div', { class: 'pt-info mudo pequeno', text: 'Arraste o mapa até o alvo ficar no ponto exato, ou toque no lugar.' });
       const caixa = el('div', { class: 'pt-mapa' });
-      let terminou = false, timer = null;
+      let terminou = false, timer = null, gps = null;   // gps: último ponto do GPS (vale enquanto o mapa não for arrastado)
       const fim = v => { if (terminou) return; terminou = true; document.removeEventListener('keydown', tecla); mapa.remove(); tela.remove(); ok(v); };
       const tecla = e => { if (e.key === 'Escape') fim(null); };
+      const podeGps = !!navigator.geolocation && window.isSecureContext;
+      const btGps = podeGps ? el('button', { type: 'button', class: 'btn', onclick: () => localizar(true) }, '📡 Estou aqui') : null;
       const tela = el('div', { class: 'ponto-tela', role: 'dialog', 'aria-label': 'Marcar onde aconteceu' },
         el('header', { class: 'pt-topo' },
-          el('div', { class: 'pt-tit' }, el('strong', { text: 'Onde aconteceu?' }), info),
+          el('div', { class: 'pt-tit' }, el('strong', { text: 'Onde foi?' }), info),
           el('div', { class: 'linha', style: 'gap:6px' },
             el('button', { type: 'button', class: 'btn fantasma', onclick: () => fim(null) }, 'Cancelar'),
-            el('button', { type: 'button', class: 'btn primario', onclick: () => { const c = mapa.getCenter(); fim({ lat: c.lat, lng: c.lng, origem: 'mapa' }); } }, '📍 Usar este ponto'))),
+            btGps,
+            el('button', { type: 'button', class: 'btn primario', onclick: () => {
+              const c = mapa.getCenter();
+              const doGps = gps && mapa.distance(c, [gps.lat, gps.lng]) < 5;
+              fim(doGps ? { ...gps } : { lat: c.lat, lng: c.lng, origem: 'mapa' });
+            } }, '📍 Usar este ponto'))),
         el('div', { class: 'pt-corpo' }, caixa, el('div', { class: 'pt-alvo', 'aria-hidden': 'true' }, el('i'), el('b'))));
       document.body.append(tela);
       document.addEventListener('keydown', tecla);
@@ -679,7 +685,7 @@ const MapaCalor = (() => {
       mapa.attributionControl.setPrefix('Leaflet');
       L.tileLayer(URL_LADRILHO, { maxNativeZoom: 18, maxZoom: 19, minZoom: 13, attribution: ATRIBUICAO }).addTo(mapa);
       L.control.scale({ imperial: false, position: 'bottomleft', maxWidth: 120 }).addTo(mapa);
-      if (inicial && isFinite(inicial.lat)) mapa.setView([inicial.lat, inicial.lng], 18);
+      if (inicial && isFinite(inicial.lat)) mapa.setView([inicial.lat, inicial.lng], inicial.zoom || 18);
       else if (base) mapa.fitBounds(limites(base)); else mapa.setView([-21.82137, -41.02123], 16);
       if (base) mapa.setMaxBounds(limites(base).pad(0.6));
       mapa.on('click', ev => mapa.panTo(ev.latlng));
@@ -689,7 +695,25 @@ const MapaCalor = (() => {
         catch (e) { info.textContent = e.message; }
       }, 250); };
       mapa.on('moveend', atualizar);
+      // GPS: "Estou aqui" (ou sozinho no celular, quando a localização já está liberada)
+      function localizar(clicou) {
+        if (!podeGps) return;
+        if (clicou) info.textContent = 'Buscando sua localização…';
+        navigator.geolocation.getCurrentPosition(pos => {
+          if (terminou) return;
+          const lat = pos.coords.latitude, lng = pos.coords.longitude, prec = Math.round(pos.coords.accuracy);
+          if (base && !limites(base).pad(0.6).contains([lat, lng])) { if (clicou) aviso('Você não está no Porto do Açu. Marque o ponto no mapa.', true); return; }
+          mapa.setView([lat, lng], 18);
+          if (prec > 50) { gps = null; aviso(`Precisão baixa do GPS (± ${prec} m). Ajuste o alvo no mapa.`, true); }
+          else gps = { lat, lng, origem: 'gps', precisao: prec };
+        }, err => { if (clicou) aviso(err.code === 1 ? 'Permita o uso da localização no navegador.' : 'Não foi possível pegar a localização. Marque no mapa.', true); },
+        { enableHighAccuracy: true, timeout: 15000, maximumAge: 30000 });
+      }
+      if (opcoes.gpsAuto && podeGps && !(inicial && inicial.marcado)) {
+        try { const st = await navigator.permissions?.query({ name: 'geolocation' }); if (st?.state === 'granted') localizar(false); } catch (_) {}
+      }
       setTimeout(() => mapa.invalidateSize(), 50);
+      atualizar();
     });
   }
 

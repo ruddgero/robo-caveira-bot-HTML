@@ -3424,44 +3424,64 @@ function abrirFormRoi(r) {
   };
   const simulado = el('input', { type: 'checkbox', checked: !!r.simulado, disabled: somenteLeitura });
 
-  // ponto exato da ocorrência (opcional): marcar no mapa ou usar o GPS do celular
-  let geo = r.geo ? { ...r.geo } : null, areaMapa = r.areaMapa || '', sugestoes = [];
+  // ponto exato da ocorrência (opcional): "📍 Onde foi?" abre o satélite; no mapa há o "📡 Estou aqui"
+  let geo = r.geo ? { ...r.geo } : null, areaMapa = r.areaMapa || '', sugestoes = [], automatico = null;
   const blocoPonto = el('div', { class: 'roi-ponto' });
-  const resolver = async () => {
+  const lerUltimo = () => { try { return JSON.parse(localStorage.getItem('caveira.ultimoPonto') || 'null'); } catch (_) { return null; } };
+  const resolver = async (preencher) => {
+    automatico = null;
     if (!geo) { areaMapa = ''; sugestoes = []; return desenharPonto(); }
     try { const x = await api('GET', `/api/roi/ponto?lat=${geo.lat}&lng=${geo.lng}`); areaMapa = x.area; sugestoes = x.sugestoes; } catch (e) { aviso(e.message, true); }
+    // óbvio: só um ponto cadastrado a menos de 30 m e o Local vazio → preenche sozinho (com desfazer)
+    const perto = sugestoes.filter(x => x.metros <= 30);
+    if (preencher && perto.length === 1 && !campos.local.value.trim()) {
+      const x = perto[0];
+      automatico = { local: campos.local.value, empresa: campos.empresa.value, nome: x.nome };
+      campos.local.value = x.nome;
+      if (x.tipo === 'empresa' && x.empresa && !campos.empresa.value.trim()) campos.empresa.value = x.empresa;
+    }
     desenharPonto();
   };
-  const marcar = async () => {
+  const ondeFoi = async () => {
     try { await garantirMapa(); } catch (_) { return aviso('Não foi possível abrir o mapa. Verifique a conexão.', true); }
-    const p = await MapaCalor.escolherPonto(geo);
-    if (p) { geo = p; await resolver(); }
-  };
-  const usarGps = () => {
-    if (!navigator.geolocation) return aviso('Este aparelho não informa a localização.', true);
-    aviso('Buscando sua localização…');
-    navigator.geolocation.getCurrentPosition(async pos => {
-      geo = { lat: pos.coords.latitude, lng: pos.coords.longitude, origem: 'gps', precisao: Math.round(pos.coords.accuracy) };
-      try { await api('GET', `/api/roi/ponto?lat=${geo.lat}&lng=${geo.lng}`); } catch (e) { geo = null; return aviso('Você não está no Porto do Açu. Marque o ponto no mapa.', true); }
-      await resolver(); aviso('Localização marcada ✓');
-    }, err => aviso(err.code === 1 ? 'Permita o uso da localização no navegador para usar o GPS.' : 'Não foi possível pegar a localização. Marque no mapa.', true), { enableHighAccuracy: true, timeout: 15000, maximumAge: 30000 });
+    let base = null; try { base = await api('GET', '/api/roi/mapa-base'); } catch (_) {}
+    // abre no lugar certo: ponto já marcado → Local escrito → último ponto usado
+    let inicial = geo ? { ...geo, marcado: true } : null;
+    if (!inicial && base && campos.local.value.trim()) {
+      const v = campos.local.value.trim(), nome = (base.mapaLocais || {})[v] || v, p = (base.pontos || {})[nome];
+      if (p) inicial = { lat: p[0], lng: p[1], zoom: 18, marcado: true };
+    }
+    if (!inicial) { const u = lerUltimo(); if (u) inicial = { lat: u.lat, lng: u.lng, zoom: 17 }; }
+    const p = await MapaCalor.escolherPonto(inicial, { base: base && base.area, gpsAuto: !geo && window.matchMedia('(pointer: coarse)').matches });
+    if (!p) return;
+    geo = p;
+    try { localStorage.setItem('caveira.ultimoPonto', JSON.stringify({ lat: p.lat, lng: p.lng })); } catch (_) {}
+    await resolver(true);
   };
   function desenharPonto() {
-    const usarSugestao = x => { campos.local.value = x.nome; if (x.tipo === 'empresa' && x.empresa && !campos.empresa.value.trim()) campos.empresa.value = x.empresa; aviso('Local preenchido ✓'); desenharPonto(); };
+    const usar = x => { campos.local.value = x.nome; if (x.tipo === 'empresa' && x.empresa && !campos.empresa.value.trim()) campos.empresa.value = x.empresa; automatico = null; desenharPonto(); };
+    const desfazer = () => { campos.local.value = automatico.local; campos.empresa.value = automatico.empresa; automatico = null; desenharPonto(); };
+    const local = (campos.local?.value || '').trim();
+    const maisPerto = sugestoes.find(x => x.nome === local) || null;
+    if (!geo) return blocoPonto.replaceChildren(...[
+      somenteLeitura ? el('span', { class: 'mudo pequeno', text: 'Sem ponto no mapa.' })
+        : el('button', { type: 'button', class: 'btn roi-onde', onclick: ondeFoi }, '📍 Onde foi?'),
+      somenteLeitura ? null : el('span', { class: 'mudo pequeno', text: 'Opcional · deixa o mapa de calor mais preciso' })].filter(Boolean));
+    // resumo numa linha
+    const partes = [areaMapa || 'Fora das áreas', local || null, maisPerto ? `${maisPerto.metros} m` : null, geo.origem === 'gps' ? `GPS ± ${geo.precisao || '?'} m` : null].filter(Boolean);
+    const duvida = !automatico && !maisPerto && sugestoes.length > 0 && !somenteLeitura && (sugestoes.length > 1 || !local);
     blocoPonto.replaceChildren(...[
-      el('div', { class: 'roi-ponto-cab' }, el('strong', { text: 'Ponto exato no mapa' }), el('span', { class: 'mudo pequeno', text: 'opcional' })),
-      geo ? el('div', { class: 'roi-ponto-ok' },
-        el('span', { class: 'etiqueta ok', text: geo.origem === 'gps' ? `📡 GPS${geo.precisao ? ' ± ' + geo.precisao + ' m' : ''}` : '📍 Marcado no mapa' }),
-        el('span', { text: areaMapa ? `Área: ${areaMapa}` : 'Fora das áreas desenhadas' })) : el('p', { class: 'mudo pequeno', style: 'margin:0', text: 'Marque onde a ocorrência aconteceu. A área é preenchida sozinha e o mapa de calor fica mais preciso.' }),
-      geo && sugestoes.length && !somenteLeitura ? el('div', { class: 'roi-ponto-sug' }, el('span', { class: 'mudo pequeno', text: 'Local mais perto:' }),
-        sugestoes.slice(0, 3).map(x => el('button', { type: 'button', class: 'filtro' + (campos.local?.value === x.nome ? ' ativo' : ''), title: `${x.metros} m`, onclick: () => usarSugestao(x) },
-          `${x.tipo === 'empresa' ? '◆' : '●'} ${x.nome}`, el('small', { class: 'mudo', text: ` ${x.metros} m` })))) : null,
-      somenteLeitura ? null : el('div', { class: 'linha', style: 'gap:6px;flex-wrap:wrap' },
-        el('button', { type: 'button', class: 'btn pequeno', onclick: marcar }, geo ? '📍 Ajustar no mapa' : '📍 Marcar no mapa'),
-        navigator.geolocation && window.isSecureContext ? el('button', { type: 'button', class: 'btn pequeno', onclick: usarGps }, '📡 Usar minha localização') : null,
-        geo ? el('button', { type: 'button', class: 'btn fantasma pequeno', onclick: () => { geo = null; resolver(); } }, 'Tirar ponto') : null)].filter(Boolean));
+      el('div', { class: 'roi-ponto-linha' },
+        el('span', { class: 'roi-ponto-ic', text: geo.origem === 'gps' ? '📡' : '📍' }),
+        el('span', { class: 'roi-ponto-txt', text: partes.join(' · ') }),
+        automatico ? el('button', { type: 'button', class: 'roi-ponto-acao', title: `Local preenchido sozinho: ${automatico.nome}`, onclick: desfazer }, '↶ desfazer') : null,
+        somenteLeitura ? null : el('button', { type: 'button', class: 'roi-ponto-acao', onclick: ondeFoi }, 'Alterar'),
+        somenteLeitura ? null : el('button', { type: 'button', class: 'roi-ponto-acao x', title: 'Tirar o ponto', 'aria-label': 'Tirar o ponto', onclick: () => { geo = null; resolver(false); } }, '✕')),
+      duvida ? el('div', { class: 'roi-ponto-sug' }, el('span', { class: 'mudo pequeno', text: 'Qual local?' }),
+        sugestoes.slice(0, 3).map(x => el('button', { type: 'button', class: 'filtro', title: `${x.metros} m`, onclick: () => usar(x) },
+          `${x.tipo === 'empresa' ? '◆' : '●'} ${x.nome}`, el('small', { class: 'mudo', text: ` ${x.metros} m` })))) : null].filter(Boolean));
   }
-  desenharPonto();
+  desenharPonto(); queueMicrotask(desenharPonto);
   const datalist = el('datalist', { id: 'roi-locais' }, (meta.locais || []).map(l => el('option', { value: l })));
 
   // envolvidos e/ou testemunhas (até 10 linhas, como no modelo)
