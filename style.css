@@ -515,3 +515,24 @@ html, body { overflow-x: clip; }
 .mapa-tela .leaflet-container .leaflet-control-attribution { background: rgba(11, 17, 32, .8); color: #b9c3d8; }
 .mapa-tela .leaflet-container .leaflet-control-attribution a { color: #c7d5ff; }
 .mapa-tela .leaflet-bar a { background: var(--superficie); color: var(--texto); border-bottom-color: var(--borda); }
+/* áreas, locais e estruturas de empresa no mapa */
+.mapa-local.recuo { margin-left: 16px; width: calc(100% - 16px); padding-top: 7px; padding-bottom: 7px; }
+.mapa-area-linha { border-color: #5a3a1c; background: #1d1a1a; }
+.mapa-area-linha .mapa-local-nome { font-weight: 700; }
+.mapa-pino.area { color: #f97316; font-weight: 700; }
+.mapa-pino.empresa { color: #e6eaf3; }
+.mapa-ferramentas { display: flex; gap: 6px; flex-wrap: wrap; padding-top: 8px; border-top: 1px dashed var(--borda); }
+.mapa-legenda-lista { letter-spacing: .01em; }
+.mapa-ficha-tit { text-transform: none !important; letter-spacing: 0 !important; color: var(--texto) !important; font-size: 17px !important; overflow-wrap: anywhere; }
+.mapa-kpis { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.mapa-kpi { display: grid; gap: 2px; padding: 8px 10px; border-radius: 10px; background: var(--superficie-2); border: 1px solid var(--borda); }
+.mapa-kpi strong { font-size: 22px; font-variant-numeric: tabular-nums; line-height: 1.1; }
+.mapa-kpi span { font-size: 12px; color: var(--mudo); }
+.mapa-bolha.empresa span { border-radius: 3px; transform: rotate(45deg) scale(.85); background: #e6eaf3; border-color: #0b1120; }
+.mapa-bolha.empresa:not(.discreta) span { background: color-mix(in srgb, var(--cor) 80%, transparent); border-color: #fff; }
+.mapa-bolha.empresa.discreta span { background: #e6eaf3; border: 2px solid #0b1120; box-shadow: 0 0 0 2px rgba(255,255,255,.35); }
+.mapa-bolha.empresa.sel span { outline: 3px solid #f97316; }
+.mapa-bolha.nova.empresa span { background: #f97316; }
+.mapa-tela .leaflet-tooltip.rotulo-area { background: none; border: 0; box-shadow: none; padding: 0; color: #fff; font: 700 12px system-ui, sans-serif; text-shadow: 0 0 3px #000, 0 0 6px #000, 0 1px 2px #000; white-space: nowrap; pointer-events: none; }
+.mapa-tela .leaflet-tooltip.rotulo-area::before { display: none; }
+.mapa-tela .leaflet-control-scale-line { background: rgba(11, 17, 32, .8); color: #e6eaf3; border-color: #e6eaf3; }

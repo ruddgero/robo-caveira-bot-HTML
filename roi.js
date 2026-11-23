@@ -18,7 +18,7 @@ const GRUPOS_ROI = {
 const MAX_FOTOS = 8;
 const CONTROLE_INICIAL = { 2026: 30 };     // último número do controle anual entregue pela equipe (030/2026)
 
-const estado = { rois: [], controle: { ...CONTROLE_INICIAL }, locais: {}, mapa: { area: null, pontos: {} }, carregado: false };   // mapa.pontos: nome do local → { lat, lng }   // locais: grafia → nome confirmado
+const estado = { rois: [], controle: { ...CONTROLE_INICIAL }, locais: {}, mapa: { area: null, pontos: {}, areas: [] }, carregado: false };   // mapa.pontos: nome → { lat, lng, tipo }; mapa.areas: contornos   // locais: grafia → nome confirmado
 let marca = 0;
 const nucleo = () => require('./nucleo');   // carregado sob demanda (evita dependência circular)
 
@@ -122,7 +122,7 @@ async function carregar() {
     estado.controle = { ...CONTROLE_INICIAL, ...(await store.get('rois_controle', {}) || {}) };
     estado.locais = await store.get('rois_locais', {}) || {};
     const m = await store.get('rois_mapa', null) || {};
-    estado.mapa = { area: m.area || null, pontos: m.pontos || {} };
+    estado.mapa = { area: m.area || null, pontos: m.pontos || {}, areas: Array.isArray(m.areas) ? m.areas : [] };
     estado.carregado = true;
     marca++;
 }
@@ -656,27 +656,60 @@ const num = v => (v === null || v === undefined || v === '' ? NaN : Number(v));
 
 async function salvarMapa() { await store.set('rois_mapa', estado.mapa); }
 
+// Ponto dentro do contorno (lng = x, lat = y)
+function dentroDoContorno(lat, lng, poly) {
+    let dentro = false;
+    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+        const [yi, xi] = poly[i], [yj, xj] = poly[j];
+        if ((yi > lat) !== (yj > lat) && lng < (xj - xi) * (lat - yi) / (yj - yi) + xi) dentro = !dentro;
+    }
+    return dentro;
+}
+const tamanhoContorno = poly => Math.abs(poly.reduce((s, [y1, x1], i) => { const [y2, x2] = poly[(i + 1) % poly.length]; return s + x1 * y2 - x2 * y1; }, 0)) / 2;
+// Área de um ponto: a menor que o contém (a mais específica)
+function areaDoPonto(lat, lng) {
+    const achadas = estado.mapa.areas.filter(a => dentroDoContorno(lat, lng, a.poly));
+    achadas.sort((a, b) => tamanhoContorno(a.poly) - tamanhoContorno(b.poly));
+    return achadas[0] || null;
+}
+
 // Dados do mapa: os mesmos filtros do indicador (ano, mês, tipos, empresa) agrupados por local
 function dadosDoMapa(filtros = {}) {
     const d = indicadorOcorrencias({ ...filtros, local: '' });
     const pontos = [], semPosicao = [];
+    const comRoi = new Set();
     for (const l of d.locais) {
         if (l.nome === '(sem local)') continue;
+        comRoi.add(l.nome);
         const p = estado.mapa.pontos[l.nome];
         const rois = d.lista.filter(r => r.local === l.nome).map(r => ({ id: r.id, numero: r.numero, tipo: r.tipo, data: r.data, simulado: r.simulado, descricao: String(r.descricao || '').slice(0, 120) }));
         const item = { nome: l.nome, total: l.total, porTipo: l.porTipo, simulados: l.simulados, rois };
-        if (p) pontos.push({ ...item, lat: p.lat, lng: p.lng }); else semPosicao.push(item);
+        if (p) pontos.push({ ...item, lat: p.lat, lng: p.lng, tipo: p.tipo || 'local', empresa: p.empresa || '' }); else semPosicao.push(item);
+    }
+    // pontos cadastrados que não têm ROI no período (ex.: canteiro de uma empresa)
+    for (const [nome, p] of Object.entries(estado.mapa.pontos))
+        if (!comRoi.has(nome)) pontos.push({ nome, total: 0, porTipo: {}, simulados: 0, rois: [], lat: p.lat, lng: p.lng, tipo: p.tipo || 'local', empresa: p.empresa || '' });
+    const areas = estado.mapa.areas.map(a => ({ id: a.id, nome: a.nome, poly: a.poly, total: 0, porTipo: {}, simulados: 0 }));
+    const porId = new Map(areas.map(a => [a.id, a]));
+    for (const p of pontos) {
+        const a = areaDoPonto(p.lat, p.lng);
+        p.area = a ? a.nome : '';
+        p.areaId = a ? a.id : '';
+        if (!a) continue;
+        const x = porId.get(a.id);
+        x.total += p.total; x.simulados += p.simulados;
+        for (const [g, n] of Object.entries(p.porTipo)) x.porTipo[g] = (x.porTipo[g] || 0) + n;
     }
     return {
         ano: d.ano, mes: d.mes, anos: d.anos, meses: d.meses.map(m => ({ mes: m.mes, total: m.total })),
         grupos: d.grupos, filtroTipos: d.filtroTipos, tiposTodos: d.tiposTodos,
         total: d.locais.reduce((s, l) => s + l.total, 0),
         area: estado.mapa.area || AREA_PADRAO, areaPadrao: !estado.mapa.area,
-        pontos, semPosicao
+        areas: areas.sort((a, b) => b.total - a.total || a.nome.localeCompare(b.nome)), pontos, semPosicao
     };
 }
 
-async function posicionarLocal(nome, lat, lng, u) {
+async function posicionarLocal(nome, lat, lng, u, extra = {}) {
     nome = limparLocal(nome);
     if (!nome) throw erro('Informe o local.', 400);
     if (lat === null) {
@@ -685,10 +718,42 @@ async function posicionarLocal(nome, lat, lng, u) {
     } else {
         lat = num(lat); lng = num(lng);
         if (!isFinite(lat) || !isFinite(lng) || !dentro(lat, lng)) throw erro('Posição fora da área do Porto do Açu.', 400);
-        estado.mapa.pontos[nome] = { lat: +lat.toFixed(6), lng: +lng.toFixed(6), por: u.nome, em: new Date().toISOString() };
+        const antes = estado.mapa.pontos[nome] || {};
+        const tipo = extra.tipo === 'empresa' || extra.tipo === 'local' ? extra.tipo : (antes.tipo || 'local');
+        const empresa = tipo === 'empresa' ? limpo(extra.empresa !== undefined ? extra.empresa : antes.empresa || '').slice(0, 80) : '';
+        estado.mapa.pontos[nome] = { lat: +lat.toFixed(6), lng: +lng.toFixed(6), tipo, ...(empresa ? { empresa } : {}), por: u.nome, em: new Date().toISOString() };
         nucleo().auditar(u, 'Mapa: local georreferenciado', `${nome} → ${lat.toFixed(5)}, ${lng.toFixed(5)}`);
     }
     await salvarMapa();
+    return { ok: true };
+}
+
+// Contornos das áreas (admin desenha no mapa)
+async function salvarContorno({ id, nome, poly }, u) {
+    nome = limpo(nome).replace(/\s+/g, ' ').slice(0, 60);
+    const existente = id ? estado.mapa.areas.find(a => a.id === id) : null;
+    if (id && !existente) throw erro('Área não encontrada.', 404);
+    if (!nome) throw erro('Dê um nome para a área.', 400);
+    if (estado.mapa.areas.some(a => a.id !== id && chaveLocal(a.nome) === chaveLocal(nome))) throw erro('Já existe uma área com esse nome.', 409);
+    let pts = existente ? existente.poly : null;
+    if (poly !== undefined) {
+        if (!Array.isArray(poly) || poly.length < 3 || poly.length > 60) throw erro('O contorno precisa ter de 3 a 60 pontos.', 400);
+        pts = poly.map(p => [num(p && p[0]), num(p && p[1])]);
+        if (!pts.every(([la, ln]) => isFinite(la) && isFinite(ln) && dentro(la, ln))) throw erro('Contorno fora da área do Porto do Açu.', 400);
+        pts = pts.map(([la, ln]) => [+la.toFixed(6), +ln.toFixed(6)]);
+    }
+    if (existente) { existente.nome = nome; existente.poly = pts; }
+    else estado.mapa.areas.push({ id: 'a' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), nome, poly: pts });
+    await salvarMapa();
+    nucleo().auditar(u, existente ? 'Mapa: área alterada' : 'Mapa: área criada', nome);
+    return { ok: true };
+}
+async function apagarContorno(id, u) {
+    const a = estado.mapa.areas.find(x => x.id === id);
+    if (!a) throw erro('Área não encontrada.', 404);
+    estado.mapa.areas = estado.mapa.areas.filter(x => x.id !== id);
+    await salvarMapa();
+    nucleo().auditar(u, 'Mapa: área apagada', a.nome);
     return { ok: true };
 }
 
@@ -860,7 +925,7 @@ function indicadorOcorrencias({ ano, mes, tipos: filtroTipos, local: filtroLocal
 }
 
 module.exports = {
-    indicadorOcorrencias, listaDeLocais, renomearLocal, mapaDeLocais, dadosDoMapa, posicionarLocal, salvarArea, ladrilhoPermitido,
+    indicadorOcorrencias, listaDeLocais, renomearLocal, mapaDeLocais, dadosDoMapa, posicionarLocal, salvarArea, salvarContorno, apagarContorno, areaDoPonto, ladrilhoPermitido,
     GRUPOS_ROI, MAX_FOTOS, estado, carregar, marcaRois, listar, detalhe, criar, editar, registrar, cancelar,
     adicionarFoto, removerFoto, lerFoto, importarControle, lerControle, resumoGeral, locaisConhecidos, proximoNumero,
     xlsxDoRoi, xlsxControle, xlsxControleTodos, montarXlsxRoi, linhaItem7, linhaControle, codigoDoTipo, adivinharTipo, agruparLocais, lerNumero, numeroRoi

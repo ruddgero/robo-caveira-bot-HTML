@@ -509,7 +509,10 @@ rota('GET', '/api/indicadores/mapa', async req => {
     const q = new URL(req.url, 'http://x').searchParams;
     return ROI.dadosDoMapa({ ano: q.get('ano'), mes: q.get('mes'), tipos: q.get('tipos'), empresa: q.get('empresa') });
 }, { perfis: LIDERES });
-rota('PUT', '/api/indicadores/mapa/ponto', async (req, res, { corpo, u }) => ROI.posicionarLocal(corpo.nome, corpo.lat === null ? null : corpo.lat, corpo.lng, u), { perfis: LIDERES });
+rota('PUT', '/api/indicadores/mapa/ponto', async (req, res, { corpo, u }) => ROI.posicionarLocal(corpo.nome, corpo.lat === null ? null : corpo.lat, corpo.lng, u, { tipo: corpo.tipo, empresa: corpo.empresa }), { perfis: LIDERES });
+rota('POST', '/api/indicadores/mapa/areas', async (req, res, { corpo, u }) => ROI.salvarContorno({ nome: corpo.nome, poly: corpo.poly }, u), { perfis: ['ADMIN'] });
+rota('PUT', '/api/indicadores/mapa/areas/:id', async (req, res, { corpo, params, u }) => ROI.salvarContorno({ id: params.id, nome: corpo.nome, poly: corpo.poly }, u), { perfis: ['ADMIN'] });
+rota('DELETE', '/api/indicadores/mapa/areas/:id', async (req, res, { params, u }) => ROI.apagarContorno(params.id, u), { perfis: ['ADMIN'] });
 rota('PUT', '/api/indicadores/mapa/area', async (req, res, { corpo, u }) => ROI.salvarArea(corpo.area === null ? null : corpo.area, u), { perfis: ['ADMIN'] });
 
 // Imagem de satélite (Esri World Imagery) passando pelo servidor: a chave do ArcGIS
