@@ -122,7 +122,16 @@ assert.strictEqual(t1.tipo, 'TRIPULACAO');
 assert.strictEqual(t1.movimento, 'Desembarque');
 assert.strictEqual(t1.quantidade, '02');
 assert.strictEqual(t1.terminal, 'T-ORE');
-assert.strictEqual(R.resumoNavio(t1), 'Desembarque de 02 tripulantes. Em andamento.');
+// desembarque: o horário da mensagem é a saída (tripulante sai do porto) e a operação já fica concluída
+assert.strictEqual(t1.horaInicial, '');
+assert.strictEqual(t1.horaFinal, '14:20');
+assert.strictEqual(R.resumoNavio(t1), 'Desembarque de 02 tripulantes.');
+assert.strictEqual(R.resumoNavio({ ...t1, horaFinal: '' }), 'Desembarque de 02 tripulantes. Em andamento.');
+const tDef = R.classificarMensagem('MOVIMENTAÇÃO DE TRIPULANTES\nNAVIO: EAGLE PILLAR\nTERMINAL: T-OIL\nDESEMBARQUE DEFINITIVO 02\nMOTORISTA: CELIO SIQUEIRA NETTO / EMPRESA MISC MARINE / ENTRADA PELA PORTARIA DO T-OIL AS 18:51 HS\nVEÍCULO: COROLLA / RJA6G90', R.NAVIOS_PADRAO, '19:00').rascunhos[0];
+assert.strictEqual(tDef.movimento, 'Desembarque definitivo');
+assert.deepStrictEqual([tDef.horaInicial, tDef.horaFinal], ['', '18:51']);
+const tEmb = R.classificarMensagem('Embarque definitivo de 02 tripulantes navio EAGLE PILLAR T-OIL entrada 09:00', R.NAVIOS_PADRAO, '09:05').rascunhos[0];
+assert.deepStrictEqual([tEmb.horaInicial, tEmb.horaFinal], ['09:00', '']);
 assert.strictEqual(R.resumoNavio({ ...t1, horaFinal: '15:00' }), 'Desembarque de 02 tripulantes.');
 const et = R.minutaEmail({ ...t1, horaFinal: '15:00' });
 assert.ok(et.corpo.includes('Autorizado por (Autoridades): Polícia Federal'));

@@ -1215,7 +1215,7 @@ async function registrarOperacoes(rascunhos, { atividadeTexto = '', entradaId = 
     const t = agora();
     const ficha = estado.ficha;
     const novas = rascunhos.map(r => {
-        const o = limparOperacao({ autoridades: '', autorizadoTerminal: '', observacoes: '', status: 'Sem alteração', ...r });
+        const o = R.ajustarDesembarque(limparOperacao({ autoridades: '', autorizadoTerminal: '', observacoes: '', status: 'Sem alteração', ...r }));
         if (o.navio) {
             const conhecido = R.acharNavio(o.navio, naviosConhecidos());
             o.navio = R.nomeNavioLimpo(conhecido ? conhecido.nome : o.navio);
@@ -1272,6 +1272,9 @@ async function atualizarOperacao(id, dados, usuario) {
     const o = operacao(id);
     const tinhaSaida = !!o.horaFinal;
     const limpos = limparOperacao(dados);
+    // desembarque: só tem saída (o horário de entrada informado passa a ser a saída)
+    const junto = { ...o, ...limpos };
+    if (R.ehDesembarque(junto) && (junto.horaInicial || !junto.horaFinal)) { const aj = R.ajustarDesembarque({ ...junto }); limpos.horaInicial = aj.horaInicial; if (aj.horaFinal) limpos.horaFinal = aj.horaFinal; }
     registrarHistorico(o, limpos, usuario ? usuario.nome : 'Correção');
     Object.assign(o, limpos);
     if (o.navio) {

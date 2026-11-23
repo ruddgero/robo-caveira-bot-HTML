@@ -1124,7 +1124,9 @@ function abrirOperacao(o) {
     o.tipo === 'TRIPULACAO' && /^Sa[ií]da/i.test(o.movimento || '') ? ['Retorno', o.horaRetorno ? o.horaRetorno + 'h' : 'não retornaram'] : null,
     ['Empresa', o.empresa], ['Motorista(s)', o.responsavel], ['Agente', o.agente], ['Ajudante(s)', o.ajudante], ['A bordo', o.aBordo],
     ['Veículo', `${o.veiculo || ''} ${o.placa || ''}`.trim()], ['Observações', o.observacoes],
-    ['Entrada', o.horaInicial ? o.horaInicial + 'h' : '—'], ['Saída', o.horaFinal ? o.horaFinal + 'h' : 'aguardando']
+    // desembarque de tripulantes: só existe a saída
+    o.tipo === 'TRIPULACAO' && /^desembarque( definitivo)?$/i.test(o.movimento || '') && !o.horaInicial ? null : ['Entrada', o.horaInicial ? o.horaInicial + 'h' : '—'],
+    ['Saída', o.horaFinal ? o.horaFinal + 'h' : 'aguardando']
   ].filter(x => x && x[1]);
   abrirModal(`${o.rotuloTipo} · ${o.navio || ''}`, [
     ...(o.conferir || []).map(t => el('div', { class: 'citacao', style: 'border-left-color:var(--vermelho)', text: '⚠️ ' + t })),

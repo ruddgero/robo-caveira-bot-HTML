@@ -912,6 +912,16 @@ function horasDoTexto(t) {
     return out;
 }
 
+// Desembarque de tripulantes: o tripulante sai do porto — só existe o horário de SAÍDA.
+// O horário que vier na mensagem (mesmo escrito "entrada") vira a saída e a operação já fica concluída.
+const ehDesembarque = o => !!o && o.tipo === 'TRIPULACAO' && /^desembarque( definitivo)?$/i.test(String(o.movimento || '').trim());
+function ajustarDesembarque(o) {
+    if (!ehDesembarque(o)) return o;
+    if (o.horaInicial && !o.horaFinal) o.horaFinal = o.horaInicial;
+    o.horaInicial = '';
+    return o;
+}
+
 // Rascunhos de operação (um por navio) a partir de uma mensagem.
 // Regra: o que está escrito na mensagem manda. Nada é descartado.
 //   conferir[] → impede o registro automático (fica "a confirmar" para o líder decidir)
@@ -971,7 +981,7 @@ function rascunhosOperacao(textoOriginal, horaMensagem, navios = NAVIOS_PADRAO) 
         if (!nomeFinal) conferir.push('Navio não informado — confirmar');
         // tripulantes sem quantidade (ex.: van que entra para a saída a passeio): registra mesmo assim e avisa
         if (tipo === 'TRIPULACAO' && !qtd && !qE && !qD) alertas.push('Quantidade de tripulantes não informada — completar na operação');
-        return {
+        return ajustarDesembarqueRascunho({
             tipo,
             navio: nomeFinal,
             autoridades: c.autoridades || (TIPOS_OPERACAO[tipo] || TIPOS_OPERACAO.OUTRA).autoridade,
@@ -995,8 +1005,17 @@ function rascunhosOperacao(textoOriginal, horaMensagem, navios = NAVIOS_PADRAO) 
             conferir,
             alertas,
             escolhas
-        };
+        });
     });
+}
+// no rascunho, os avisos sobre "horário de entrada" passam a falar de saída
+function ajustarDesembarqueRascunho(r) {
+    if (!ehDesembarque(r)) return r;
+    ajustarDesembarque(r);
+    const troca = t => t.replace('confirmar o horário de entrada', 'confirmar o horário de saída').replace('Horário de entrada não estava', 'Horário de saída não estava');
+    r.conferir = r.conferir.map(troca); r.alertas = r.alertas.map(troca);
+    r.escolhas = r.escolhas.map(e => e.campo === 'horaInicial' ? { ...e, campo: 'horaFinal', rotulo: 'Horário de saída' } : e);
+    return r;
 }
 
 // Frase da seção 4 para as operações de uma mensagem (padrão "✓ 19:01h ...")
@@ -1016,7 +1035,7 @@ function atividadeDasOperacoes(ops, horaMensagem) {
     const hora = o.horaInicial || o.horaFinal || horaMensagem || '';
     let frase = `${hora ? hora + 'h ' : ''}${descricao}${nomesNavios ? ' – ' + nomesNavios : ''}${o.terminal ? ' – ' + o.terminal : ''}.`;
     if (detalhes) frase += ` ${detalhes.charAt(0).toUpperCase() + detalhes.slice(1)}.`;
-    if (o.horaFinal) frase += ` Saída às ${o.horaFinal}h.`;
+    if (o.horaFinal && (o.horaInicial || !ehDesembarque(o))) frase += ` Saída às ${o.horaFinal}h.`;   // desembarque: o horário já é a saída
     return frase;
 }
 
@@ -1258,7 +1277,7 @@ module.exports = {
     ehMensagemDeSaida, TIPOS_OPERACAO, MOVIMENTOS, NAVIOS_PADRAO,
     fichaVazia, naviosDeTexto, arrumarNavios, ehNomeDeNavio, linhaNoPadrao, ehOperacaoConcluida, adicionarLinhaNavio, ehRelatorioDeTurno, lerRelatorio, fichaHerdada,
     formatarRelatorio, conferirFicha, formatarPassagemEscala, textoAviso, padronizarLinhaNavio, padronizarAtividade,
-    lerMensagemPadrao, classificarMensagem, extrairCampos, rascunhosOperacao, atividadeDasOperacoes,
+    lerMensagemPadrao, classificarMensagem, extrairCampos, rascunhosOperacao, atividadeDasOperacoes, ehDesembarque, ajustarDesembarque,
     tipoOperacaoDoTexto, movimentoDoTexto, resumoNavio, minutaEmail, mensagemPadrao, manobraDoTexto, linhaManobra, numeroKm, navioConhecido, terminalDoNavio,
     formatarQtdTripulantes, ehSemAlteracao, separarNomes, juntarNomes, nomeProprio, lerEquipesComPipe, nomeNavioLimpo, chaveNavio, acharNavio, trocarLinhaNavio
 };
