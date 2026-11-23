@@ -131,6 +131,11 @@ const MapaCalor = (() => {
   }
   const gavetaAberta = () => M.tela.classList.contains('lado-aberto');
   function gaveta(abrir) {
+    if (abrir && M.btGaveta) {
+      const caixa = M.caixaMapa.getBoundingClientRect(), b = M.btGaveta.getBoundingClientRect();
+      M.lado.style.setProperty('--topo-menu', Math.round(b.bottom - caixa.top + 6) + 'px');
+      M.lado.style.setProperty('--esq-menu', Math.round(b.left - caixa.left) + 'px');
+    }
     M.tela.classList.toggle('lado-aberto', abrir);
     if (M.btGaveta) M.btGaveta.setAttribute('aria-expanded', abrir ? 'true' : 'false');
     if (!abrir && (M.sel || M.selArea)) { M.sel = ''; M.selArea = ''; desenharCamadas(); desenharLado(); }
@@ -139,7 +144,8 @@ const MapaCalor = (() => {
   function rotuloGaveta() {
     if (!M.btGaveta || !M.d) return;
     const n = M.d.pontos.length + M.d.semPosicao.length;
-    M.btGaveta.replaceChildren(el('span', { class: 'ic', 'aria-hidden': 'true', text: '☰' }), M.d.areas.length ? `Áreas e locais (${n})` : `Locais (${n})`);
+    M.btGaveta.replaceChildren(el('span', { class: 'ic', 'aria-hidden': 'true', text: '☰' }), M.d.areas.length ? `Áreas e locais (${n})` : `Locais (${n})`,
+      el('span', { class: 'seta', 'aria-hidden': 'true', text: gavetaAberta() ? '▴' : '▾' }));
     M.btGaveta.title = gavetaAberta() ? 'Fechar a lista' : 'Abrir a lista de áreas e locais';
   }
 
@@ -254,8 +260,12 @@ const MapaCalor = (() => {
     }
     const ordenar = l => l.slice().sort((a, b) => b.total - a.total || a.nome.localeCompare(b.nome));
     const fora = ordenar(d.pontos.filter(p => !p.areaId));
+    const busca = el('input', { type: 'search', class: 'mapa-busca', placeholder: 'Buscar área, local ou empresa…', 'aria-label': 'Buscar', oninput: e => {
+      const q = semAcento(e.target.value).toLowerCase();
+      M.lado.querySelectorAll('.mapa-local').forEach(b => { b.hidden = !!q && !semAcento(b.title).toLowerCase().includes(q); });
+    } });
     M.lado.replaceChildren(...[
-      fecharGaveta(),
+      el('div', { class: 'mapa-lado-topo' }, busca, fecharGaveta(true)),
       el('h3', { text: `Áreas (${d.areas.length})` }),
       d.areas.length ? el('div', { class: 'mapa-lista' }, d.areas.flatMap(a => [
         el('button', { class: 'mapa-local mapa-area-linha', title: `${a.nome} · ${plural(a.total)}`, onclick: () => selecionarArea(a.id, true) },
