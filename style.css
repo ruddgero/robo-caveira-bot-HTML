@@ -581,3 +581,4 @@ html, body { overflow-x: clip; }
 .passagem-origem { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
 .passagem-trocar summary { cursor: pointer; font-size: 13px; color: var(--mudo); width: fit-content; }
 .passagem-trocar summary:hover { color: var(--texto); }
+.mapa-acoes .btn-icone.ativo { border-color: #f97316; color: #f97316; }

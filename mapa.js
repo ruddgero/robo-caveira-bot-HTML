@@ -63,7 +63,7 @@ const MapaCalor = (() => {
     const tela = el('div', { class: 'mapa-tela', role: 'dialog', 'aria-label': 'Mapa de calor' });
     document.body.append(tela);
     document.body.style.overflow = 'hidden';
-    M = { tela, modo: 'calor', ano: S.indAno || 0, mes: S.indMes || 0, tipos: (S.indTipos || []).slice(), sel: '', selArea: '', marcando: null, desenho: null, d: null };
+    M = { tela, modo: 'calor', contornosVisiveis: true, ano: S.indAno || 0, mes: S.indMes || 0, tipos: (S.indTipos || []).slice(), sel: '', selArea: '', marcando: null, desenho: null, d: null };
     history.pushState({ mapaCalor: true }, '');
     window.addEventListener('popstate', aoVoltar);
     document.addEventListener('keydown', aoTeclar);
@@ -98,13 +98,15 @@ const MapaCalor = (() => {
     M.faixa = el('div', { class: 'mapa-faixa', hidden: true });
     M.btModo = el('div', { class: 'mapa-modo' },
       el('button', { class: 'ativo', 'data-modo': 'calor', onclick: () => trocarModo('calor') }, 'Calor'),
-      el('button', { 'data-modo': 'areas', onclick: () => trocarModo('areas') }, 'Áreas'),
+      ehAdmin() ? el('button', { 'data-modo': 'areas', onclick: () => trocarModo('areas') }, 'Áreas') : null,
       el('button', { 'data-modo': 'locais', onclick: () => trocarModo('locais') }, 'Locais'));
     t.replaceChildren(
       el('header', { class: 'mapa-topo' },
         el('button', { class: 'btn pequeno', onclick: () => fechar() }, '‹ Voltar'),
         el('div', { class: 'mapa-tit' }, el('strong', { text: 'Mapa de calor' }), M.titulo),
         el('div', { class: 'mapa-acoes' }, M.btModo,
+          ehAdmin() ? (M.btContornos = el('button', { class: 'btn-icone ativo', title: 'Mostrar/esconder os contornos das áreas (só o admin vê)', 'aria-label': 'Mostrar ou esconder os contornos das áreas', 'aria-pressed': 'true',
+            onclick: () => { M.contornosVisiveis = !M.contornosVisiveis; M.btContornos.classList.toggle('ativo', M.contornosVisiveis); M.btContornos.setAttribute('aria-pressed', String(M.contornosVisiveis)); desenharCamadas(); } }, '▢')) : null,
           el('button', { class: 'btn-icone', title: 'Centralizar na Ferroport', 'aria-label': 'Centralizar na Ferroport', onclick: centralizar }, '⌖'))),
       M.filtros,
       el('div', { class: 'mapa-corpo' }, M.caixaMapa, M.lado),
@@ -206,7 +208,9 @@ const MapaCalor = (() => {
     // contornos das áreas
     M.contornos.clearLayers();
     const maxA = Math.max(1, ...d.areas.map(a => a.total));
-    for (const a of d.areas) {
+    // a delimitação das áreas fica oculta: só o administrador vê e edita
+    const verContornos = ehAdmin() && (M.contornosVisiveis || M.modo === 'areas' || M.desenho);
+    for (const a of verContornos ? d.areas : []) {
       const sel = M.selArea === a.id, pintar = M.modo === 'areas';
       const pol = L.polygon(a.poly, pintar
         ? { color: sel ? '#fff' : '#e2e8f0', weight: sel ? 3 : 1.5, fillColor: corArea(a.total, maxA), fillOpacity: a.total ? .55 : .15, bubblingMouseEvents: false }
