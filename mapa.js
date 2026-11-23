@@ -31,6 +31,7 @@ const MapaCalor = (() => {
     _desenhar() {
       const map = this._map; if (!map) return;
       const tam = map.getSize(), c = this._c;
+      if (!tam.x || !tam.y) return;   // mapa escondido (ex.: impressão)
       L.DomUtil.setPosition(c, map.containerPointToLayerPoint([0, 0]));
       c.width = tam.x; c.height = tam.y;
       const x = c.getContext('2d');
@@ -112,7 +113,6 @@ const MapaCalor = (() => {
     M.faixa = el('div', { class: 'mapa-faixa', hidden: true });
     M.btModo = el('div', { class: 'mapa-modo' },
       el('button', { class: 'ativo', 'data-modo': 'calor', onclick: () => trocarModo('calor') }, 'Calor'),
-      el('button', { 'data-modo': 'areas', onclick: () => trocarModo('areas') }, 'Áreas'),
       el('button', { 'data-modo': 'locais', onclick: () => trocarModo('locais') }, 'Locais'));
     t.replaceChildren(
       el('header', { class: 'mapa-topo' },
@@ -120,7 +120,7 @@ const MapaCalor = (() => {
         el('div', { class: 'mapa-tit' }, el('strong', { text: 'Mapa de calor' }), M.titulo),
         el('div', { class: 'mapa-acoes' }, M.btModo,
           (M.btGaveta = el('button', { type: 'button', class: 'mapa-bt-gaveta', 'aria-expanded': 'false', 'aria-keyshortcuts': 'L', onclick: () => gaveta(!gavetaAberta()) })),
-          (M.btContornos = el('button', { class: 'btn-icone' + (M.contornosVisiveis ? ' ativo' : ''), title: 'Mostrar/esconder os contornos das áreas', 'aria-label': 'Mostrar ou esconder os contornos das áreas', 'aria-pressed': String(M.contornosVisiveis),
+          (M.btContornos = el('button', { hidden: true, class: 'btn-icone' + (M.contornosVisiveis ? ' ativo' : ''), title: 'Mostrar/esconder os contornos das áreas', 'aria-label': 'Mostrar ou esconder os contornos das áreas', 'aria-pressed': String(M.contornosVisiveis),
             onclick: () => { M.contornosVisiveis = !M.contornosVisiveis; try { localStorage.setItem('caveira.contornos', M.contornosVisiveis ? '1' : '0'); } catch (_) {} M.btContornos.classList.toggle('ativo', M.contornosVisiveis); M.btContornos.setAttribute('aria-pressed', String(M.contornosVisiveis)); desenharCamadas(); } }, '▢')),
           el('button', { class: 'btn-icone', title: 'Centralizar na Ferroport', 'aria-label': 'Centralizar na Ferroport', onclick: centralizar }, '⌖'))),
       M.filtros,
@@ -183,12 +183,20 @@ const MapaCalor = (() => {
         M.map.fitBounds(limites(d.area));
       }
       desenhar();
+      if (primeira && d.areas.length) {
+        // abre enquadrando as áreas; no computador o ranking já fica à vista ao lado
+        const largo = window.innerWidth >= 1000;
+        if (largo) gaveta(true);
+        const b = L.latLngBounds(d.areas.flatMap(a => a.poly));
+        M.map.fitBounds(b, { paddingTopLeft: [40, 40], paddingBottomRight: [largo ? 400 : 30, largo ? 40 : 60], maxZoom: 17 });
+      }
     } catch (e) { aviso(e.message, true); }
   }
 
   function centralizar() { if (M.d) M.map.flyToBounds(limites(M.d.area), { duration: 0.6 }); }
   function trocarModo(m) {
-    M.modo = m;
+    M.modo = m === 'areas' ? 'calor' : m;   // o modo Áreas virou o próprio Calor (áreas pintadas)
+    if (M.btContornos) M.btContornos.hidden = M.modo === 'calor';
     M.btModo.querySelectorAll('button').forEach(b => b.classList.toggle('ativo', b.dataset.modo === m));
     desenharCamadas();
   }
@@ -282,11 +290,6 @@ const MapaCalor = (() => {
 
   // ------------------- camadas do mapa -------------------
   const plural = n => `${n} ROI${n === 1 ? '' : 's'}`;
-  function corArea(n, max) {
-    if (!n) return '#64748b';
-    const t = n / max;
-    return t > .75 ? '#dc2626' : t > .45 ? '#f97316' : t > .2 ? '#facc15' : '#4ade80';
-  }
   // peso por gravidade, simulados e agrupamento por área
   const PESO_G = { G1: 3, G3: 3, G2: 2, G4: 2, G5: 1, G6: 1 };
   function contar(p) {
@@ -295,6 +298,33 @@ const MapaCalor = (() => {
     const n = p.rois.length < p.total && M.simulados ? p.total : r.length;
     return { n, peso: M.gravidade ? r.reduce((s, x) => s + (PESO_G[x.tipo] || 1), 0) : n, porTipo };
   }
+  // área: quantidade e peso respeitando "simulados" e o peso por gravidade
+  function medir(o) {
+    const pt = { ...(o && o.porTipo || {}) };
+    if (!M.simulados && o && o.simPorTipo) for (const [t, k] of Object.entries(o.simPorTipo)) pt[t] = (pt[t] || 0) - k;
+    let n = 0, peso = 0;
+    for (const [t, k] of Object.entries(pt)) if (k > 0) { n += k; peso += k * (PESO_G[t] || 1); } else delete pt[t];
+    return { n, v: M.gravidade ? peso : n, porTipo: pt };
+  }
+  // 5 faixas fixas, do cinza-claro ao vermelho
+  const ESCALA = ['#e2e8f0', '#fde68a', '#fb923c', '#ef4444', '#991b1b'];
+  const faixaDe = (v, max) => v > 0 ? Math.min(4, Math.max(0, Math.ceil(v / max * 5) - 1)) : -1;
+  function medidasAreas() {
+    const d = M.d;
+    const lista = d.areas.map(a => ({ a, ...medir(a), ant: medir(a.anterior).n }));
+    const max = Math.max(1, ...lista.map(x => x.v));
+    lista.forEach(x => { x.faixa = faixaDe(x.v, max); });
+    lista.sort((x, y) => y.v - x.v || y.n - x.n || x.a.nome.localeCompare(y.a.nome));
+    const totalN = lista.reduce((s, x) => s + x.n, 0) + medir(d.foraAreas).n;
+    return { lista, max, totalN, porId: new Map(lista.map(x => [x.a.id, x])) };
+  }
+  // ▲ piorou (vermelho) · ▼ melhorou (verde), comparando com o mesmo período do ano anterior
+  function tendencia(n, ant, longo) {
+    const dif = n - ant, ref = `mesmo período de ${M.d.anoAnterior}: ${ant}`;
+    if (!dif) return el('span', { class: 'tend igual', title: `Igual ao ${ref}`, text: longo ? '= igual' : '=' });
+    return el('span', { class: 'tend ' + (dif > 0 ? 'sobe' : 'desce'), title: `${dif > 0 ? 'Aumentou' : 'Diminuiu'} ${Math.abs(dif)} em relação ao ${ref}`, text: `${dif > 0 ? '▲' : '▼'} ${Math.abs(dif)}${longo ? ' vs ' + M.d.anoAnterior : ''}` });
+  }
+  const tamanhoNaTela = a => { const b = L.latLngBounds(a.poly), p1 = M.map.latLngToContainerPoint(b.getNorthWest()), p2 = M.map.latLngToContainerPoint(b.getSouthEast()); return Math.max(Math.abs(p2.x - p1.x), Math.abs(p2.y - p1.y)); };
   const centroDe = poly => [poly.reduce((s, q) => s + q[0], 0) / poly.length, poly.reduce((s, q) => s + q[1], 0) / poly.length];
   function areaAberta(a) {
     const b = L.latLngBounds(a.poly), p1 = M.map.latLngToContainerPoint(b.getNorthWest()), p2 = M.map.latLngToContainerPoint(b.getSouthEast());
@@ -330,18 +360,29 @@ const MapaCalor = (() => {
       } else pinos.push({ p, ...c });
     }
     for (const g of grupos.values()) if (g.n) { const [lat, lng] = centroDe(g.area.poly); pinos.push({ grupo: g, p: { nome: g.area.nome, lat, lng }, n: g.n, peso: g.peso, porTipo: g.porTipo }); }
-    M.calor.definir(M.modo === 'calor' ? pinos.filter(x => x.peso && !x.soMarca).map(x => ({ lat: x.p.lat, lng: x.p.lng, peso: x.peso })) : []);
+    // mancha de calor só com zoom perto (dentro das áreas abertas); de longe quem fala é a cor da área
+    const perto = M.map.getZoom() >= 16;
+    M.calor.definir(M.modo === 'calor' && perto ? pinos.filter(x => x.peso && !x.soMarca && !x.grupo).map(x => ({ lat: x.p.lat, lng: x.p.lng, peso: x.peso })) : []);
+    if (M.modo === 'calor') for (let i = pinos.length - 1; i >= 0; i--) if (pinos[i].grupo) pinos.splice(i, 1);
     // contornos das áreas (só o admin vê)
     M.contornos.clearLayers();
-    const maxA = Math.max(1, ...d.areas.map(a => a.total));
-    const verContornos = (M.contornosVisiveis || M.modo === 'areas' || M.desenho);
+    const pintar = M.modo === 'calor' && !M.desenho;
+    const med = M.med = medidasAreas();
+    const verContornos = pintar || M.contornosVisiveis || M.desenho;
     for (const a of verContornos ? d.areas : []) {
-      const sel = M.selArea === a.id, pintar = M.modo === 'areas';
+      const sel = M.selArea === a.id, x = med.porId.get(a.id);
+      const cor = x.faixa >= 0 ? ESCALA[x.faixa] : '#94a3b8';
       const pol = L.polygon(a.poly, pintar
-        ? { color: sel ? '#fff' : '#e2e8f0', weight: sel ? 3 : 1.5, fillColor: corArea(a.total, maxA), fillOpacity: a.total ? .55 : .15, bubblingMouseEvents: false }
+        ? x.n ? { color: sel ? '#fff' : cor, weight: sel ? 3 : 1.5, opacity: .95, fillColor: cor, fillOpacity: sel ? .55 : .42, bubblingMouseEvents: false }
+          : { color: sel ? '#fff' : '#94a3b8', weight: sel ? 3 : 1.2, dashArray: '4 4', fillOpacity: 0, bubblingMouseEvents: false }   // sem ROI: só o contorno
         : { color: sel ? '#fff' : '#f97316', weight: sel ? 3 : 2, dashArray: sel ? null : '6 4', fillColor: '#f97316', fillOpacity: sel ? .12 : .04, bubblingMouseEvents: false });
-      if (sel || areaAberta(a)) pol.bindTooltip(`${a.nome} · ${plural(a.total)}`, { permanent: true, direction: 'center', className: 'rotulo-area' });   // área pequena na tela: sem rótulo (não embaralha)
-      else pol.bindTooltip(`${a.nome} · ${plural(a.total)}`, { direction: 'top', className: 'rotulo-area', sticky: true });
+      const rotulo = el('span', { class: 'rot-area' }, el('b', { text: a.nome }), ` · ${x.n}`, pintar && (x.n || x.ant) ? [' ', tendencia(x.n, x.ant)] : null);
+      if (pintar && (sel || tamanhoNaTela(a) >= 110)) {
+        // rótulo fixo na borda de cima da área (não cobre os pontos de dentro)
+        const b = L.latLngBounds(a.poly);
+        L.marker([b.getNorth(), b.getCenter().lng], { icon: L.divIcon({ className: 'rotulo-area-ic', html: rotulo, iconSize: null }), interactive: false, keyboard: false }).addTo(M.contornos);
+      } else if (!pintar && (sel || areaAberta(a))) pol.bindTooltip(rotulo, { permanent: true, direction: 'center', className: 'rotulo-area' });
+      else pol.bindTooltip(rotulo, { direction: 'top', className: 'rotulo-area', sticky: true });   // área pequena na tela: rótulo só ao passar o mouse
       pol.on('click', ev => (M.marcando || M.desenho) ? aoClicarMapa(ev) : selecionarArea(a.id, false));
       pol.addTo(M.contornos);
     }
@@ -408,12 +449,12 @@ const MapaCalor = (() => {
 
   function desenharLegenda() {
     if (!M.legenda) return;
-    const itens = M.modo === 'areas'
-      ? [el('b', { text: 'ROIs por área' }), ...[['#4ade80', 'poucos'], ['#facc15', 'médio'], ['#f97316', 'alto'], ['#dc2626', 'mais alto']].map(([c, t]) => el('div', { class: 'leg-it' }, el('i', { style: `background:${c}` }), t))]
-      : M.modo === 'locais'
+    const itens = M.modo === 'locais'
         ? [el('b', { text: 'ROIs por ponto' }), el('div', { class: 'leg-it' }, el('i', { class: 'bola' }), 'tamanho = quantidade'), el('div', { class: 'leg-it' }, el('i', { class: 'bola grupo' }), 'área agrupada: aproxime')]
-        : [el('b', { text: M.gravidade ? 'Intensidade · peso por gravidade' : 'Intensidade · quantidade' }), el('div', { class: 'leg-barra' }), el('div', { class: 'leg-esc' }, el('span', { text: 'baixa' }), el('span', { text: 'alta' })),
-          el('div', { class: 'leg-it' }, el('i', { class: 'bola grupo' }), 'área agrupada: aproxime'),
+        : [el('b', { text: M.gravidade ? 'ROIs por área · peso por gravidade' : 'ROIs por área · quantidade' }),
+          el('div', { class: 'leg-faixas' }, ESCALA.map(c => el('i', { style: `background:${c}` }))), el('div', { class: 'leg-esc' }, el('span', { text: 'menos' }), el('span', { text: 'mais' })),
+          el('div', { class: 'leg-it' }, el('i', { class: 'vazia' }), 'área sem ROI'),
+          el('div', { class: 'leg-it' }, el('span', { class: 'tend sobe', text: '▲' }), el('span', { class: 'tend desce', text: '▼' }), `vs mesmo período de ${M.d ? M.d.anoAnterior : ''}`),
           el('div', { class: 'leg-it' }, el('i', { class: 'losango' }), 'estrutura de empresa')];
     M.legenda.replaceChildren(...itens);
   }
@@ -450,17 +491,12 @@ const MapaCalor = (() => {
     const fora = ordenar(d.pontos.filter(p => !p.areaId));
     const busca = el('input', { type: 'search', class: 'mapa-busca', placeholder: 'Buscar área, local ou empresa…', 'aria-label': 'Buscar', oninput: e => {
       const q = semAcento(e.target.value).toLowerCase();
-      M.lado.querySelectorAll('.mapa-local').forEach(b => { b.hidden = !!q && !semAcento(b.title).toLowerCase().includes(q); });
+      M.lado.querySelectorAll('.mapa-local').forEach(b => { const achou = semAcento(b.title).toLowerCase().includes(q); b.hidden = b.classList.contains('recuo') ? !q || !achou : !!q && !achou; });
     } });
     M.lado.replaceChildren(...[
       el('div', { class: 'mapa-lado-topo' }, busca, fecharGaveta(true)),
-      el('h3', { text: `Áreas (${d.areas.length})` }),
-      d.areas.length ? el('div', { class: 'mapa-lista' }, d.areas.flatMap(a => [
-        el('button', { class: 'mapa-local mapa-area-linha', title: `${a.nome} · ${plural(a.total)}`, onclick: () => selecionarArea(a.id, true) },
-          el('span', { class: 'mapa-pino area', 'aria-hidden': 'true', text: '▢' }), el('span', { class: 'mapa-local-nome', text: a.nome }), el('strong', { text: String(a.total) })),
-        ...ordenar(d.pontos.filter(p => p.areaId === a.id)).map(p => linhaPonto(p, true, true))]))
-        : el('p', { class: 'mudo pequeno', style: 'margin:0', text: pode('mapa.areas') ? 'Nenhuma área desenhada ainda. Use "✏️ Desenhar área" abaixo.' : 'Nenhuma área desenhada ainda.' }),
-      fora.length ? el('h3', { text: d.areas.length ? `Fora das áreas (${fora.length})` : `Locais no mapa (${fora.length})` }) : null,
+      d.areas.length ? rankingAreas() : el('p', { class: 'mudo pequeno', style: 'margin:0', text: pode('mapa.areas') ? 'Nenhuma área desenhada ainda. Use "✏️ Desenhar área" abaixo.' : 'Nenhuma área desenhada ainda.' }),
+      fora.length ? el('h3', { text: d.areas.length ? `Locais fora das áreas (${fora.length})` : `Locais no mapa (${fora.length})` }) : null,
       fora.length ? el('div', { class: 'mapa-lista' }, fora.map(p => linhaPonto(p, true))) : null,
       d.semPosicao.length ? el('h3', { text: `Sem posição no mapa (${d.semPosicao.length})` }) : null,
       d.semPosicao.length ? el('p', { class: 'mudo pequeno', style: 'margin:0', text: podeMarcar ? 'Toque no local e marque onde ele fica. Os ROIs dele passam a aparecer no calor.' : 'Ainda não aparecem no calor.' }) : null,
@@ -487,15 +523,16 @@ const MapaCalor = (() => {
       lista.length > 12 ? el('div', { class: 'mudo pequeno', text: `+ ${lista.length - 12} empresas` }) : null);
   }
 
-  function listaRois(p) {
+  function listaRois(p, idsNav) {
+    const nav = idsNav || p.rois.map(y => y.id);
     return [
       p.rois.length ? el('div', { class: 'mapa-lista' }, p.rois.map(r => el('div', { class: 'mapa-roi-linha' },
-        el('button', { class: 'mapa-roi', onclick: () => pode('roi.registrar') ? abrirRoi(r.id) : abrirRelatorioExecutivo(r.id, p.rois.map(y => y.id)) },
+        el('button', { class: 'mapa-roi', onclick: () => pode('roi.registrar') ? abrirRoi(r.id) : abrirRelatorioExecutivo(r.id, nav) },
           el('span', { class: 'ponto-tipo', style: `background:${COR_TIPO[r.tipo] || '#888'}` }),
           el('span', { style: 'min-width:0' },
             el('div', { class: 'tit' }, `ROI ${r.numero} · ${r.tipo} · ${r.data}`, r.simulado ? el('span', { class: 'etiqueta simulado', text: 'SIMULADO' }) : null),
             el('div', { class: 'sub', text: [r.local !== p.nome ? r.local : '', r.empresa, r.descricao].filter(Boolean).join(' · ') }))),
-        pode('roi.executivo') ? el('button', { class: 'btn-icone mapa-roi-rel', title: 'Ver o relatório executivo', 'aria-label': `Relatório executivo do ROI ${r.numero}`, onclick: () => abrirRelatorioExecutivo(r.id, p.rois.map(y => y.id)) }, '📄') : null))) : el('p', { class: 'mudo pequeno', style: 'margin:0', text: 'Nenhum ROI neste período.' }),
+        pode('roi.executivo') ? el('button', { class: 'btn-icone mapa-roi-rel', title: 'Ver o relatório executivo', 'aria-label': `Relatório executivo do ROI ${r.numero}`, onclick: () => abrirRelatorioExecutivo(r.id, nav) }, '📄') : null))) : el('p', { class: 'mudo pequeno', style: 'margin:0', text: 'Nenhum ROI neste período.' }),
       p.rois.length < p.total ? el('p', { class: 'mudo pequeno', style: 'margin:0', text: `Mostrando ${p.rois.length} de ${p.total}.` }) : null];
   }
 
@@ -519,25 +556,89 @@ const MapaCalor = (() => {
     ];
   }
 
+  // ranking das áreas: posição, cor da faixa, barra, total, % e tendência
+  function rankingAreas() {
+    const d = M.d, med = M.med || medidasAreas(), maxN = Math.max(1, ...med.lista.map(x => x.n));
+    const ordenarP = l => l.slice().sort((a, b) => b.total - a.total || a.nome.localeCompare(b.nome));
+    const linha = (x, pos) => el('button', { class: 'mapa-local mapa-rank' + (M.selArea === x.a.id ? ' sel' : ''), title: `${x.a.nome} · ${plural(x.n)}`, onclick: () => selecionarArea(x.a.id, true) },
+      el('span', { class: 'rk-pos', text: x.n ? `${pos}º` : '–' }),
+      el('i', { class: 'rk-cor' + (x.n ? '' : ' vazia'), style: x.n ? `background:${ESCALA[x.faixa]}` : '' }),
+      el('span', { class: 'rk-nome' }, el('span', { class: 'mapa-local-nome', text: x.a.nome }), el('span', { class: 'rk-barra' }, el('em', { style: `width:${x.n ? Math.max(4, x.n / maxN * 100) : 0}%` }))),
+      el('span', { class: 'rk-num' }, el('strong', { text: String(x.n) }), el('small', { text: med.totalN ? Math.round(x.n / med.totalN * 100) + '%' : '0%' })),
+      x.n || x.ant ? tendencia(x.n, x.ant) : el('span', { class: 'tend vazio' }));
+    const fora = medir(d.foraAreas), foraAnt = medir(d.foraAreas.anterior).n;
+    return el('div', { class: 'mapa-ranking' },
+      el('div', { class: 'rk-cab' }, el('h3', { text: 'Áreas com mais ocorrências' }), el('span', { class: 'mudo pequeno', text: `▲▼ vs mesmo período de ${d.anoAnterior}` })),
+      el('div', { class: 'mapa-lista' }, med.lista.flatMap((x, k) => [linha(x, k + 1), ...ordenarP(d.pontos.filter(p => p.areaId === x.a.id)).map(p => { const b = linhaPonto(p, true, true); b.hidden = true; return b; })])),
+      fora.n || foraAnt ? el('div', { class: 'mapa-rank fora', title: 'ROIs fora das áreas desenhadas ou de locais ainda sem posição no mapa' },
+        el('span', { class: 'rk-pos', text: '' }), el('i', { class: 'rk-cor vazia' }),
+        el('span', { class: 'rk-nome' }, el('span', { class: 'mapa-local-nome', text: 'Sem área definida' })),
+        el('span', { class: 'rk-num' }, el('strong', { text: String(fora.n) }), el('small', { text: med.totalN ? Math.round(fora.n / med.totalN * 100) + '%' : '0%' })),
+        tendencia(fora.n, foraAnt)) : null);
+  }
+
+  const dataNum = t => { const [dd, mm, aa] = String(t || '').split('/').map(Number); return (aa || 0) * 10000 + (mm || 0) * 100 + (dd || 0); };
+  function roisDaArea(a) {
+    const l = [];
+    for (const p of M.d.pontos.filter(p => p.areaId === a.id)) for (const r of p.rois) if (M.simulados || !r.simulado) l.push({ ...r, local: r.local || p.nome });
+    return l.sort((x, y) => dataNum(y.data) - dataNum(x.data) || y.numero - x.numero);
+  }
   function fichaArea(a) {
     const dentro = M.d.pontos.filter(p => p.areaId === a.id).sort((x, y) => y.total - x.total || x.nome.localeCompare(y.nome));
-    const parte = M.d.total ? Math.round(a.total / M.d.total * 100) : 0;
+    const med = M.med || medidasAreas(), x = med.porId.get(a.id) || { n: a.total, ant: 0, porTipo: a.porTipo };
+    const pos = med.lista.indexOf(x) + 1;
+    const parte = med.totalN ? Math.round(x.n / med.totalN * 100) : 0;
+    const top = dentro.filter(p => p.total).slice(0, 3), maxTop = Math.max(1, ...top.map(p => p.total));
+    const rois = roisDaArea(a), ids = rois.map(r => r.id);
     return [
       voltarLista(),
-      el('div', {}, el('h3', { class: 'mapa-ficha-tit', text: a.nome }), el('div', { class: 'mudo pequeno', text: (n => `Área · ${n} ponto${n === 1 ? '' : 's'} marcado${n === 1 ? '' : 's'}`)(dentro.filter(p => p.tipo !== 'centro').length) })),
-      el('div', { class: 'mapa-kpis' },
-        el('div', { class: 'mapa-kpi' }, el('strong', { text: String(a.total) }), el('span', { text: `ROI${a.total === 1 ? '' : 's'} no período` })),
-        el('div', { class: 'mapa-kpi' }, el('strong', { text: parte + '%' }), el('span', { text: 'do total do período' }))),
-      a.total ? tiposDe(a.porTipo) : null,
-      Object.keys(a.porEmpresa || {}).length ? el('h3', { text: 'Por empresa' }) : null,
-      porEmpresa(a),
-      el('h3', { text: 'Locais e empresas na área' }),
-      dentro.length ? el('div', { class: 'mapa-lista' }, dentro.map(p => linhaPonto(p, true))) : el('p', { class: 'mudo pequeno', style: 'margin:0', text: 'Nenhum ponto marcado dentro desta área.' }),
+      el('div', {}, el('h3', { class: 'mapa-ficha-tit', text: a.nome }), el('div', { class: 'mudo pequeno', text: x.n ? `Área · ${pos}º no ranking de ${med.lista.length}` : 'Área · sem ROI no período' })),
+      el('div', { class: 'mapa-kpis tres' },
+        el('div', { class: 'mapa-kpi' }, el('strong', { text: String(x.n) }), el('span', { text: `ROI${x.n === 1 ? '' : 's'} no período` })),
+        el('div', { class: 'mapa-kpi' }, el('strong', { text: parte + '%' }), el('span', { text: 'do total' })),
+        el('div', { class: 'mapa-kpi' }, el('strong', {}, tendencia(x.n, x.ant)), el('span', { text: `${M.d.anoAnterior}: ${x.ant}` }))),
+      x.n ? tiposDe(x.porTipo) : null,
+      top.length ? el('h3', { text: 'Onde mais acontece' }) : null,
+      top.length ? el('div', { class: 'mapa-empresas' }, top.map(p => el('button', { class: 'mapa-empresa mapa-top', title: p.nome, onclick: () => selecionar(p.nome, true) },
+        el('span', { class: 'mapa-local-nome', text: p.nome }), el('i', { style: `width:${Math.max(6, p.total / maxTop * 100)}%` }), el('strong', { text: String(p.total) })))) : null,
+      rois.length ? el('h3', { text: 'Últimos ROIs' }) : null,
+      rois.length ? listaRois({ rois: rois.slice(0, 6), total: rois.length, nome: '' }, ids)[0] : null,
+      rois.length > 6 ? el('p', { class: 'mudo pequeno', style: 'margin:0', text: `+ ${rois.length - 6} no relatório da área` }) : null,
+      x.n ? el('button', { class: 'btn primario pequeno', onclick: () => imprimirArea(a) }, '🖨️ Relatório da área (PDF)') : null,
+      Object.keys(a.porEmpresa || {}).length ? el('details', { class: 'mapa-mais' }, el('summary', { text: 'Por empresa' }), porEmpresa(a)) : null,
+      el('details', { class: 'mapa-mais' }, el('summary', { text: `Locais e empresas na área (${dentro.length})` }),
+        dentro.length ? el('div', { class: 'mapa-lista' }, dentro.map(p => linhaPonto(p, true))) : el('p', { class: 'mudo pequeno', style: 'margin:0', text: 'Nenhum ponto marcado dentro desta área.' })),
       pode('mapa.areas') ? el('div', { class: 'linha', style: 'gap:6px;flex-wrap:wrap' },
         el('button', { class: 'btn pequeno', onclick: () => renomearArea(a) }, 'Renomear'),
         el('button', { class: 'btn pequeno', onclick: () => iniciarDesenho(a) }, 'Redesenhar'),
         el('button', { class: 'btn fantasma pequeno', onclick: () => apagarArea(a) }, 'Apagar área')) : null
     ];
+  }
+
+  // relatório da área para imprimir ou salvar em PDF (reunião)
+  function imprimirArea(a) {
+    const d = M.d, med = M.med || medidasAreas(), x = med.porId.get(a.id);
+    const pos = med.lista.indexOf(x) + 1, parte = med.totalN ? Math.round(x.n / med.totalN * 100) : 0;
+    const per = d.mes ? `${NOMES_MES[d.mes - 1]} de ${d.ano}` : `${d.ano} (ano todo)`;
+    const dif = x.n - x.ant;
+    const dentro = d.pontos.filter(p => p.areaId === a.id && p.total).sort((p, q) => q.total - p.total);
+    const rois = roisDaArea(a);
+    const cel = (rot, val) => [el('th', { text: rot }), el('td', { text: String(val) })];
+    $('#impressao').replaceChildren(el('div', { class: 'roi-imp area-imp' },
+      el('h1', { text: `Relatório da área · ${a.nome}` }),
+      el('p', { text: `Ocorrências internas (ROI) · Segurança Patrimonial · Porto do Açu · Período: ${per}${M.tipos.length ? ' · Tipos: ' + M.tipos.join(', ') : ''}${M.simulados ? '' : ' · sem simulados'}` }),
+      el('table', {},
+        el('tr', {}, cel('ROIs no período', x.n), cel('Posição no ranking', `${pos}º de ${med.lista.length} áreas`)),
+        el('tr', {}, cel('Parte do total', `${parte}%`), cel(`Mesmo período de ${d.anoAnterior}`, `${x.ant} (${dif > 0 ? '+' : ''}${dif})`))),
+      el('h2', { text: 'Por tipo' }),
+      el('table', {}, el('tr', {}, el('th', { text: 'Tipo' }), el('th', { text: 'Quantidade' })),
+        Object.entries(x.porTipo).sort((p, q) => q[1] - p[1]).map(([g, n]) => el('tr', {}, el('td', { text: `${g} – ${d.grupos[g] || ''}` }), el('td', { text: String(n) })))),
+      dentro.length ? [el('h2', { text: 'Locais com ocorrência' }), el('table', {}, el('tr', {}, el('th', { text: 'Local' }), el('th', { text: 'Quantidade' })),
+        dentro.map(p => el('tr', {}, el('td', { text: p.nome }), el('td', { text: String(p.total) }))))] : null,
+      rois.length ? [el('h2', { text: 'ROIs' }), el('table', {}, el('tr', {}, ['Nº', 'Data', 'Tipo', 'Local', 'Empresa', 'Descrição'].map(t => el('th', { text: t }))),
+        rois.map(r => el('tr', {}, [r.numero, r.data, r.tipo, r.local, r.empresa || '—', r.descricao || '—'].map(t => el('td', { text: String(t ?? '') })))))] : null,
+      el('div', { class: 'legenda-imp', text: `USO INTERNO · CONFIDENCIAL · Gerado em ${new Date().toLocaleString('pt-BR')} por ${S.usuario?.nome || ''}` })));
+    window.print();
   }
 
   function selecionar(nome, voar) {
@@ -550,7 +651,11 @@ const MapaCalor = (() => {
   function selecionarArea(id, voar) {
     M.selArea = id; M.sel = '';
     const a = M.d.areas.find(x => x.id === id);
-    if (voar && a) M.map.flyToBounds(L.latLngBounds(a.poly), { duration: 0.6, padding: [40, 40] });
+    if (voar && a) {
+      // a gaveta cobre parte do mapa: no celular embaixo, no computador à direita
+      const cel = window.innerWidth < 900, h = M.caixaMapa.clientHeight;
+      M.map.flyToBounds(L.latLngBounds(a.poly), { duration: 0.6, paddingTopLeft: [30, 30], paddingBottomRight: cel ? [30, Math.round(h * 0.62) + 20] : [400, 30] });
+    }
     desenharCamadas(); desenharLado();
     gaveta(true);
   }

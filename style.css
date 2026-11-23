@@ -845,3 +845,36 @@ body:has(#app:not([hidden])) #fundo-animado { opacity: .12; }
 .mapa-roi-linha { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; align-items: stretch; }
 .mapa-roi-rel { align-self: center; }
 .painel.sobre-mapa { z-index: 60; }
+/* 7.6 · calor por área: rótulo, tendência, ranking, ficha e impressão */
+.rot-area { display: inline-flex; align-items: center; gap: 4px; }
+.rot-area .tend { text-shadow: none; padding: 0 4px; border-radius: 6px; font-size: 11px; }
+.tend { font-weight: 700; font-size: 12px; white-space: nowrap; }
+.tend.sobe { color: #f87171; } .tend.desce { color: #4ade80; } .tend.igual { color: var(--mudo); } .tend.vazio { min-width: 1px; }
+.rot-area .tend.sobe { background: rgba(127, 29, 29, .85); color: #fecaca; } .rot-area .tend.desce { background: rgba(20, 83, 45, .85); color: #bbf7d0; } .rot-area .tend.igual { background: rgba(15, 23, 42, .8); color: #cbd5e1; }
+.leg-faixas { display: grid; grid-template-columns: repeat(5, 1fr); gap: 2px; height: 9px; }
+.leg-faixas i { border-radius: 2px; }
+.mapa-legenda .leg-it i.vazia { width: 12px; height: 9px; border: 1.5px dashed #94a3b8; border-radius: 2px; background: none; }
+.mapa-legenda .leg-it .tend { font-size: 11px; }
+.mapa-ranking { display: grid; gap: 6px; }
+.rk-cab { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.rk-cab h3 { margin: 0; }
+.mapa-rank { display: grid !important; grid-template-columns: 26px 10px minmax(0, 1fr) auto 46px; align-items: center; gap: 8px; text-align: left; }
+.mapa-rank.fora { padding: 8px 10px; border: 1px dashed var(--borda); border-radius: 10px; color: var(--mudo); }
+.mapa-rank.sel { outline: 2px solid #f97316; outline-offset: -2px; }
+.rk-pos { font-weight: 700; color: var(--mudo); font-size: 12px; text-align: right; }
+.rk-cor { width: 10px; height: 10px; border-radius: 3px; }
+.rk-cor.vazia { border: 1.5px dashed #94a3b8; }
+.rk-nome { display: grid; gap: 4px; min-width: 0; }
+.rk-barra { display: block; height: 4px; border-radius: 3px; background: rgba(148, 163, 184, .18); overflow: hidden; }
+.rk-barra em { display: block; height: 100%; background: #f97316; border-radius: 3px; }
+.rk-num { display: grid; justify-items: end; line-height: 1.1; }
+.rk-num small { color: var(--mudo); font-size: 11px; }
+.mapa-rank .tend { text-align: right; }
+.mapa-kpis.tres { grid-template-columns: repeat(3, 1fr); }
+.mapa-kpi strong .tend { font-size: 18px; }
+.mapa-top { width: 100%; background: none; border: 0; color: inherit; cursor: pointer; text-align: left; padding: 4px 0; font: inherit; }
+.mapa-mais summary { cursor: pointer; font-weight: 600; padding: 4px 0; }
+.mapa-mais[open] summary { margin-bottom: 6px; }
+@media print { #impressao .area-imp h1 { font-size: 15pt; } #impressao .area-imp td, #impressao .area-imp th { text-align: left; } }
+.mapa-tela .rotulo-area-ic { width: auto !important; height: auto !important; margin: 0 !important; transform-origin: 0 0; }
+.mapa-tela .rotulo-area-ic .rot-area { position: absolute; left: 0; bottom: 3px; transform: translateX(-50%); white-space: nowrap; color: #fff; font: 700 12px system-ui, sans-serif; text-shadow: 0 0 3px #000, 0 0 6px #000, 0 1px 2px #000; pointer-events: none; }

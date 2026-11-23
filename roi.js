@@ -705,56 +705,67 @@ const mesmaEmpresa = (a, b) => !!a && !!b && (chaveLocal(a) === chaveLocal(b) ||
 
 function dadosDoMapa(filtros = {}) {
     const d = indicadorOcorrencias({ ...filtros, local: '' });
-    const areas = estado.mapa.areas.map(a => ({ id: a.id, nome: a.nome, poly: a.poly, total: 0, porTipo: {}, simulados: 0, porEmpresa: {} }));
-    const areaPorId = new Map(areas.map(a => [a.id, a]));
-    const areaPorNome = new Map(estado.mapa.areas.map(a => [chaveLocal(a.nome), a]));
-    // pinos: cada ponto cadastrado (local ou empresa) e, se preciso, o meio de uma área
-    const pinos = new Map();
-    const pino = (chave, base) => { if (!pinos.has(chave)) pinos.set(chave, { total: 0, porTipo: {}, simulados: 0, porEmpresa: {}, rois: [], ...base }); return pinos.get(chave); };
-    for (const [nome, p] of Object.entries(estado.mapa.pontos)) {
-        const a = areaDoPonto(p.lat, p.lng);
-        pino('p:' + nome, { nome, lat: p.lat, lng: p.lng, tipo: p.tipo || 'local', empresa: p.empresa || '', area: a ? a.nome : '', areaId: a ? a.id : '' });
-    }
-    const empresasNoMapa = [...pinos.values()].filter(p => p.tipo === 'empresa' && p.empresa);
-    const semPos = new Map();
-    const somar = (alvo, r) => {
-        alvo.total++; alvo.porTipo[r.tipo] = (alvo.porTipo[r.tipo] || 0) + 1;
-        if (r.simulado) alvo.simulados++;
-        if (r.empresaNome) alvo.porEmpresa[r.empresaNome] = (alvo.porEmpresa[r.empresaNome] || 0) + 1;
-    };
-    const resumo = r => ({ id: r.id, numero: r.numero, tipo: r.tipo, data: r.data, simulado: !!r.simulado, local: r.localNome, empresa: r.empresaNome || '', descricao: String(r.descricao || r.oque || '').slice(0, 120) });
-    for (const r of d.baseMapa.slice().sort((x, y) => y.ano - x.ano || y.seq - x.seq)) {
-        if (r.localNome === '(sem local)') continue;
-        const pLocal = estado.mapa.pontos[r.localNome];
-        const aLocal = areaPorNome.get(chaveLocal(r.localNome)) || (pLocal ? areaDoPonto(pLocal.lat, pLocal.lng) : null);
-        let alvo = null;
-        if (r.geo && isFinite(r.geo.lat) && isFinite(r.geo.lng)) {
-            // ponto exato marcado no ROI (agrupado a cada ~10 m)
-            const aG = areaDoPonto(r.geo.lat, r.geo.lng);
-            alvo = pino(`g:${r.geo.lat.toFixed(4)},${r.geo.lng.toFixed(4)}`, { nome: `${r.localNome} · ponto exato`, lat: r.geo.lat, lng: r.geo.lng, tipo: 'exato', empresa: '', area: aG ? aG.nome : '', areaId: aG ? aG.id : '' });
+    // distribui uma lista de ROIs pelos pontos e áreas (usado no período e no mesmo período do ano anterior)
+    const montar = lista => {
+        const areas = estado.mapa.areas.map(a => ({ id: a.id, nome: a.nome, poly: a.poly, total: 0, porTipo: {}, simPorTipo: {}, simulados: 0, porEmpresa: {} }));
+        const fora = { total: 0, porTipo: {}, simPorTipo: {}, simulados: 0, porEmpresa: {} };   // ROIs que não caem em nenhuma área
+        const areaPorId = new Map(areas.map(a => [a.id, a]));
+        const areaPorNome = new Map(estado.mapa.areas.map(a => [chaveLocal(a.nome), a]));
+        // pinos: cada ponto cadastrado (local ou empresa) e, se preciso, o meio de uma área
+        const pinos = new Map();
+        const pino = (chave, base) => { if (!pinos.has(chave)) pinos.set(chave, { total: 0, porTipo: {}, simulados: 0, porEmpresa: {}, rois: [], ...base }); return pinos.get(chave); };
+        for (const [nome, p] of Object.entries(estado.mapa.pontos)) {
+            const a = areaDoPonto(p.lat, p.lng);
+            pino('p:' + nome, { nome, lat: p.lat, lng: p.lng, tipo: p.tipo || 'local', empresa: p.empresa || '', area: a ? a.nome : '', areaId: a ? a.id : '' });
+        }
+        const empresasNoMapa = [...pinos.values()].filter(p => p.tipo === 'empresa' && p.empresa);
+        const semPos = new Map();
+        const somar = (alvo, r) => {
+            alvo.total++; alvo.porTipo[r.tipo] = (alvo.porTipo[r.tipo] || 0) + 1;
+            if (r.simulado) { alvo.simulados++; if (alvo.simPorTipo) alvo.simPorTipo[r.tipo] = (alvo.simPorTipo[r.tipo] || 0) + 1; }
+            if (r.empresaNome) alvo.porEmpresa[r.empresaNome] = (alvo.porEmpresa[r.empresaNome] || 0) + 1;
+        };
+        const resumo = r => ({ id: r.id, numero: r.numero, tipo: r.tipo, data: r.data, simulado: !!r.simulado, local: r.localNome, empresa: r.empresaNome || '', descricao: String(r.descricao || r.oque || '').slice(0, 120) });
+        for (const r of lista.slice().sort((x, y) => y.ano - x.ano || y.seq - x.seq)) {
+            if (r.localNome === '(sem local)') { somar(fora, r); continue; }
+            const pLocal = estado.mapa.pontos[r.localNome];
+            const aLocal = areaPorNome.get(chaveLocal(r.localNome)) || (pLocal ? areaDoPonto(pLocal.lat, pLocal.lng) : null);
+            let alvo = null;
+            if (r.geo && isFinite(r.geo.lat) && isFinite(r.geo.lng)) {
+                // ponto exato marcado no ROI (agrupado a cada ~10 m)
+                const aG = areaDoPonto(r.geo.lat, r.geo.lng);
+                alvo = pino(`g:${r.geo.lat.toFixed(4)},${r.geo.lng.toFixed(4)}`, { nome: `${r.localNome} · ponto exato`, lat: r.geo.lat, lng: r.geo.lng, tipo: 'exato', empresa: '', area: aG ? aG.nome : '', areaId: aG ? aG.id : '' });
+                somar(alvo, r); if (alvo.rois.length < 100) alvo.rois.push(resumo(r));
+                somar(aG ? areaPorId.get(aG.id) : fora, r);
+                continue;
+            }
+            if (r.empresaNome && (aLocal || pLocal)) {
+                const cand = empresasNoMapa.filter(p => mesmaEmpresa(p.empresa, r.empresaNome)
+                    && (aLocal ? p.areaId === aLocal.id : metros([p.lat, p.lng], [pLocal.lat, pLocal.lng]) <= 500));
+                if (cand.length) alvo = pLocal ? cand.sort((x, y) => metros([x.lat, x.lng], [pLocal.lat, pLocal.lng]) - metros([y.lat, y.lng], [pLocal.lat, pLocal.lng]))[0] : cand[0];
+            }
+            if (!alvo && pLocal) alvo = pinos.get('p:' + r.localNome);
+            if (!alvo && aLocal) {
+                const [lat, lng] = centroDe(aLocal.poly);
+                alvo = pino('a:' + aLocal.id, { nome: aLocal.nome, lat, lng, tipo: 'centro', empresa: '', area: aLocal.nome, areaId: aLocal.id });
+            }
+            if (!alvo) {
+                const x = semPos.get(r.localNome) || { nome: r.localNome, total: 0, porTipo: {}, simulados: 0, porEmpresa: {}, rois: [] };
+                somar(x, r); if (x.rois.length < 100) x.rois.push(resumo(r)); semPos.set(r.localNome, x);
+                somar(fora, r);
+                continue;
+            }
             somar(alvo, r); if (alvo.rois.length < 100) alvo.rois.push(resumo(r));
-            if (aG) somar(areaPorId.get(aG.id), r);
-            continue;
+            const aSoma = aLocal || (alvo.areaId ? estado.mapa.areas.find(a => a.id === alvo.areaId) : null);
+            somar(aSoma ? areaPorId.get(aSoma.id) : fora, r);
         }
-        if (r.empresaNome && (aLocal || pLocal)) {
-            const cand = empresasNoMapa.filter(p => mesmaEmpresa(p.empresa, r.empresaNome)
-                && (aLocal ? p.areaId === aLocal.id : metros([p.lat, p.lng], [pLocal.lat, pLocal.lng]) <= 500));
-            if (cand.length) alvo = pLocal ? cand.sort((x, y) => metros([x.lat, x.lng], [pLocal.lat, pLocal.lng]) - metros([y.lat, y.lng], [pLocal.lat, pLocal.lng]))[0] : cand[0];
-        }
-        if (!alvo && pLocal) alvo = pinos.get('p:' + r.localNome);
-        if (!alvo && aLocal) {
-            const [lat, lng] = centroDe(aLocal.poly);
-            alvo = pino('a:' + aLocal.id, { nome: aLocal.nome, lat, lng, tipo: 'centro', empresa: '', area: aLocal.nome, areaId: aLocal.id });
-        }
-        if (!alvo) {
-            const x = semPos.get(r.localNome) || { nome: r.localNome, total: 0, porTipo: {}, simulados: 0, porEmpresa: {}, rois: [] };
-            somar(x, r); if (x.rois.length < 100) x.rois.push(resumo(r)); semPos.set(r.localNome, x);
-            continue;
-        }
-        somar(alvo, r); if (alvo.rois.length < 100) alvo.rois.push(resumo(r));
-        const aSoma = aLocal || (alvo.areaId ? estado.mapa.areas.find(a => a.id === alvo.areaId) : null);
-        if (aSoma) somar(areaPorId.get(aSoma.id), r);
-    }
+        return { areas, pinos, semPos, fora };
+    };
+    const { areas, pinos, semPos, fora } = montar(d.baseMapa);
+    const ant = montar(d.baseAnterior || []);
+    const antPorId = new Map(ant.areas.map(a => [a.id, a]));
+    for (const a of areas) { const x = antPorId.get(a.id); a.anterior = { total: x.total, porTipo: x.porTipo, simPorTipo: x.simPorTipo }; }
+    fora.anterior = { total: ant.fora.total, porTipo: ant.fora.porTipo, simPorTipo: ant.fora.simPorTipo };
     const pontos = [...pinos.values()].filter(p => p.tipo !== 'centro' || p.total);
     return {
         ano: d.ano, mes: d.mes, anos: d.anos, meses: d.meses.map(m => ({ mes: m.mes, total: m.total })),
@@ -762,7 +773,8 @@ function dadosDoMapa(filtros = {}) {
         total: d.baseMapa.length,
         area: estado.mapa.area || AREA_PADRAO, areaPadrao: !estado.mapa.area,
         areas: areas.sort((a, b) => b.total - a.total || a.nome.localeCompare(b.nome)), pontos,
-        semPosicao: [...semPos.values()].sort((a, b) => b.total - a.total)
+        semPosicao: [...semPos.values()].sort((a, b) => b.total - a.total),
+        foraAreas: fora, anoAnterior: d.ano - 1
     };
 }
 
@@ -1120,6 +1132,7 @@ function indicadorOcorrencias({ ano, mes, tipos: filtroTipos, local: filtroLocal
         lista: escopo.sort((a, b) => b.ano - a.ano || b.seq - a.seq).slice(0, 200).map(r => ({ id: r.id, numero: r.numero, tipo: r.tipo, data: r.data, local: r.localNome, simulado: !!r.simulado, descricao: r.descricao || r.oque || '' }))
     };
     Object.defineProperty(resultado, 'baseMapa', { value: baseMapa, enumerable: false });
+    Object.defineProperty(resultado, 'baseAnterior', { value: semLocal.filter(r => r.ano === ano - 1 && noPeriodo(r)), enumerable: false });   // mesmo período do ano anterior (tendência por área)
     return resultado;
 }
 
