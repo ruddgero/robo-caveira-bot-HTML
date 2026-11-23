@@ -1320,7 +1320,7 @@ async function atualizarOperacao(id, dados, usuario) {
     const limpos = limparOperacao(dados);
     // desembarque: só tem saída (o horário de entrada informado passa a ser a saída)
     const junto = { ...o, ...limpos };
-    if (R.ehEmbarque(junto) || (R.ehDesembarque(junto) && (junto.horaInicial || !junto.horaFinal))) { const aj = R.ajustarDesembarque({ ...junto }); limpos.horaInicial = aj.horaInicial; limpos.horaFinal = aj.horaFinal; }   // embarque: só entrada · desembarque: só saída
+    if (R.ehEmbarque(junto) || ((R.ehDesembarque(junto) || R.ehPasseio(junto)) && junto.horaInicial && !junto.horaFinal)) { const aj = R.ajustarDesembarque({ ...junto }); limpos.horaInicial = aj.horaInicial; limpos.horaFinal = aj.horaFinal; }   // embarque: só entrada · desembarque: só saída
     registrarHistorico(o, limpos, usuario ? usuario.nome : 'Correção');
     Object.assign(o, limpos);
     if (o.navio) {

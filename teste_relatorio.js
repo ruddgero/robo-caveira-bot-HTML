@@ -350,11 +350,14 @@ const mapaLoc = ROI.mapaDeLocais([{ local: 'Portaria Principal' }, { local: 'Por
 assert.strictEqual(mapaLoc.get('Portaria Principal (Saída de veículos)'), 'Portaria Principal');
 assert.strictEqual(mapaLoc.get('Portaria Principal - Rai-x'), 'Portaria Principal');
 assert.strictEqual(mapaLoc.get('Gate 01'), 'Gate 01');
-// Saída a passeio sem a palavra "tripulantes" (mensagem real do grupo): vira operação, com horário de entrada
+// Saída a passeio sem a palavra "tripulantes" (mensagem real do grupo): vira operação; no passeio o tripulante SAI primeiro (horário = saída) e entra no retorno
 const passeioVan = R.classificarMensagem('*SAIDA A PASSEIO*\nNAVIO: MARTHA OLDENDORFF\nTERMINAL: T-ORE\nVEÍCULO: VAN/ KZI6D14\nMOTORISTA: DIOGO ARAUJO\nEMPRESA: BJM TRANSPORTE\nENTRADA PELO CAIS DO PIER AS: 14:50', undefined, '14:53');
 assert.strictEqual(passeioVan.sugestao, 'OPERACAO');
 assert.strictEqual(passeioVan.rascunhos[0].movimento, 'Saída a passeio');
-assert.strictEqual(passeioVan.rascunhos[0].horaInicial, '14:50');
+assert.deepStrictEqual([passeioVan.rascunhos[0].horaInicial, passeioVan.rascunhos[0].horaFinal], ['', '14:50']);
+const pvEmail = R.minutaEmail({ ...passeioVan.rascunhos[0], quantidade: '05', data: '23/11/2026' }).corpo;
+assert.ok(pvEmail.includes('\t✓ Saída a passeio\n\t✓ Saída: 14:50h\n\t✓ Retorno (entrada): Não retornaram até o momento\n'));
+assert.ok(R.minutaEmail({ ...passeioVan.rascunhos[0], horaRetorno: '18:10' }).corpo.includes('Retorno (entrada): 18:10h') && !/Retorno dos tripulantes/.test(R.minutaEmail({ ...passeioVan.rascunhos[0], horaRetorno: '18:10' }).corpo));
 assert.strictEqual(passeioVan.rascunhos[0].placa, 'KZI-6D14');
 assert.strictEqual(passeioVan.rascunhos[0].conferir.length, 0);
 assert.ok(passeioVan.rascunhos[0].alertas.some(a => /Quantidade de tripulantes/.test(a)));

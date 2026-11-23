@@ -1130,11 +1130,11 @@ function abrirOperacao(o) {
   const linhas = [
     ['Tipo', o.rotuloTipo], ['Navio', o.navio], ['Terminal', o.terminal],
     o.tipo === 'TRIPULACAO' ? ['Tripulantes', `${o.movimento || ''} · ${o.quantidade || '?'}`] : null,
-    o.tipo === 'TRIPULACAO' && /^Sa[ií]da/i.test(o.movimento || '') ? ['Retorno', o.horaRetorno ? o.horaRetorno + 'h' : 'não retornaram'] : null,
+    o.tipo === 'TRIPULACAO' && /^Sa[ií]da/i.test(o.movimento || '') ? ['Retorno (entrada)', o.horaRetorno ? o.horaRetorno + 'h' : 'não retornaram'] : null,
     ['Empresa', o.empresa], ['Motorista(s)', o.responsavel], ['Agente', o.agente], ['Ajudante(s)', o.ajudante], ['A bordo', o.aBordo],
     ['Veículo', `${o.veiculo || ''} ${o.placa || ''}`.trim()], ['Observações', o.observacoes],
     // desembarque de tripulantes: só existe a saída
-    o.tipo === 'TRIPULACAO' && /^desembarque( definitivo)?$/i.test(o.movimento || '') && !o.horaInicial ? null : ['Entrada', o.horaInicial ? o.horaInicial + 'h' : '—'],
+    o.tipo === 'TRIPULACAO' && /^(desembarque( definitivo)?|sa[ií]da (a passeio|para atendimento m[eé]dico))$/i.test(o.movimento || '') && !o.horaInicial ? null : ['Entrada', o.horaInicial ? o.horaInicial + 'h' : '—'],   // desembarque e passeio: sai primeiro
     soEntrada(o) ? null : ['Saída', o.horaFinal ? o.horaFinal + 'h' : 'aguardando']
   ].filter(x => x && x[1]);
   abrirModal(`${o.rotuloTipo} · ${o.navio || ''}`, [
