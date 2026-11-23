@@ -2838,7 +2838,8 @@ function abrirPainel(titulo, conteudo, aoFechar) {
 }
 function fecharPainel(aoFechar) {
   $('#painel').hidden = true;
-  document.body.style.overflow = '';
+  $('#painel').classList.remove('sobre-mapa');
+  document.body.style.overflow = document.querySelector('.mapa-tela') ? 'hidden' : '';
   clearInterval(S.painelTimer);
   if (aoFechar) aoFechar();
   recarregarTudo();
@@ -3771,3 +3772,64 @@ function importarControleRoi() {
     .observe(document.documentElement, { childList: true, subtree: true });
   trocar(document.body);
 })();
+
+// =====================================================================
+// RELATÓRIO EXECUTIVO DO ROI (gestão): uma página limpa, pronta para a gerência
+// ids: os ROIs do mesmo ponto, para passar com ← →
+// =====================================================================
+async function abrirRelatorioExecutivo(id, ids = [id]) {
+  let i = Math.max(0, ids.indexOf(id));
+  const caixa = el('div', { class: 'exe' }, el('div', { class: 'vazio', text: 'Carregando relatório…' }));
+  abrirPainel('📄 Relatório executivo', caixa);
+  $('#painel').classList.toggle('sobre-mapa', !!document.querySelector('.mapa-tela'));   // aberto pelo mapa: fica por cima dele
+  const tecla = e => { if ($('#painel').hidden) return document.removeEventListener('keydown', tecla); if (e.key === 'ArrowRight' && i < ids.length - 1) { i++; mostrar(); } if (e.key === 'ArrowLeft' && i > 0) { i--; mostrar(); } };
+  document.addEventListener('keydown', tecla);
+  async function mostrar() {
+    let r;
+    try { r = (await api('GET', `/api/roi/${encodeURIComponent(ids[i])}/executivo`)).roi; } catch (e) { return caixa.replaceChildren(el('div', { class: 'vazio', text: e.message })); }
+    const cor = COR_TIPO[r.tipo] || '#94a3b8';
+    const bloco = (titulo, texto) => texto ? el('section', { class: 'exe-bloco' }, el('h3', { text: titulo }), el('p', { text: texto })) : null;
+    const meta = (rot, val) => val ? el('div', { class: 'exe-meta' }, el('span', { text: rot }), el('strong', { text: val })) : null;
+    const aut = ['pm', 'pf', 'pc', 'outras'].map((k, n) => [['Polícia Militar', 'Polícia Federal', 'Polícia Civil', 'Outras'][n], r.autoridades?.[k]]).filter(([, v]) => v && !/^n\/?a$/i.test(v));
+    const fotos = (r.fotos || []).map((f, n) => el('figure', {}, el('img', { src: `/api/roi/${encodeURIComponent(r.id)}/foto/${encodeURIComponent(f.id)}`, alt: f.legenda || `Evidência ${n + 1}`, loading: 'lazy' }), el('figcaption', { text: `${String(n + 1).padStart(2, '0')} · ${f.legenda || 'Evidência'}` })));
+    const correcoes = (r.historico || []).length;
+    caixa.replaceChildren(...[
+      ids.length > 1 ? el('div', { class: 'exe-nav' },
+        el('button', { type: 'button', class: 'btn pequeno', disabled: i === 0, onclick: () => { i--; mostrar(); } }, '← Anterior'),
+        el('span', { class: 'mudo pequeno', text: `${i + 1} de ${ids.length} neste ponto` }),
+        el('button', { type: 'button', class: 'btn pequeno', disabled: i === ids.length - 1, onclick: () => { i++; mostrar(); } }, 'Próximo →')) : null,
+      el('header', { class: 'exe-cab', style: `--cor:${cor}` },
+        el('div', { class: 'exe-num' }, el('span', { class: 'mudo pequeno', text: 'ROI Nº' }), el('strong', { text: r.numero })),
+        el('div', { class: 'exe-tit' },
+          el('div', { class: 'exe-selos' }, el('span', { class: 'exe-tipo', text: `${r.tipo} · ${r.grupo || ''}` }), r.simulado ? seloSimulado() : null),
+          el('h2', { text: r.titulo || r.grupo || 'Ocorrência' }),
+          el('div', { class: 'mudo', text: [r.data && `${r.data}${r.hora ? ' às ' + r.hora : ''}`, r.local, r.areaMapa && r.areaMapa !== r.local ? r.areaMapa : null].filter(Boolean).join(' · ') }))),
+      el('div', { class: 'exe-metas' }, meta('Empresa', r.empresa), meta('Turno', r.turno), meta('Área responsável', r.area), meta('Risco de reincidência', r.risco),
+        meta('Ponto no mapa', r.geo ? (r.geo.origem === 'gps' ? `GPS ± ${r.geo.precisao || '?'} m` : 'Marcado no mapa') : '')),
+      (r.oque || r.quando || r.quem) ? el('div', { class: 'exe-grade' }, bloco('O quê', r.oque), bloco('Onde', r.onde || r.local), bloco('Quando', r.quando), bloco('Quem', r.quem)) : null,
+      bloco(r.redacao ? 'Redação da ocorrência' : 'Descrição', r.redacao || (r.descricao !== r.oque ? r.descricao : '')), bloco('Providências', r.providencias), bloco('Recomendações', r.recomendacoes),
+      (r.envolvidos || []).length ? el('section', { class: 'exe-bloco' }, el('h3', { text: 'Envolvidos e/ou testemunhas' }),
+        el('div', { class: 'tabela-rolagem' }, el('table', { class: 'exe-tabela' },
+          el('tr', {}, ['Nome', 'Matrícula', 'Cargo', 'Empresa ou setor', 'Telefone'].map(t => el('th', { text: t }))),
+          r.envolvidos.map(e => el('tr', {}, [e.nome, e.matricula, e.cargo, e.empresa, e.telefone].map(t => el('td', { text: t || '—' }))))))) : null,
+      aut.length ? el('section', { class: 'exe-bloco' }, el('h3', { text: 'Autoridades acionadas' }), el('div', { class: 'linha' }, aut.map(([n, v]) => el('span', { class: 'etiqueta info', text: `${n}: ${v}` })))) : null,
+      r.bemDescricao ? bloco('Bem envolvido', [r.bemDescricao, r.bemQuant && `Quantidade: ${r.bemQuant}`, r.bemValorTotal && `Valor total: ${r.bemValorTotal}`].filter(Boolean).join(' · ')) : null,
+      bloco('Observações', r.observacoes),
+      fotos.length ? el('section', { class: 'exe-bloco' }, el('h3', { text: 'Evidências fotográficas' }), el('div', { class: 'exe-fotos' }, fotos)) : null,
+      el('footer', { class: 'exe-rodape' },
+        el('div', {}, [
+          r.relator && `Relator: ${r.relator}${r.matricula ? ' (mat. ' + r.matricula + ')' : ''}`,
+          r.comunicante && `Comunicante: ${r.comunicante}${r.funcao ? ' · ' + r.funcao : ''}`,
+          r.registradoEm && `Registrado em ${quando(r.registradoEm)}${r.registradoPor?.nome ? ' por ' + r.registradoPor.nome : ''}`,
+          r.revisadoPor && `Revisado por ${r.revisadoPor}`,
+          correcoes ? `${correcoes} correç${correcoes === 1 ? 'ão' : 'ões'} registrada${correcoes === 1 ? '' : 's'}` : null].filter(Boolean).map(t => el('div', { class: 'mudo pequeno', text: t }))),
+        el('span', { class: 'exe-selo', text: 'USO INTERNO · CONFIDENCIAL' })),
+      el('div', { class: 'linha exe-acoes' },
+        el('button', { type: 'button', class: 'btn primario', onclick: () => imprimirRoi(r) }, '🖨️ Imprimir / PDF'),
+        el('button', { type: 'button', class: 'btn', onclick: () => baixarArquivo(`/api/roi/${encodeURIComponent(r.id)}/xlsx`, `ROI_${String(r.numero || '').replace('/', '-')}.xlsx`) }, '⬇️ Excel'),
+        pode('roi.registrar') ? el('button', { type: 'button', class: 'btn fantasma', onclick: () => { fecharPainel(); abrirRoi(r.id); } }, 'Abrir no formulário') : null)
+    ].filter(Boolean));
+    $('#painel').scrollTop = 0;
+  }
+  mostrar();
+}

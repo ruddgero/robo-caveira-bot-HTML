@@ -595,6 +595,14 @@ function xlsxControleTodos() {
     return { nome: `Controle_ROI_${anos[0] || ''}${anos.length > 1 ? '-' + anos[anos.length - 1] : ''}.xlsx`, dados: gerarXlsx(abas) };
 }
 
+// Relatório executivo (gestão): só ROI registrado; fica na auditoria quem abriu
+function executivo(id, u) {
+    const r = roi(id);
+    if (r.status !== 'registrado') throw erro('O relatório executivo é só de ROI registrado.', 404);
+    nucleo().auditar(u, `ROI ${r.numero}: relatório executivo aberto`);
+    return detalhe(id);
+}
+
 function detalhe(id) {
     const r = roi(id);
     return { ...r, grupo: GRUPOS_ROI[r.tipo] || '', linhaItem7: r.numero ? linhaItem7(r) : '', linhaControle: r.numero ? linhaControle(r) : [] };
@@ -1116,7 +1124,7 @@ function indicadorOcorrencias({ ano, mes, tipos: filtroTipos, local: filtroLocal
 }
 
 module.exports = {
-    indicadorOcorrencias, listaDeLocais, renomearLocal, mapaDeLocais, pontoDoRoi, mapaBase, padronizacaoDeLocais, ignorarSugestao, salvarRegras, regraDoLocal, sugerirNome, saoParecidos, dadosDoMapa, posicionarLocal, salvarArea, salvarContorno, apagarContorno, areaDoPonto, ladrilhoPermitido,
+    indicadorOcorrencias, listaDeLocais, renomearLocal, mapaDeLocais, executivo, pontoDoRoi, mapaBase, padronizacaoDeLocais, ignorarSugestao, salvarRegras, regraDoLocal, sugerirNome, saoParecidos, dadosDoMapa, posicionarLocal, salvarArea, salvarContorno, apagarContorno, areaDoPonto, ladrilhoPermitido,
     GRUPOS_ROI, MAX_FOTOS, estado, carregar, marcaRois, listar, detalhe, criar, editar, registrar, cancelar,
     adicionarFoto, removerFoto, lerFoto, importarControle, lerControle, resumoGeral, locaisConhecidos, proximoNumero,
     xlsxDoRoi, xlsxControle, xlsxControleTodos, montarXlsxRoi, linhaItem7, linhaControle, codigoDoTipo, adivinharTipo, agruparLocais, lerNumero, numeroRoi

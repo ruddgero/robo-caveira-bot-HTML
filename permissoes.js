@@ -10,6 +10,7 @@ const CATALOGO = [
     { grupo: 'Pendências', chave: 'pendencias.ver', rotulo: 'Ver e tratar pendências' },
     { grupo: 'ROI', chave: 'roi.registrar', rotulo: 'Abrir e registrar ROI' },
     { grupo: 'ROI', chave: 'roi.corrigir', rotulo: 'Corrigir ROI já registrado' },
+    { grupo: 'ROI', chave: 'roi.executivo', rotulo: 'Ver o relatório executivo dos ROIs' },
     { grupo: 'Indicadores', chave: 'indicadores.ver', rotulo: 'Ver os indicadores de ocorrências' },
     { grupo: 'Indicadores', chave: 'mapa.ver', rotulo: 'Ver o mapa de calor' },
     { grupo: 'Indicadores', chave: 'mapa.marcar', rotulo: 'Marcar locais e empresas no mapa' },
@@ -18,17 +19,24 @@ const CATALOGO = [
     { grupo: 'Equipe', chave: 'organograma.editar', rotulo: 'Lançar férias e substituições no organograma' }
 ];
 const CHAVES = CATALOGO.map(c => c.chave);
-const PERFIS_EDITAVEIS = ['LIDER', 'OPERADOR', 'SUNSET'];
+const PERFIS_EDITAVEIS = ['LIDER', 'OPERADOR', 'SUNSET', 'GESTAO'];
 const PADRAO = {
-    LIDER: ['plantao.ver', 'plantao.liderar', 'pendencias.ver', 'roi.registrar', 'roi.corrigir', 'indicadores.ver', 'mapa.ver', 'mapa.marcar', 'organograma.editar'],
-    OPERADOR: ['plantao.ver', 'pendencias.ver', 'roi.registrar', 'indicadores.ver'],
-    SUNSET: ['roi.registrar']
+    LIDER: ['plantao.ver', 'plantao.liderar', 'pendencias.ver', 'roi.registrar', 'roi.corrigir', 'roi.executivo', 'indicadores.ver', 'mapa.ver', 'mapa.marcar', 'organograma.editar'],
+    OPERADOR: ['plantao.ver', 'pendencias.ver', 'roi.registrar', 'roi.executivo', 'indicadores.ver'],
+    SUNSET: ['roi.registrar'],
+    GESTAO: ['indicadores.ver', 'mapa.ver', 'roi.executivo']
 };
 
 let config = { perfis: {} };   // perfil → lista de chaves (quando o admin já ajustou)
 async function carregar() { config = (await store.get('permissoes', null)) || { perfis: {} }; if (!config.perfis) config.perfis = {}; }
 
-const doPerfil = perfil => perfil === 'ADMIN' ? CHAVES.slice() : (config.perfis[perfil] || PADRAO[perfil] || []).filter(k => CHAVES.includes(k));
+const doPerfil = perfil => {
+    if (perfil === 'ADMIN') return CHAVES.slice();
+    const salvo = config.perfis[perfil];
+    if (!salvo) return (PADRAO[perfil] || []).slice();
+    const novas = (PADRAO[perfil] || []).filter(k => !(config.conhecidas || []).includes(k));   // permissões criadas depois do último salvamento
+    return [...new Set([...salvo, ...novas])].filter(k => CHAVES.includes(k));
+};
 function efetivas(u) {
     if (!u) return [];
     if (u.perfil === 'ADMIN') return CHAVES.slice();
@@ -44,7 +52,7 @@ function resumo() {
 async function salvarPerfis(perfis) {
     const novo = {};
     for (const p of PERFIS_EDITAVEIS) if (Array.isArray(perfis?.[p])) novo[p] = [...new Set(perfis[p].filter(k => CHAVES.includes(k)))];
-    config = { perfis: { ...config.perfis, ...novo } };
+    config = { perfis: { ...config.perfis, ...novo }, conhecidas: CHAVES.slice() };
     await store.set('permissoes', config);
     return resumo();
 }

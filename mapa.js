@@ -87,8 +87,10 @@ const MapaCalor = (() => {
     document.body.style.overflow = '';
     if (!doHistorico && history.state && history.state.mapaCalor) history.back();
   }
-  function aoVoltar() { if (modalAberto()) { history.pushState({ mapaCalor: true }, ''); fecharModal(); return; } fechar(true); }
+  const painelSobre = () => { const p = document.getElementById('painel'); return !!p && !p.hidden && p.classList.contains('sobre-mapa'); };
+  function aoVoltar() { if (painelSobre()) { history.pushState({ mapaCalor: true }, ''); fecharPainel(); return; } if (modalAberto()) { history.pushState({ mapaCalor: true }, ''); fecharModal(); return; } fechar(true); }
   function aoTeclar(e) {
+    if (painelSobre()) { if (e.key === 'Escape' && !modalAberto()) fecharPainel(); return; }
     if ((e.key === 'l' || e.key === 'L') && !e.ctrlKey && !e.metaKey && !e.altKey && !modalAberto() && !/^(INPUT|TEXTAREA|SELECT)$/.test((document.activeElement || {}).tagName || '')) {
       e.preventDefault(); return gaveta(!gavetaAberta());
     }
@@ -346,22 +348,64 @@ const MapaCalor = (() => {
     // marcadores
     M.marcas.clearLayers();
     const max = Math.max(1, ...pinos.filter(x => !x.soMarca).map(x => x.n));
+    const toque = window.matchMedia('(hover: none)').matches;
+    M.armado = null;
+    if (toque && !M.toqueOk) { M.toqueOk = true; M.map.on('click zoomstart', () => { if (M.armado) { M.armado.closeTooltip(); M.armado = null; } }); }
+    const ehGestao = S.usuario?.perfil === 'GESTAO';
     for (const x of pinos) {
       const { p } = x, empresa = p.tipo === 'empresa', grupo = !!x.grupo;
       const dom = Object.entries(x.porTipo).sort((a, b) => b[1] - a[1])[0];
       const grande = M.modo === 'locais' && x.n && !x.soMarca;
-      const tam = grande ? Math.round(26 + 22 * Math.sqrt(x.n / max)) : grupo ? 26 : empresa ? 16 : 14;
-      const html = grande || grupo ? `<span style="--cor:${COR_TIPO[dom ? dom[0] : 'G6']};width:${tam}px;height:${tam}px">${x.n}</span>` : '<span></span>';
-      const classe = 'mapa-bolha' + (x.soMarca ? ' agrupada' : '') + (grupo ? ' grupo' : '') + (empresa ? ' empresa' : '') + (grande || grupo ? '' : ' discreta') + (M.modo === 'calor' && grupo ? ' leve' : '') + (M.sel === p.nome ? ' sel' : '');
+      // no calor, o ponto com ROI mostra a quantidade e um anel com a cor de cada tipo
+      const contagem = M.modo === 'calor' && !grupo && !x.soMarca && x.n > 0;
+      const tam = grande ? Math.round(26 + 22 * Math.sqrt(x.n / max)) : grupo ? 26 : contagem ? Math.round(24 + 12 * Math.sqrt(x.n / max)) : empresa ? 16 : 14;
+      const grave = (x.porTipo.G1 || 0) + (x.porTipo.G3 || 0) > 0;
+      const html = contagem ? `<span style="--anel:${anelTipos(x.porTipo)};width:${tam}px;height:${tam}px"><b>${x.n}</b></span>`
+        : grande || grupo ? `<span style="--cor:${COR_TIPO[dom ? dom[0] : 'G6']};width:${tam}px;height:${tam}px">${x.n}</span>` : '<span></span>';
+      const classe = 'mapa-bolha' + (contagem ? ' contagem' + (grave ? ' grave' : '') : '') + (x.soMarca ? ' agrupada' : '') + (grupo ? ' grupo' : '') + (empresa && !contagem ? ' empresa' : '') + (grande || grupo || contagem ? '' : ' discreta') + (M.modo === 'calor' && grupo ? ' leve' : '') + (M.sel === p.nome ? ' sel' : '');
       const titulo = grupo ? `${p.nome} · ${plural(x.n)} em ${x.grupo.pontos} ponto${x.grupo.pontos === 1 ? '' : 's'}. Toque para aproximar e ver as empresas.` : `${p.nome}${p.empresa ? ' (' + p.empresa + ')' : ''} · ${plural(x.n)}`;
-      L.marker([p.lat, p.lng], { icon: L.divIcon({ className: classe, html, iconSize: [tam, tam] }), title: titulo, keyboard: true })
-        .on('click', ev => (M.marcando || M.desenho) ? aoClicarMapa(ev)
-          : grupo ? (M.map.flyToBounds(L.latLngBounds(x.grupo.area.poly), { duration: 0.7, padding: [60, 60] }), selecionarArea(x.grupo.area.id, false))
-          : selecionar(p.nome, true)).addTo(M.marcas);
+      const rois = !grupo && !x.soMarca && p.rois ? (M.simulados ? p.rois : p.rois.filter(r => !r.simulado)) : [];
+      const m = L.marker([p.lat, p.lng], { icon: L.divIcon({ className: classe, html, iconSize: [tam, tam] }), keyboard: true, title: rois.length ? '' : titulo });
+      if (rois.length || grupo) m.bindTooltip(dicaPino(p, x, rois, grupo), { direction: 'top', className: 'mapa-dica', offset: [0, -tam / 2], opacity: 1 });
+      if (toque && (rois.length || grupo)) m.off('mouseout', m.closeTooltip);   // no toque a dica fica aberta até tocar de novo ou no mapa
+      m.on('tooltipopen', ev => {   // não deixa a lista sair da tela (celular)
+        const t = ev.tooltip.getElement(), W = M.map.getContainer().clientWidth; if (!t) return;
+        t.style.marginLeft = ''; const r = t.getBoundingClientRect(), c = M.map.getContainer().getBoundingClientRect();
+        const esq = r.left - c.left, dir = r.right - c.left;
+        if (esq < 8) t.style.marginLeft = (8 - esq) + 'px'; else if (dir > W - 8) t.style.marginLeft = (W - 8 - dir) + 'px';
+      });
+      m.on('click', ev => {
+        if (M.marcando || M.desenho) return aoClicarMapa(ev);
+        if (toque && (rois.length || grupo) && M.armado !== m) { if (M.armado) M.armado.closeTooltip(); M.armado = m; return m.openTooltip(); }   // celular: 1º toque mostra a lista, 2º abre
+        if (M.armado) { M.armado.closeTooltip(); M.armado = null; }
+        if (grupo) { M.map.flyToBounds(L.latLngBounds(x.grupo.area.poly), { duration: 0.7, padding: [60, 60] }); return selecionarArea(x.grupo.area.id, false); }
+        if (ehGestao && rois.length && pode('roi.executivo')) return abrirRelatorioExecutivo(rois[0].id, rois.map(r => r.id));
+        selecionar(p.nome, true);
+      }).addTo(M.marcas);
     }
     if (M.temp) M.temp.addTo(M.map);
     desenharLegenda();
   }
+  // anel colorido com a proporção de cada tipo (G1…G6)
+  function anelTipos(porTipo) {
+    const tot = Object.values(porTipo).reduce((a, b) => a + b, 0) || 1;
+    let acc = 0;
+    const partes = Object.keys(COR_TIPO).filter(g => porTipo[g]).map(g => { const de = acc; acc += porTipo[g] / tot * 360; return `${COR_TIPO[g]} ${de.toFixed(1)}deg ${acc.toFixed(1)}deg`; });
+    return `conic-gradient(${partes.join(',') || '#94a3b8 0deg 360deg'})`;
+  }
+  // dica ao passar o mouse: quantidade, tipos e os últimos ROIs
+  function dicaPino(p, x, rois, grupo) {
+    const tipos = Object.entries(x.porTipo).sort((a, b) => b[1] - a[1]);
+    return el('div', { class: 'dica-pino' },
+      el('strong', { text: `${grupo ? p.nome : p.nome} · ${plural(x.n)}` }),
+      el('div', { class: 'dica-tipos' }, tipos.map(([g, n]) => el('span', {}, el('i', { style: `background:${COR_TIPO[g]}` }), `${g} ${n}`))),
+      grupo ? el('div', { class: 'mudo', text: 'Toque para aproximar e ver os pontos da área.' }) : [
+        ...rois.slice(0, 5).map(r => el('div', { class: 'dica-roi' }, el('i', { style: `background:${COR_TIPO[r.tipo] || '#888'}` }),
+          el('span', { text: `ROI ${r.numero} · ${r.tipo} · ${String(r.data || '').slice(0, 5)}${r.descricao ? ' · ' + (r.descricao.length > 46 ? r.descricao.slice(0, 44) + '…' : r.descricao) : ''}` }))),
+        rois.length > 5 ? el('div', { class: 'mudo', text: `+ ${rois.length - 5} outros` }) : null,
+        el('div', { class: 'dica-acao', text: S.usuario?.perfil === 'GESTAO' && pode('roi.executivo') ? 'Clique para abrir o relatório executivo' : 'Clique para ver os ROIs do local' })]);
+  }
+
   function desenharLegenda() {
     if (!M.legenda) return;
     const itens = M.modo === 'areas'
@@ -445,11 +489,13 @@ const MapaCalor = (() => {
 
   function listaRois(p) {
     return [
-      p.rois.length ? el('div', { class: 'mapa-lista' }, p.rois.map(r => el('button', { class: 'mapa-roi', onclick: () => abrirRoi(r.id) },
-        el('span', { class: 'ponto-tipo', style: `background:${COR_TIPO[r.tipo] || '#888'}` }),
-        el('span', { style: 'min-width:0' },
-          el('div', { class: 'tit' }, `ROI ${r.numero} · ${r.tipo} · ${r.data}`, r.simulado ? el('span', { class: 'etiqueta simulado', text: 'SIMULADO' }) : null),
-          el('div', { class: 'sub', text: [r.local !== p.nome ? r.local : '', r.empresa, r.descricao].filter(Boolean).join(' · ') }))))) : el('p', { class: 'mudo pequeno', style: 'margin:0', text: 'Nenhum ROI neste período.' }),
+      p.rois.length ? el('div', { class: 'mapa-lista' }, p.rois.map(r => el('div', { class: 'mapa-roi-linha' },
+        el('button', { class: 'mapa-roi', onclick: () => pode('roi.registrar') ? abrirRoi(r.id) : abrirRelatorioExecutivo(r.id, p.rois.map(y => y.id)) },
+          el('span', { class: 'ponto-tipo', style: `background:${COR_TIPO[r.tipo] || '#888'}` }),
+          el('span', { style: 'min-width:0' },
+            el('div', { class: 'tit' }, `ROI ${r.numero} · ${r.tipo} · ${r.data}`, r.simulado ? el('span', { class: 'etiqueta simulado', text: 'SIMULADO' }) : null),
+            el('div', { class: 'sub', text: [r.local !== p.nome ? r.local : '', r.empresa, r.descricao].filter(Boolean).join(' · ') }))),
+        pode('roi.executivo') ? el('button', { class: 'btn-icone mapa-roi-rel', title: 'Ver o relatório executivo', 'aria-label': `Relatório executivo do ROI ${r.numero}`, onclick: () => abrirRelatorioExecutivo(r.id, p.rois.map(y => y.id)) }, '📄') : null))) : el('p', { class: 'mudo pequeno', style: 'margin:0', text: 'Nenhum ROI neste período.' }),
       p.rois.length < p.total ? el('p', { class: 'mudo pequeno', style: 'margin:0', text: `Mostrando ${p.rois.length} de ${p.total}.` }) : null];
   }
 

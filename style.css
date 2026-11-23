@@ -798,3 +798,50 @@ body:has(#app:not([hidden])) #fundo-animado { opacity: .12; }
   .pt-topo .linha .btn { padding-left: 8px; padding-right: 8px; justify-content: center; }
 }
 .mapa-bolha.agrupada span { opacity: .8; }
+/* Relatório executivo */
+.exe { display: grid; gap: 14px; max-width: 900px; margin: 0 auto; padding-bottom: 40px; }
+.exe-nav { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.exe-cab { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 16px; align-items: center; padding: 16px; border-radius: 16px; background: var(--superficie); border: 1px solid var(--borda); border-left: 5px solid var(--cor); }
+.exe-num { display: grid; justify-items: center; padding: 8px 14px; border-radius: 12px; background: var(--fundo); border: 1px solid var(--borda); }
+.exe-num strong { font-size: 22px; font-variant-numeric: tabular-nums; }
+.exe-tit { display: grid; gap: 4px; min-width: 0; }
+.exe-tit h2 { font-size: 20px; overflow-wrap: anywhere; }
+.exe-selos { display: flex; gap: 6px; flex-wrap: wrap; }
+.exe-tipo { padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 700; color: #fff; background: color-mix(in srgb, var(--cor) 75%, #000); }
+.exe-metas { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }
+.exe-meta { display: grid; gap: 2px; padding: 10px 12px; border-radius: 12px; background: var(--superficie); border: 1px solid var(--borda); }
+.exe-meta span { font-size: 12px; color: var(--mudo); }
+.exe-grade { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+@media (max-width: 640px) { .exe-grade { grid-template-columns: minmax(0, 1fr); } .exe-cab { grid-template-columns: minmax(0, 1fr); } .exe-num { justify-self: start; } }
+.exe-bloco { display: grid; gap: 6px; padding: 12px 14px; border-radius: 12px; background: var(--superficie); border: 1px solid var(--borda); }
+.exe-bloco h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--mudo); }
+.exe-bloco p { margin: 0; white-space: pre-wrap; line-height: 1.55; overflow-wrap: anywhere; }
+.exe-tabela { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+.exe-tabela th, .exe-tabela td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--borda); }
+.exe-tabela th { color: var(--mudo); font-weight: 600; font-size: 12px; }
+.tabela-rolagem { overflow-x: auto; }
+.exe-fotos { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; }
+.exe-fotos figure { margin: 0; display: grid; gap: 4px; }
+.exe-fotos img { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: 10px; border: 1px solid var(--borda); }
+.exe-fotos figcaption { font-size: 12px; color: var(--mudo); }
+.exe-rodape { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; flex-wrap: wrap; padding-top: 6px; border-top: 1px solid var(--borda); }
+.exe-selo { padding: 4px 12px; border-radius: 999px; background: rgba(127, 29, 29, .85); color: #fecaca; border: 1px solid #b91c1c; font: 700 10.5px system-ui; letter-spacing: .08em; }
+.exe-acoes { gap: 8px; flex-wrap: wrap; }
+/* mapa: pontos com quantidade e tipos; dica; relatório na ficha */
+.mapa-bolha.contagem span { display: grid; place-items: center; border-radius: 50%; background: var(--anel); padding: 3px; box-shadow: 0 2px 10px rgba(0,0,0,.55); border: 0; }
+.mapa-bolha.contagem span b { display: grid; place-items: center; width: 100%; height: 100%; border-radius: 50%; background: #0b1120; color: #fff; font: 700 12px system-ui, sans-serif; }
+.mapa-bolha.contagem.grave span { box-shadow: 0 0 0 2px #ef4444, 0 2px 10px rgba(0,0,0,.55); }
+.mapa-bolha.contagem.sel span { outline: 3px solid #f97316; outline-offset: 2px; }
+.mapa-tela .leaflet-tooltip.mapa-dica { background: rgba(11, 17, 32, .97); color: var(--texto); border: 1px solid var(--borda); border-radius: 10px; box-shadow: 0 10px 30px rgba(0,0,0,.5); padding: 8px 10px; white-space: normal; width: min(290px, calc(100vw - 32px)); }
+.mapa-tela .leaflet-tooltip.mapa-dica::before { border-top-color: var(--borda); }
+.dica-pino { display: grid; gap: 4px; font: 12.5px system-ui, sans-serif; }
+.dica-pino strong { font-size: 13px; }
+.dica-tipos { display: flex; gap: 8px; flex-wrap: wrap; color: var(--mudo); }
+.dica-tipos span { display: inline-flex; align-items: center; gap: 5px; }
+.dica-roi { display: flex; align-items: center; gap: 5px; min-width: 0; }
+.dica-tipos i, .dica-roi i { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.dica-roi span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dica-acao { margin-top: 2px; color: #93b4ff; font-weight: 600; }
+.mapa-roi-linha { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; align-items: stretch; }
+.mapa-roi-rel { align-self: center; }
+.painel.sobre-mapa { z-index: 60; }

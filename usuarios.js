@@ -5,8 +5,8 @@ const crypto = require('crypto');
 const store = require('./store');
 const { novoId, agora } = require('./util');
 
-const PERFIS = ['ADMIN', 'LIDER', 'OPERADOR', 'SUNSET'];
-const ROTULO_PERFIL = { ADMIN: 'Administrador', LIDER: 'Líder', OPERADOR: 'Operador', SUNSET: 'Supervisor Sunset' };
+const PERFIS = ['ADMIN', 'LIDER', 'OPERADOR', 'SUNSET', 'GESTAO'];
+const ROTULO_PERFIL = { ADMIN: 'Administrador', LIDER: 'Líder', OPERADOR: 'Operador', SUNSET: 'Supervisor Sunset', GESTAO: 'Gestão' };
 const PERM = require('./permissoes');
 
 let usuarios = [];

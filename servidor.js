@@ -27,6 +27,7 @@ const PERM_ROTAS = [
     ['*', /^\/api\/indicadores\/locais\/(padronizar|ignorar|regras)$/, 'locais.padronizar'], ['POST', /^\/api\/indicadores\/locais$/, 'locais.padronizar'],
     ['GET', /^\/api\/indicadores\//, 'indicadores.ver'],
     ['POST', /^\/api\/roi\/importar$/, null],
+    ['GET', /^\/api\/roi\/[^/]+\/(executivo|xlsx|foto\/[^/]+)$/, ['roi.registrar', 'roi.executivo']],
     ['*', /^\/api\/roi/, 'roi.registrar'],
     ['*', /^\/api\/pendencias/, 'pendencias.ver'],
     ['*', /^\/api\/organograma\/substituicoes/, 'organograma.editar'],
@@ -495,6 +496,7 @@ rota('POST', '/api/roi/importar', async (req, res, { corpo, u }) => {
     return ROI.importarControle(Buffer.from(String(corpo.base64).replace(/^data:[^,]+,/, ''), 'base64'), String(corpo.nome || 'planilha.xlsx'), u);
 }, { perfis: ['ADMIN'] });
 rota('POST', '/api/roi', async (req, res, { corpo, u }) => ({ roi: ROI.detalhe((await ROI.criar(corpo || {}, u)).id) }));
+rota('GET', '/api/roi/:id/executivo', async (req, res, { params, u }) => ({ roi: ROI.executivo(params.id, u) }));
 rota('GET', '/api/roi/:id', async (req, res, { params }) => ({ roi: ROI.detalhe(params.id) }));
 rota('PUT', '/api/roi/:id', async (req, res, { corpo, params, u }) => {
     const r = ROI.estado.rois.find(x => x.id === params.id);
