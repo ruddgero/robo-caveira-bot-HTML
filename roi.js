@@ -843,7 +843,7 @@ const chavePar = (a, b) => [chaveLocal(a), chaveLocal(b)].sort().join(' | ');
 // As decisões feitas uma a uma (renomear/juntar) vêm por cima das regras.
 const REGRAS_PADRAO = [
     { termos: ['contratadas anglo', 'contratadas aa', 'anglo american contratadas'], nome: 'Área das Contratadas AA' },
-    { termos: ['canteiro contratadas', 'predio contratadas', 'casa branca'], nome: 'Área das Contratadas' },
+    { termos: ['canteiro contratadas', 'predio contratadas', 'casa branca', 'contratadas ferroport'], nome: 'Área das Contratadas' },
     { termos: ['ponte'], nome: 'Ponte' }
 ];
 const textoRegra = t => ' ' + palavrasDe(t).filter(w => !PALAVRAS_LIGACAO.has(w)).join(' ') + ' ';
