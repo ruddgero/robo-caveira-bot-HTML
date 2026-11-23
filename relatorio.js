@@ -1251,7 +1251,11 @@ function minutaEmail(op) {
     if (op.tipo === 'TRIPULACAO') {
         corpo = 'Registro a movimentação de tripulação:\n\n' + L([
             `Data: ${data}`, `Navio: ${M(op.navio)}`, `Terminal: ${sa(op.terminal)}`,
-            `Quantos: ${op.qtdEmbarque && op.qtdDesembarque ? `${formatarQtdTripulantes(op.qtdEmbarque)} (embarque) / ${formatarQtdTripulantes(op.qtdDesembarque)} (desembarque)` : formatarQtdTripulantes(op.quantidade)}`, `Embarque ou desembarque: ${sa(op.movimento)}`, horarios,
+            `Quantos: ${op.qtdEmbarque && op.qtdDesembarque ? `${formatarQtdTripulantes(op.qtdEmbarque)} (embarque) / ${formatarQtdTripulantes(op.qtdDesembarque)} (desembarque)` : formatarQtdTripulantes(op.quantidade)}`,
+            // modelo da US: embarque só com a entrada, desembarque só com a saída (o terminal acompanha a operação: T-ORE ou T-OIL)
+            ...(ehEmbarque(op) ? [sa(op.movimento), `Entrada: ${hh(op.horaInicial, 'Não informado')}`]
+                : ehDesembarque(op) ? [sa(op.movimento), `Saída: ${hh(op.horaFinal, 'Não informado')}`]
+                : [`Embarque ou desembarque: ${sa(op.movimento)}`, horarios]),
             `Empresa responsável/ Agência: ${M(op.empresa)}`,
             `Agente/ Motorista autorizado responsável: ${agenteEMotorista(op)}`,
             `Veículo utilizado: ${veiculo}`,

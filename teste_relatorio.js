@@ -135,7 +135,7 @@ const tEmb = R.classificarMensagem('Embarque definitivo de 02 tripulantes navio 
 assert.deepStrictEqual([tEmb.horaInicial, tEmb.horaFinal], ['09:00', '09:00']);
 assert.strictEqual(R.resumoNavio(tEmb), 'Embarque definitivo de 02 tripulantes.');
 assert.ok(!/Sa[ií]da/.test(R.mensagemPadraoOperacao ? R.mensagemPadraoOperacao(tEmb) : ''));
-assert.ok(R.minutaEmail(tEmb).corpo.includes('Horário final: Não se aplica'));
+assert.ok(R.minutaEmail(tEmb).corpo.includes('\t✓ Entrada: 09:00h\n') && !R.minutaEmail(tEmb).corpo.includes('Horário final'));
 // mensagem sem dizer o movimento não fecha sozinha
 const tVago = R.classificarMensagem('Van da agência OCEAN para tripulantes do navio EAGLE PILLAR T-OIL 10:00', R.NAVIOS_PADRAO, '10:05').rascunhos?.[0];
 if (tVago && tVago.tipo === 'TRIPULACAO') assert.strictEqual(tVago.horaFinal, '');
@@ -159,7 +159,9 @@ assert.deepStrictEqual(em.conferir, []);
 assert.strictEqual(R.resumoNavio(em), 'Embarque definitivo de 01 tripulante.');   // embarque: só entrada, já concluído
 const emEmail = R.minutaEmail({ ...em, data: '19/11/2026' }).corpo;
 assert.ok(emEmail.includes('DIEGO ALVARADO (AGENTE) / ROSSINE GUEDES (MOTORISTA)'));
-assert.ok(emEmail.includes('Embarque ou desembarque: Embarque definitivo'));
+assert.ok(emEmail.includes('\t✓ Embarque definitivo\n\t✓ Entrada: 14:50h\n'), 'embarque: só entrada');
+const dsEmail = R.minutaEmail({ ...em, movimento: 'Desembarque definitivo', horaInicial: '', horaFinal: '05:55', terminal: 'T-OIL', data: '23/11/2026' }).corpo;
+assert.ok(dsEmail.includes('\t✓ Terminal: T-OIL\n') && dsEmail.includes('\t✓ Desembarque definitivo\n\t✓ Saída: 05:55h\n') && !/Entrada|Horário/.test(dsEmail), 'desembarque: só saída');
 
 // a versão apagada dizia T.OIL: conflito com o navio atracado no T-ORE → a confirmar
 const emErrado = R.classificarMensagem(embarque.replace('T.ORE', 'T.OIL'), NAVIOS_TURNO, '15:21').rascunhos[0];
