@@ -634,7 +634,7 @@ function padronizarAtividade(t) {
     l = l.replace(/\s*[.;,:-]?\s*\(?\s*vide (o )?e-?mail( encaminhado)?\s*\)?\.?\s*$/i, '. Detalhes no e-mail encaminhado.');
     l = l.replace(/^(Realizado|Executado|Feito)( a | uma )(solicita|verifica|limpeza|ronda|entrega|inspe|abertura|troca|instala|manuten|reuni|vistoria|retirada|comunica|orienta|abordagem)/i,
         (_, v, a, x) => `${v.replace(/o$/i, 'a')}${a}${x}`);
-    l = l.replace(/\bGATE\b/g, 'Gate').replace(/\bPORTARIA\b(?=.*[a-z])/g, 'portaria');
+    l = l.replace(/\bGATE\b/g, 'Gate').replace(/(?<![A-ZÀ-Ý0-9]{2,}\s)\bPORTARIA\b(?!\s+[A-ZÀ-Ý]{2,}\b)(?=.*[a-z])/g, 'portaria');   // dentro de título em maiúsculas não mexe
     l = l.charAt(0).toUpperCase() + l.slice(1);
     if (/[\p{L}\d)]$/u.test(l)) l += '.';
     return l;
@@ -713,6 +713,18 @@ function textoAvisoPadrao(p) {
         saida.push(l);
     }
     return semRepeticao(conteudoSeguro(saida.join(' ')).replace(/\s+/g, ' ').trim());
+}
+// Atualização de aviso ("Atualizar"): vira a nova descrição do aviso. O texto sai estruturado
+// (um parágrafo, sem repetir frase, primeira letra maiúscula, ponto final) e é o MESMO no histórico e no item 5.
+function estruturarAtualizacaoAviso(texto) {
+    const linhas = String(texto || '').split('\n').map(x => x.trim()).filter(Boolean)
+        .map(x => (/[\p{L}\d)]$/u.test(x) ? x + '.' : x));   // cada linha é uma frase (não cola uma na outra)
+    let l = textoAvisoPadrao({ texto: linhas.join('\n') });
+    if (!l) return '';
+    l = l.replace(/\s+([.,;:!?])/g, '$1').replace(/([.,;:!?])(?=[\p{L}])/gu, '$1 ').replace(/\.{2,}$/, '.');
+    l = l.replace(/(^|[.!?]\s+)(\p{Ll})/gu, (_, a, c) => a + c.toUpperCase());
+    if (/[\p{L}\d)]$/u.test(l)) l += '.';
+    return l;
 }
 const avisoTemLista = p => String(p.texto || '').split('\n').filter(l => /^\s*(?:[✓✔•\-]\s*)?\d+\.\d+\.?\s+\S/.test(l.replace(/[*_~]/g, ''))).length >= 1;
 // movimentação do navio vira atividade da seção 4
@@ -1422,7 +1434,7 @@ module.exports = {
     proximoTurno, turnoAnterior, linhasExcel,
     ehMensagemDeSaida, TIPOS_OPERACAO, MOVIMENTOS, NAVIOS_PADRAO,
     fichaVazia, naviosDeTexto, arrumarNavios, ehNomeDeNavio, linhaNoPadrao, ehOperacaoConcluida, adicionarLinhaNavio, ehRelatorioDeTurno, lerRelatorio, fichaHerdada,
-    formatarRelatorio, conferirFicha, validarPadrao, PADRAO_RELATORIO, conteudoSeguro, semRepeticao, tituloAvisoPadrao, avisoTemLista, itemPadrao, linhaNavioNaAtividade, formatarPassagemEscala, textoAviso, padronizarLinhaNavio, padronizarAtividade,
+    formatarRelatorio, conferirFicha, validarPadrao, PADRAO_RELATORIO, conteudoSeguro, semRepeticao, tituloAvisoPadrao, avisoTemLista, estruturarAtualizacaoAviso, textoAvisoPadrao, itemPadrao, linhaNavioNaAtividade, formatarPassagemEscala, textoAviso, padronizarLinhaNavio, padronizarAtividade,
     lerMensagemPadrao, classificarMensagem, extrairCampos, rascunhosOperacao, atividadeDasOperacoes, ehDesembarque, ehEmbarque, ehPasseio, ajustarDesembarque,
     tipoOperacaoDoTexto, movimentoDoTexto, resumoNavio, minutaEmail, mensagemPadrao, manobraDoTexto, linhaManobra, numeroKm, navioConhecido, terminalDoNavio,
     formatarQtdTripulantes, ehSemAlteracao, separarNomes, juntarNomes, nomeProprio, lerEquipesComPipe, nomeNavioLimpo, chaveNavio, acharNavio, trocarLinhaNavio

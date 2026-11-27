@@ -378,4 +378,15 @@ assert.ok(confPad.some(a => /linha solta "Echo inicial:"/.test(a)));
 assert.ok(confPad.some(a => /AMETISTA BRASIL: a previsão de desatracação/.test(a)));
 assert.ok(!R.conferirFicha(fPad, [], [{ titulo: 'X', texto: 'Retirada para 25/11.' }], { data: '20/11/2026', hora: '10:00' }).some(a => /já passou/.test(a)));
 assert.ok(R.textoAviso({ texto: 'Texto.', historico: [{ tipo: 'ATUALIZACAO', data: '20/11', hora: '10:58', texto: 'Lista enviada.' }, { tipo: 'SISTEMA', data: '20/11', hora: '11:11', texto: 'Pendência repetida juntada a esta.' }] }).endsWith('Atualização (20/11 10:58h): Lista enviada.'));
+// ---- 7.9.3: "Atualizar" no aviso vira a descrição (título fica), texto estruturado igual no histórico e no item 5
+const atuCatraca = R.estruturarAtualizacaoAviso('carlos irá direcionar o técnico líder Matheus para analisar a catraca 02 da portaria principal');
+assert.strictEqual(atuCatraca, 'Carlos irá direcionar o técnico líder Matheus para analisar a catraca 02 da portaria principal.');
+assert.strictEqual(R.estruturarAtualizacaoAviso(atuCatraca), atuCatraca, 'estruturar de novo não muda o texto');
+assert.strictEqual(R.textoAvisoPadrao({ texto: atuCatraca }), atuCatraca, 'o item 5 sai igual ao histórico');
+assert.strictEqual(R.estruturarAtualizacaoAviso('  aguardando retorno da digital\ncâmera voltou  a oscilar'), 'Aguardando retorno da digital. Câmera voltou a oscilar.');
+assert.strictEqual(R.estruturarAtualizacaoAviso('   '), '');
+const relAtu = R.formatarRelatorio(R.fichaVazia(), [{ titulo: 'CATRACA 02 PORTARIA PRINCIPAL', texto: atuCatraca, historico: [{ tipo: 'ATUALIZACAO', data: '27/11', hora: '18:01', texto: atuCatraca }] }]);
+assert.ok(relAtu.includes(`✓ *5.1. CATRACA 02 PORTARIA PRINCIPAL*\n${atuCatraca}`), 'título mantido e descrição = atualização');
+assert.ok(!relAtu.includes('Atualização ('), 'sem linha "Atualização (...)" no relatório');
+
 console.log('\n✅ Todos os testes passaram.');

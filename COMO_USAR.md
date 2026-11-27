@@ -51,6 +51,8 @@ Entrada na portaria: 14:50Hs
 ## Menu Pendências (só Segurança Patrimonial)
 - **Avisos** (todas as abertas) · **Digital** · **Projetos** (etapas, prazos, próxima etapa) · **Concluídas**. Filtro por responsável.
 - **Dar baixa** exige a tratativa (o que foi feito). Vale para o Plantão e para o menu ao mesmo tempo e vai para o relatório (Atividades).
+- **Atualizar (Aviso)**: o título continua o mesmo e o texto da atualização (arrumado pelo robô) passa a ser a descrição do aviso no item 5 do relatório — igual no histórico. A descrição anterior fica guardada no histórico.
+- **Dar baixa (Aviso)**: o aviso sai do item 5 e entra só no item 4 (Atividades Realizadas) com a tratativa.
 - O robô atualiza sozinho o histórico da pendência quando o assunto aparece no grupo ou nas atividades do relatório publicado.
   Se a mensagem disser que foi resolvido ("reparada", "operacional"…), aparece **💡 Parece resolvido** com a tratativa já preenchida.
 - **💡 Sugestões do robô**: atividade com "favor acompanhar", "aguardando", "próxima semana"… que ainda não tem pendência. `✓ Criar` em um toque.

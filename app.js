@@ -971,16 +971,20 @@ function cartaoPendenciaRapida(p) {
 
 function atualizarPendenciaModal(p) {
   const [c, t] = campoTexto('Nova atualização', '', { autofocus: true, placeholder: 'Ex.: Daniel (Sênior) definiu troca do cabo para terça.' });
-  abrirModal(`Atualizar · ${p.titulo}`, [c], botoesSalvar(async () => {
-    await api('POST', `/api/pendencias/${p.id}/atualizar`, { texto: t.value }); fecharModal(); aviso('Atualização registrada ✓'); await recarregarTudo();
+  const ehAviso = p.tipo === 'AVISO';
+  abrirModal(`Atualizar · ${p.titulo}`, [c, ehAviso ? el('p', { class: 'mudo pequeno', style: 'margin:0', text: 'O título continua o mesmo. Esta atualização passa a ser a descrição do aviso no relatório (item 5) e fica igual no histórico.' }) : null], botoesSalvar(async () => {
+    await api('POST', `/api/pendencias/${p.id}/atualizar`, { texto: t.value }); fecharModal(); aviso(ehAviso ? 'Descrição do aviso atualizada ✓' : 'Atualização registrada ✓'); await recarregarTudo();
   }, 'Registrar'));
 }
 // Baixa única: vale no turno e no geral; a tratativa vai para o relatório (Atividades)
 function concluirPendenciaModal(p) {
   const [c, t] = campoTexto('O que foi feito para resolver? (tratativa obrigatória)', p.sugestaoConclusao?.texto || '', { autofocus: true, linhas: 4, placeholder: 'Ex.: Cancela do Gate 1 reparada pela Digital (troca do motor), testada às 14h e operacional.' });
   const chk = el('input', { type: 'checkbox', checked: true });
-  abrirModal(`Dar baixa · ${p.titulo}`, [c, el('label', { class: 'check' }, chk, 'Colocar no relatório do turno (Atividades)'),
-    el('p', { class: 'mudo pequeno', style: 'margin:0', text: 'A baixa vale para o Plantão e para o menu Pendências ao mesmo tempo.' })],
+  const ehAviso = p.tipo === 'AVISO';
+  abrirModal(`Dar baixa · ${p.titulo}`, [c, ehAviso ? null : el('label', { class: 'check' }, chk, 'Colocar no relatório do turno (Atividades)'),
+    el('p', { class: 'mudo pequeno', style: 'margin:0', text: ehAviso
+      ? 'O aviso sai do item 5 (Avisos) e entra no item 4 (Atividades Realizadas) com a tratativa. Vale para o Plantão e para o menu Pendências.'
+      : 'A baixa vale para o Plantão e para o menu Pendências ao mesmo tempo.' })],
   botoesSalvar(async () => {
     if (!t.value.trim()) { t.focus(); throw new Error('Escreva a tratativa: o que foi feito para resolver.'); }
     await api('POST', `/api/pendencias/${p.id}/concluir`, { tratativa: t.value, registrarAtividade: chk.checked });

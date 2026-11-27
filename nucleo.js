@@ -162,6 +162,21 @@ async function carregar() {
         if (JSON.stringify(estado.ficha.navios) !== antes) { await store.set('ficha', estado.ficha); await store.set('operacoes', estado.operacoes); console.log('🚢 [NAVIOS] Seção 6 organizada (um tópico por navio).'); }
     }
     if (arrumarPendencias()) { await store.set('pendencias', estado.pendencias); console.log('🧹 [PENDÊNCIAS] Títulos arrumados e repetidas juntadas.'); }
+    // 7.9.3 (uma vez só): avisos atualizados pelo botão "Atualizar" desde 27/11/2026 passam a ter a última atualização como descrição
+    if (!estado.config.migracaoDescricaoAviso793) {
+        let n = 0;
+        for (const p of estado.pendencias.filter(x => x.tipo === 'AVISO' && x.status === 'ABERTA')) {
+            const h = (p.historico || []).filter(x => x.tipo === 'ATUALIZACAO' && !x.origem).slice(-1)[0];
+            if (!h || !h.em || h.em < '2026-11-27T03:00:00.000Z') continue;
+            const novo = R.estruturarAtualizacaoAviso(h.texto);
+            if (!novo) continue;
+            if (h.descricaoAnterior === undefined) h.descricaoAnterior = p.texto || '';
+            h.texto = novo; p.texto = novo; delete p.textoSugerido; n++;
+        }
+        estado.config.migracaoDescricaoAviso793 = true;
+        await Promise.all([store.set('pendencias', estado.pendencias), store.set('config', estado.config)]);
+        if (n) console.log(`📝 [AVISOS] ${n} aviso(s) atualizado(s) hoje passaram a usar a atualização como descrição.`);
+    }
     // mensagens recentes que hoje são reconhecidas como operação (ex.: saída a passeio sem a palavra "tripulantes"):
     // atualiza a leitura para o "Usar de novo › Operação de bordo" já vir preenchido
     const limite48h = Date.now() - 48 * 3600 * 1000;
@@ -996,6 +1011,18 @@ async function atualizarPendencia(id, texto, usuario, { origem = '' } = {}) {
     const p = pendencia(id);
     if (!String(texto || '').trim()) throw erro('Escreva a atualização.');
     const t = agora();
+    // Aviso atualizado pelo botão "Atualizar": o título fica, a descrição passa a ser a atualização
+    // (texto estruturado pelo robô, igual no histórico e no item 5 do relatório). A descrição anterior fica guardada no histórico.
+    if (p.tipo === 'AVISO' && !origem) {
+        const novo = R.estruturarAtualizacaoAviso(maiusculaInicial(texto));
+        if (!novo) throw erro('Escreva a atualização.');
+        p.historico.push({ tipo: 'ATUALIZACAO', em: t.iso, data: t.data.slice(0, 5), hora: t.hora, por: usuario?.nome || 'Robô', texto: novo, descricaoAnterior: p.texto || '' });
+        p.texto = novo;
+        delete p.textoSugerido;
+        await salvarPendencias();
+        auditar(usuario, 'Atualizou aviso (nova descrição)', `${p.titulo} — ${novo}`);
+        return p;
+    }
     p.historico.push({ tipo: 'ATUALIZACAO', em: t.iso, data: t.data.slice(0, 5), hora: t.hora, por: usuario?.nome || 'Robô', texto: maiusculaInicial(texto), ...(origem ? { origem } : {}) });
     sugerirTextoConsolidado(p, maiusculaInicial(texto));
     await salvarPendencias();
@@ -1050,7 +1077,8 @@ async function concluirPendencia(id, { tratativa, registrarAtividade }, usuario)
     p.historico.push({ tipo: 'CONCLUSAO', em: t.iso, data: t.data.slice(0, 5), hora: t.hora, por: usuario.nome, texto: p.tratativa });
     p.sugestaoConclusao = null;
     await salvarPendencias();
-    if (registrarAtividade) {
+    // aviso com baixa sai do item 5 e entra só no item 4 (Atividades) como atividade realizada
+    if (registrarAtividade || p.tipo === 'AVISO') {
         await alterarFicha(f => f.atividades.push({ id: novoId(), texto: `${t.hora}h ${p.titulo}: ${p.tratativa}` }));
     }
     auditar(usuario, 'Concluiu pendência', `${p.titulo} — ${p.tratativa}`);
@@ -1755,7 +1783,8 @@ function textoPendencia(p) {
     const ultima = (p.historico || []).filter(h => h.tipo === 'ATUALIZACAO').slice(-1)[0];
     let t = p.titulo || '';
     if (p.texto) t += (t ? ': ' : '') + p.texto.replace(/\n+/g, ' ');
-    if (ultima) t += ` (Atualização ${ultima.data} ${ultima.hora}h: ${ultima.texto})`;
+    const igual = s => semAcento(String(s || '')).toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (ultima && igual(ultima.texto) !== igual(p.texto)) t += ` (Atualização ${ultima.data} ${ultima.hora}h: ${ultima.texto})`;   // aviso já com a atualização na descrição: não repete
     return t;
 }
 
